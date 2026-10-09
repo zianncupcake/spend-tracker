@@ -1,0 +1,16 @@
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_SECRET=
+
+# The OAuth client that users sign in to Google through.
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# Base64 of 32 random bytes, for example from: openssl rand -base64 32
+TOKEN_ENCRYPTION_KEY=
+
+# Where the service is reached, with no trailing slash.
+PUBLIC_BASE_URL=
+
+# Who runs the service and how to reach them. Both are shown on the public pages.
+OPERATOR_NAME=
+OPERATOR_CONTACT=

@@ -1,0 +1,26 @@
+import { startingCategoryOn } from './domain/sorting'
+import { parseAlert } from './parsers'
+import type { AlertEmail } from './parsers/types'
+import type { Card, Store, Transaction } from './store'
+
+export type IngestResult =
+  | { status: 'stored'; transaction: Transaction; card: Card | undefined }
+  | { status: 'duplicate' }
+  | { status: 'unparsed' }
+
+/**
+ * The entry point for bank alert emails: reads the purchase out of one and
+ * stores it for the store's user. The purchase is stored even when the user
+ * has not registered a card with those last four digits yet. When they have,
+ * the card comes back with the purchase, which starts in the category that
+ * the card's product gives it.
+ */
+export async function ingestAlert(store: Store, email: AlertEmail): Promise<IngestResult> {
+  const transaction = parseAlert(email)
+  if (!transaction) return { status: 'unparsed' }
+  const card = (await store.listCards()).find((each) => each.last4 === transaction.cardLast4)
+  const category = await startingCategoryOn(store, card, transaction)
+  const id = await store.insertTransaction({ ...transaction, sourceId: email.sourceId, category })
+  if (id === null) return { status: 'duplicate' }
+  return { status: 'stored', transaction: { ...transaction, id, category }, card }
+}

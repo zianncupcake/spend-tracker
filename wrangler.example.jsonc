@@ -1,0 +1,18 @@
+// Template for the real config. Copy it to wrangler.jsonc (git-ignored) and add
+// your own D1 "database_id" there. The tests read this file as it is.
+{
+  "name": "spend-tracker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // Every minute, one connected mailbox is checked for new bank alerts.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spend-tracker",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

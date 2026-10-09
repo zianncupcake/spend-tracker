@@ -1,0 +1,114 @@
+import { env } from 'cloudflare:workers'
+import { describe, expect, it } from 'vitest'
+import { connectedChat, NOW, openChat } from './connect-helpers'
+
+const db = env.DB
+const DAY = 86_400
+/** The time of the service's clock in these tests, in unix seconds: 12:00 on 9 October in Singapore. */
+const NOW_SECONDS = NOW.getTime() / 1000
+
+const NOT_YET = 'Alerts last fully checked: not yet'
+const NOTHING_READ = 'Last 30 days: 0 purchases recorded, 0 alerts could not be read'
+
+// The checker is what changes a connection. These tests write to its row directly, as it would have.
+function setConnection(userId: number, status: string, lastCheckedAt: number | null) {
+  return db
+    .prepare('UPDATE google_connections SET status = ?, last_checked_at = ? WHERE owner_id = ?')
+    .bind(status, lastCheckedAt, userId)
+    .run()
+}
+
+describe('/status', () => {
+  it('says that Gmail is not connected, and how to connect it', async () => {
+    const reply = await openChat().say('/status')
+
+    expect(reply).toBe(`Your Gmail is not connected. Send /connect to connect it.\n${NOT_YET}\n${NOTHING_READ}`)
+  })
+
+  it('says that Gmail is connected, with its address, and that its alerts are yet to be checked', async () => {
+    const chat = await connectedChat('jane@example.test')
+
+    expect(await chat.say('/status')).toBe(`Your Gmail jane@example.test is connected.\n${NOT_YET}\n${NOTHING_READ}`)
+  })
+
+  it("says when the alerts were last fully checked, in the user's time zone", async () => {
+    const chat = await connectedChat('jane@example.test')
+    const userId = await chat.userId()
+    await setConnection(userId, 'active', NOW_SECONDS - 115 * 60)
+
+    expect(await chat.say('/status')).toBe(
+      `Your Gmail jane@example.test is connected.\nAlerts last fully checked: 9 Oct, 10:05\n${NOTHING_READ}`,
+    )
+
+    await db.prepare("UPDATE users SET timezone = 'America/New_York' WHERE id = ?").bind(userId).run()
+    expect(await chat.say('/status')).toContain('Alerts last fully checked: 8 Oct, 22:05')
+  })
+
+  it('says that Gmail needs reconnecting, and how to reconnect it', async () => {
+    const chat = await connectedChat('jane@example.test')
+    await setConnection(await chat.userId(), 'needs_reconnect', NOW_SECONDS - DAY)
+
+    expect(await chat.say('/status')).toBe(
+      [
+        'Your Gmail jane@example.test needs reconnecting. Send /connect to reconnect it.',
+        'Alerts last fully checked: 8 Oct, 12:00',
+        NOTHING_READ,
+      ].join('\n'),
+    )
+  })
+
+  it('counts the purchases recorded and the alerts that could not be read in the last 30 days', async () => {
+    const chat = await connectedChat('jane@example.test')
+    const bystander = await connectedChat('sam@example.test')
+    const [userId, otherId] = [await chat.userId(), await bystander.userId()]
+    const monthAgo = NOW_SECONDS - 30 * DAY
+    const rows: [ownerId: number, sourceId: string, at: number, status?: string][] = [
+      [userId, 'stored-today', NOW_SECONDS - 3600],
+      [userId, 'stored-30-days-ago', monthAgo],
+      [userId, 'stored-before-that', monthAgo - 1],
+      [otherId, 'stored-for-another', NOW_SECONDS - 3600],
+      [userId, 'unparsed-today', NOW_SECONDS - 3600, 'unparsed'],
+      [userId, 'unparsed-before-that', monthAgo - 1, 'unparsed'],
+      [userId, 'rejected-today', NOW_SECONDS - 3600, 'rejected'],
+    ]
+    for (const [ownerId, sourceId, at, status] of rows) {
+      const insert = status
+        ? db
+            .prepare('INSERT INTO seen_alerts (owner_id, source_id, seen_at, status) VALUES (?, ?, ?, ?)')
+            .bind(ownerId, sourceId, at, status)
+        : db
+            .prepare(
+              `INSERT INTO transactions
+                 (owner_id, source_id, created_at, card_last4, amount_minor, currency, occurred_at, parser)
+               VALUES (?, ?, ?, '1234', 1000, 'SGD', 0, 'example-bank')`,
+            )
+            .bind(ownerId, sourceId, at)
+      await insert.run()
+    }
+
+    expect(await chat.say('/status')).toContain('Last 30 days: 2 purchases recorded, 1 alert could not be read')
+    expect(await bystander.say('/status')).toContain('Last 30 days: 1 purchase recorded, 0 alerts could not be read')
+  })
+
+  it('counts what was read from alerts: no purchase that was added by hand, and none that was taken out', async () => {
+    const chat = await connectedChat('jane@example.test')
+    const userId = await chat.userId()
+    const rows: [sourceId: string, parser: string, removedAt: number | null][] = [
+      ['read-and-kept', 'example-bank', null],
+      ['read-and-taken-out', 'example-bank', NOW_SECONDS - 60],
+      ['added-by-hand', 'manual', null],
+    ]
+    for (const [sourceId, parser, removedAt] of rows) {
+      await db
+        .prepare(
+          `INSERT INTO transactions
+             (owner_id, source_id, created_at, parser, removed_at, card_last4, amount_minor, currency, occurred_at)
+           VALUES (?, ?, ?, ?, ?, '1234', 1000, 'SGD', 0)`,
+        )
+        .bind(userId, sourceId, NOW_SECONDS - 3600, parser, removedAt)
+        .run()
+    }
+
+    expect(await chat.say('/status')).toContain('Last 30 days: 1 purchase recorded, 0 alerts could not be read')
+  })
+})

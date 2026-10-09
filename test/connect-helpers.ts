@@ -1,0 +1,381 @@
+import { env } from 'cloudflare:workers'
+import { afterEach, beforeEach, expect, vi } from 'vitest'
+import { oauthCallback, oauthStart } from '../src/connect'
+import { depsFor, type Deps } from '../src/deps'
+import { decryptToken } from '../src/google/crypto'
+import { GMAIL_READONLY } from '../src/google/oauth'
+import { findOrCreateUser } from '../src/store'
+import type { MessageEntity, Outgoing } from '../src/telegram/api'
+import { handleUpdate } from '../src/telegram/handler'
+import { headersOf, type Message } from './gmail-helpers'
+import { newTelegramId } from './helpers'
+
+// What the tests of Google sign-in and of the mail checker share: a stand-in
+// for Google and Telegram, a clock, an outbox, chats with the bot and a
+// browser. There is one of each for everybody in a test, as the real service
+// has, and a test file that imports this gets them made new before each of
+// its tests, with the users of the test before deleted.
+
+export const NOW = new Date('2026-10-09T12:00:00+08:00')
+export const MINUTE = 60_000
+
+export const TOKEN_URL = 'https://oauth2.googleapis.com/token'
+export const PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile'
+export const MESSAGES_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages'
+export const REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
+export const TELEGRAM_URL = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`
+
+/** What the stand-in for Google and Telegram has been sent, and how it is to answer. */
+interface Outside {
+  /** The forms posted to Google's token endpoint to exchange a code. */
+  exchanges: Record<string, string>[]
+  /** The refresh tokens Google has issued, oldest first. */
+  issued: string[]
+  /** The tokens Google has been asked to revoke. */
+  revoked: string[]
+  /**
+   * The refresh tokens Google no longer honours. Revoking one ends the whole grant of its account, as it does at
+   * Google: every token issued for that mailbox until then is ended with it.
+   */
+  ended: Set<string>
+  /** The messages that Telegram took. */
+  telegrams: {
+    chat_id: number
+    text: string
+    entities?: MessageEntity[]
+    link_preview_options?: { is_disabled?: boolean }
+  }[]
+  /** The chats whose users have blocked the bot. Telegram takes no message for them, and answers 403. */
+  blocked: Set<number>
+  /** Laid over Google's token response. A test changes a field with it or, with undefined, leaves one out. */
+  grant: Record<string, unknown>
+  /** The endpoints that answer with an error. */
+  failing: Set<string>
+  /** Runs once while a code is being exchanged: something else happening in the meantime. */
+  meanwhile: (() => Promise<unknown>) | undefined
+  /** What each mailbox holds, by its address and newest first. Gmail lists all of it, whatever the search asks for. */
+  mailboxes: Record<string, Message[]>
+  /** How many ids Gmail puts on one page of a listing. */
+  pageSize: number
+  /** The listings asked of Gmail: of whose mailbox, and with what parameters. */
+  listings: Record<string, string>[]
+  /** The ids of the messages that Gmail was asked for the headers of, and for no more. */
+  fetchedHeaders: string[]
+  /** The ids of the messages fetched whole from Gmail. */
+  fetched: string[]
+}
+
+function newOutside(): Outside {
+  return {
+    exchanges: [],
+    issued: [],
+    revoked: [],
+    ended: new Set(),
+    telegrams: [],
+    blocked: new Set(),
+    grant: {},
+    failing: new Set(),
+    meanwhile: undefined,
+    mailboxes: {},
+    pageSize: 100,
+    listings: [],
+    fetchedHeaders: [],
+    fetched: [],
+  }
+}
+
+export const outside = newOutside()
+
+/** The service's clock. A test moves it by setting `now`. */
+export const clock = { now: NOW }
+
+/** What the bot has sent that was not the reply to a message: `say` takes each reply out. */
+export const sent: { chatId: number; text: string }[] = []
+
+/** A message of the bot's as it stands in a chat, with the id that Telegram gave it. */
+export type Posted = Outgoing & { id: number; chatId: number }
+
+/**
+ * Every message that the bot has sent, whole: with what is marked in it and the buttons under it. An edit changes
+ * the message here, as it does in the chat.
+ */
+export const posted: Posted[] = []
+
+/** What each press of a button was answered with, which Telegram shows to whoever pressed. */
+export const answered: { pressId: string; text: string }[] = []
+
+export const deps: Deps = {
+  ...depsFor(env),
+  now: () => clock.now,
+  messenger: {
+    async send(chatId, text, entities, buttons) {
+      sent.push({ chatId, text })
+      posted.push({ id: posted.length + 1, chatId, text, entities, buttons })
+    },
+    async answer(pressId, text) {
+      answered.push({ pressId, text })
+    },
+    async edit(chatId, messageId, text, entities, buttons) {
+      const message = posted.find((each) => each.chatId === chatId && each.id === messageId)
+      if (!message) throw new Error('A test edited a message that was never sent')
+      Object.assign(message, { text, entities, buttons })
+    },
+  },
+}
+
+beforeEach(async () => {
+  Object.assign(outside, newOutside())
+  clock.now = NOW
+  sent.length = 0
+  posted.length = 0
+  answered.length = 0
+  vi.stubGlobal('fetch', fakeFetch)
+  // The service looks across all users for the mailbox whose turn it is, and for who else holds a mailbox. What
+  // an earlier test left connected is of a Google that is no more, so every test starts with no users.
+  await env.DB.prepare('DELETE FROM users').run()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+/**
+ * Google and Telegram are reached with the global fetch. This takes its place,
+ * so no test signs in to anything real. Its Google has an account for every
+ * authorisation code: "code-for-jane@example.test" is exchanged for tokens of
+ * the mailbox jane@example.test, and each token names the mailbox it is for.
+ * As at Google, revoking one token of an account ends them all.
+ */
+async function fakeFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const { origin, pathname, searchParams } = new URL(url)
+  const endpoint = origin + pathname
+  if (outside.failing.has(endpoint)) return Response.json({ error: 'made_up_error' }, { status: 400 })
+  const form: Record<string, string> = Object.fromEntries(init.body instanceof URLSearchParams ? init.body : [])
+  const mailbox = (new Headers(init.headers).get('authorization') ?? '').replace('Bearer access-token-of-', '')
+
+  if (endpoint.startsWith(`${MESSAGES_URL}/`)) {
+    const id = decodeURIComponent(endpoint.slice(MESSAGES_URL.length + 1))
+    const headersOnly = searchParams.get('format') === 'metadata'
+    const asked = headersOnly ? outside.fetchedHeaders : outside.fetched
+    asked.push(id)
+    const message = outside.mailboxes[mailbox]?.find((each) => each.id === id)
+    if (!message) return Response.json({ error: { code: 404 } }, { status: 404 })
+    return Response.json(headersOnly ? headersOf(message, searchParams.getAll('metadataHeaders')) : message)
+  }
+
+  switch (endpoint) {
+    case TOKEN_URL: {
+      if (form.grant_type === 'refresh_token') {
+        const honoured = outside.issued.includes(form.refresh_token) && !outside.ended.has(form.refresh_token)
+        if (!honoured) return Response.json({ error: 'invalid_grant' }, { status: 400 })
+        return Response.json({
+          access_token: `access-token-of-${mailboxOf(form.refresh_token)}`,
+          expires_in: 3599,
+          scope: GMAIL_READONLY,
+          token_type: 'Bearer',
+        })
+      }
+      outside.exchanges.push(form)
+      const meanwhile = outside.meanwhile
+      outside.meanwhile = undefined
+      await meanwhile?.()
+      const email = form.code.replace('code-for-', '')
+      const refreshToken = `refresh-token-${outside.issued.length + 1}-of-${email}`
+      outside.issued.push(refreshToken)
+      return Response.json({
+        access_token: `access-token-of-${email}`,
+        expires_in: 3599,
+        refresh_token: refreshToken,
+        scope: GMAIL_READONLY,
+        token_type: 'Bearer',
+        ...outside.grant,
+      })
+    }
+    case PROFILE_URL:
+      return Response.json({ emailAddress: mailbox, messagesTotal: 12 })
+    case MESSAGES_URL: {
+      outside.listings.push({ mailbox, ...Object.fromEntries(searchParams) })
+      const messages = outside.mailboxes[mailbox] ?? []
+      const pageToken = searchParams.get('pageToken') ?? 'page-from-0'
+      // Gmail takes no page token but one of its own making.
+      if (!/^page-from-\d+$/.test(pageToken)) {
+        return Response.json({ error: { code: 400, message: 'Invalid pageToken' } }, { status: 400 })
+      }
+      const start = Number(pageToken.replace('page-from-', ''))
+      const end = start + outside.pageSize
+      const page = messages.slice(start, end).map(({ id }) => ({ id, threadId: id }))
+      return Response.json({
+        // Gmail leaves both of these out when there is nothing to put in them.
+        messages: page.length > 0 ? page : undefined,
+        nextPageToken: end < messages.length ? `page-from-${end}` : undefined,
+        resultSizeEstimate: messages.length,
+      })
+    }
+    case REVOKE_URL:
+      outside.revoked.push(form.token)
+      for (const token of outside.issued) {
+        if (mailboxOf(token) === mailboxOf(form.token)) outside.ended.add(token)
+      }
+      return Response.json({})
+    case TELEGRAM_URL: {
+      const message = JSON.parse(String(init.body))
+      if (outside.blocked.has(message.chat_id)) {
+        const description = 'Forbidden: bot was blocked by the user'
+        return Response.json({ ok: false, error_code: 403, description }, { status: 403 })
+      }
+      outside.telegrams.push(message)
+      return Response.json({ ok: true })
+    }
+    default:
+      throw new Error('A test made a request it should not have')
+  }
+}
+
+/** The mailbox that a refresh token of the stand-in's Google is for. */
+function mailboxOf(refreshToken: string): string {
+  return refreshToken.replace(/^refresh-token-\d+-of-/, '')
+}
+
+type Chat = ReturnType<typeof openChat>
+
+let lastPress = 0
+
+/** A new user's private chat with the bot. */
+export function openChat() {
+  const telegramId = newTelegramId()
+  /** Sends the bot a message. Its reply is left in `sent`. */
+  const send = (text: string) =>
+    handleUpdate(deps, { message: { text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } } })
+
+  /**
+   * Tells the bot of the press of a button under a message, as Telegram does: with what the button holds, and with
+   * the message as it stands. Returns what the press was answered with, and the messages that the bot sent after it.
+   */
+  async function pressWith(message: Posted, data: string): Promise<{ answer: string | undefined; sent: Posted[] }> {
+    const pressId = `press-${++lastPress}`
+    const [before, beforePosted] = [sent.length, posted.length]
+    const { id: message_id, text, entities } = message
+    const under = { message_id, chat: { id: telegramId, type: 'private' }, text, entities }
+    await handleUpdate(deps, { callback_query: { id: pressId, from: { id: telegramId }, data, message: under } })
+    sent.splice(before)
+    return { answer: answered.find((each) => each.pressId === pressId)?.text, sent: posted.slice(beforePosted) }
+  }
+
+  return {
+    telegramId,
+    send,
+    /** Sends the bot a message and returns its one reply, which is taken out of `sent`. */
+    async say(text: string): Promise<string> {
+      const before = sent.length
+      await send(text)
+      expect(sent).toHaveLength(before + 1)
+      const [reply] = sent.splice(before)
+      expect(reply.chatId).toBe(telegramId)
+      return reply.text
+    },
+    /** Sends the bot a message and returns its replies whole, however many there are. They are taken out of `sent`. */
+    async ask(text: string): Promise<Posted[]> {
+      const [before, beforePosted] = [sent.length, posted.length]
+      await send(text)
+      sent.splice(before)
+      const replies = posted.slice(beforePosted)
+      for (const reply of replies) expect(reply.chatId).toBe(telegramId)
+      return replies
+    },
+    pressWith,
+    /** Presses the button with the label under a message. */
+    press(message: Posted, label: string) {
+      const button = message.buttons?.flat().find((each) => each.text === label)
+      if (!button) throw new Error(`A test pressed a button that the message does not have: ${label}`)
+      return pressWith(message, button.data)
+    },
+    async userId(): Promise<number> {
+      return (await findOrCreateUser(env.DB, telegramId)).id
+    },
+  }
+}
+
+/** The connect link in one of the bot's replies. */
+export function linkIn(reply: string): URL {
+  return new URL(/https:\/\/\S+/.exec(reply)?.[0] ?? '')
+}
+
+/** A browser opening a connect link. A link preview does the same. */
+export function open(link: URL): Promise<Response> {
+  return oauthStart(deps, link.searchParams)
+}
+
+/** Google sending a browser back to the service, after the owner of `email` opened the link and approved. */
+export function approve(link: URL, email: string): Promise<Response> {
+  const state = link.searchParams.get('state') ?? ''
+  return oauthCallback(deps, new URLSearchParams({ state, code: `code-for-${email}` }))
+}
+
+/** The code that a page shows. */
+export async function codeOn(page: Response): Promise<string> {
+  const code = /<p class="code">(\d{6})<\/p>/.exec(await page.text())?.[1] ?? ''
+  expect(code).toHaveLength(6)
+  return code
+}
+
+/** /connect, then signing in at Google as `email`. Returns the code the browser ends up showing. */
+export async function signIn(chat: Chat, email: string): Promise<string> {
+  const code = await codeOn(await approve(linkIn(await chat.say('/connect')), email))
+  sent.length = 0 // the message that told the chat about it
+  return code
+}
+
+/** A chat whose user has connected the mailbox. */
+export async function connectedChat(email: string): Promise<Chat> {
+  const chat = openChat()
+  expect(await chat.say(await signIn(chat, email))).toContain('Connected')
+  return chat
+}
+
+/** A six-digit code that is not the given one. */
+export function otherThan(code: string): string {
+  return code === '000000' ? '111111' : '000000'
+}
+
+export async function sha256(text: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
+}
+
+// The two functions below read the tables directly, as the counts in helpers.ts do.
+
+interface AttemptRow {
+  owner_id: number
+  state_hash: string
+  code_verifier: string
+  expires_at: number
+  claimed: number
+  email: string | null
+  refresh_token_enc: string | null
+  confirm_code_hash: string | null
+  confirm_tries: number
+}
+
+interface ConnectionRow {
+  owner_id: number
+  email: string
+  refresh_token_enc: string
+  status: string
+  last_checked_at: number | null
+  backlog_page_token: string | null
+  connected_at: number
+  last_run_at: number | null
+}
+
+export function attemptOf(userId: number): Promise<AttemptRow | null> {
+  return env.DB.prepare('SELECT * FROM connect_attempts WHERE owner_id = ?').bind(userId).first<AttemptRow>()
+}
+
+export function connectionOf(userId: number): Promise<ConnectionRow | null> {
+  return env.DB.prepare('SELECT * FROM google_connections WHERE owner_id = ?').bind(userId).first<ConnectionRow>()
+}
+
+/** The refresh token that a row holds, decrypted. */
+export function tokenIn(row: { refresh_token_enc: string | null } | null): Promise<string> {
+  return decryptToken(env.TOKEN_ENCRYPTION_KEY, row?.refresh_token_enc ?? '')
+}
