@@ -7,7 +7,7 @@ import { record } from './mcp-helpers'
 
 // Linking a card to a product of the catalogue. The clock stands at 12:00 on 9 October 2026 in Singapore.
 
-const LINKED = 'Linked evol ••••1234 to UOB EVOL Card. To sort its purchases, send /sort evol.'
+const LINKED = 'Linked evol ••••1234 to UOB EVOL Card. For how its purchases are sorted, send /sort evol.'
 
 /** The categories of a user's purchases, by their merchants. It reads the table directly, to see what is stored. */
 async function categoriesOf(userId: number): Promise<Record<string, string | null>> {
@@ -99,7 +99,7 @@ describe('/product', () => {
     expect(await bystander.say('/cards')).toBe('evol ••••1234: calendar month')
   })
 
-  it("sorts the card's unsorted purchases of its current window that the product's own rules settle", async () => {
+  it("sorts the purchases of the card's current window that the product's rules settle, and no others", async () => {
     const [chat, bystander] = [openChat(), openChat()]
     for (const each of [chat, bystander]) await each.say('/addcard evol 1234 calendar') // October
     await chat.say('/addcard amex 0005 calendar')
@@ -121,12 +121,13 @@ describe('/product', () => {
       merchant: 'SORTED BY HAND',
       occurredAt: Date.parse('2026-10-07T10:00:00+08:00') / 1000,
       parser: 'example-bank',
-      category: 'excluded',
+      category: 'other',
     })
     await record(await bystander.userId(), [['2026-10-02T10:00:00+08:00', 1598, 'SGD', '1234', 'NETFLIX.COM']])
 
     expect(await chat.say('/product evol uob-evol')).toBe(LINKED)
 
+    // Nothing is stored for the purchase that no rule settles. It is online, as the product takes a purchase to be.
     expect(await categoriesOf(userId)).toEqual({
       'NETFLIX.COM LAST MONTH': null,
       'NETFLIX.COM': 'selected',
@@ -134,7 +135,7 @@ describe('/product', () => {
       'COFFEE PLACE': null,
       'SINGTEL MOBILE': 'selected',
       'SPOTIFY ON ANOTHER CARD': null,
-      'SORTED BY HAND': 'excluded',
+      'SORTED BY HAND': 'other',
     })
     expect(await categoriesOf(await bystander.userId())).toEqual({ 'NETFLIX.COM': null })
   })

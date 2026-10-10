@@ -1,4 +1,4 @@
-import { hundredths, merchantIn, singaporeTime, singleSpaced } from './shared'
+import { hundredths, MAX_FROM_EMAIL, merchantIn, singaporeTime, singleSpaced } from './shared'
 import type { Parser } from './types'
 
 // OCBC Bank (Singapore) tells of a purchase made with one of its cards in one sentence of an email. The values in
@@ -39,8 +39,9 @@ export const ocbc: Parser = {
       amountMinor: hundredths(whole, decimals),
       currency,
       merchant: merchantIn(text.slice(match.index + upToMerchant.length), FOLLOWING),
-      // When the alert states a date or a time that does not exist, the purchase is dated by the email instead.
-      occurredAt: stated ?? email.receivedAt,
+      // When the alert states a date or a time that does not exist, or one that is more than two days from when the
+      // email came, the purchase is dated by the email instead.
+      occurredAt: stated !== null && Math.abs(stated - email.receivedAt) <= MAX_FROM_EMAIL ? stated : email.receivedAt,
     }
   },
 }

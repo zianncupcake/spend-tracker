@@ -8,26 +8,38 @@ import { alertEmail, alertText, newTelegramId, rowsOwnedBy, seconds, userCount }
 
 const NOW = new Date('2026-10-09T12:00:00+08:00')
 
-/** Dependencies with a Messenger that records what it is asked to send. */
+/**
+ * Dependencies with a Messenger that records what it is asked to send. The service that they make has no assistant:
+ * test/assistant.test.ts has the one that has, and what comes of a question there.
+ */
 function recorder() {
   const sent: { chatId: number; text: string }[] = []
   const deps: Deps = {
     ...depsFor(env),
+    ai: undefined,
     now: () => NOW,
     messenger: {
       async send(chatId, text) {
         sent.push({ chatId, text })
       },
-      // No reply to a message answers a press or edits a message. test/sort.test.ts has the presses.
+      // No reply here is a rich message, which /spend with a card is, and an answer of the assistant's:
+      // test/detail-rich.test.ts and test/assistant.test.ts have those. And no reply to a message answers a press
+      // or edits a message. test/sort.test.ts has the presses.
+      async sendRich() {},
       async answer() {},
       async edit() {},
+      async typing() {},
     },
   }
   return { sent, deps }
 }
 
+let lastMessage = 0
+
+/** A message in a user's private chat with the bot, with an id that no message before it had. */
 function privateMessage(telegramId: number, text: string): Update {
-  return { message: { text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } } }
+  const message_id = ++lastMessage
+  return { message: { message_id, text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } } }
 }
 
 /** A new user's private chat with the bot. */
@@ -97,8 +109,8 @@ describe('/start', () => {
       '/remove <purchase id> - take a purchase out',
       '/products - list the card products whose reward rules are known',
       '/product <nickname> <product key> - link a card to a product, or to none',
-      "/sort <nickname> - sort a card's purchases into the reward categories of its product",
-      '/sort <purchase id> - sort one purchase, or sort it again',
+      "/sort <nickname> - how a card's purchases are sorted into the reward categories of its product",
+      '/sort <purchase id> - move one purchase to another category',
     ]) {
       expect(lines).toContain(line)
     }
@@ -350,7 +362,7 @@ describe('/delete', () => {
 })
 
 describe('anything else', () => {
-  const messages = ['hello', '/unknown', '/', '/delete_everything']
+  const messages = ['/unknown', '/', '/delete_everything']
 
   it.each(messages)('answers "%s" with the command list and stores nothing', async (message) => {
     const chat = openChat()
@@ -358,6 +370,21 @@ describe('anything else', () => {
     const reply = await chat.say(message)
 
     expect(reply.startsWith('Commands:\n/addcard')).toBe(true)
+    expect(await userCount(chat.telegramId)).toBe(0)
+  })
+
+  // What is no command is a question for the assistant, which this service has not got.
+  const questions = ['hello', '12345', 'How much have I spent this month?', 'delete everything']
+
+  it.each(questions)('answers "%s" that there is no assistant to ask, and stores nothing', async (message) => {
+    const chat = openChat()
+
+    const reply = await chat.say(message)
+
+    expect(reply).toBe(
+      'The assistant, which answers questions asked in your own words, is not available on this service. ' +
+        'Send /start for the list of commands.',
+    )
     expect(await userCount(chat.telegramId)).toBe(0)
   })
 
@@ -372,12 +399,15 @@ describe('anything else', () => {
 
 describe('updates that are ignored', () => {
   const text = '/start'
+  // The id and the text that a message of Telegram's has, so that each of these is ignored for what it is said to be.
+  const body = { message_id: 1, text }
   const updates: [what: string, update: (id: number) => Update][] = [
-    ['a group chat', (id) => ({ message: { text, chat: { id: -5001, type: 'group' }, from: { id } } })],
-    ['a supergroup chat', (id) => ({ message: { text, chat: { id: -5002, type: 'supergroup' }, from: { id } } })],
-    ['a channel', () => ({ message: { text, chat: { id: -5003, type: 'channel' } } })],
-    ['a message without text', (id) => ({ message: { chat: { id, type: 'private' }, from: { id } } })],
-    ['a message without a sender', (id) => ({ message: { text, chat: { id, type: 'private' } } })],
+    ['a group chat', (id) => ({ message: { ...body, chat: { id: -5001, type: 'group' }, from: { id } } })],
+    ['a supergroup chat', (id) => ({ message: { ...body, chat: { id: -5002, type: 'supergroup' }, from: { id } } })],
+    ['a channel', () => ({ message: { ...body, chat: { id: -5003, type: 'channel' } } })],
+    ['a message without text', (id) => ({ message: { message_id: 1, chat: { id, type: 'private' }, from: { id } } })],
+    ['a message without a sender', (id) => ({ message: { ...body, chat: { id, type: 'private' } } })],
+    ['a message without an id', (id) => ({ message: { text, chat: { id, type: 'private' }, from: { id } } })],
     ['an update without a message', () => ({})],
   ]
 
@@ -396,7 +426,7 @@ describe('updates that are ignored', () => {
     const { sent, deps } = recorder()
 
     // The user is known by the sender, and the reply goes to the chat. It would be the sender's reply, sent elsewhere.
-    await handleUpdate(deps, { message: { text, chat: { id: chatId, type: 'private' }, from: { id: senderId } } })
+    await handleUpdate(deps, { message: { ...body, chat: { id: chatId, type: 'private' }, from: { id: senderId } } })
 
     expect(sent).toEqual([])
     expect(await userCount(senderId)).toBe(0)

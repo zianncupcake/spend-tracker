@@ -10,6 +10,7 @@ import { alertEmail, newTelegramId, seconds } from './helpers'
 const STATED = seconds('2026-10-09T12:01:00Z')
 /** When the email of the alert came, which is a little later. */
 const RECEIVED = seconds('2026-10-09T20:03:00+08:00')
+const DAY = 86_400
 
 /** The purchase that the alert below tells of. */
 const PURCHASE = {
@@ -37,8 +38,8 @@ function alertBody(sentence = charge()): string {
   ].join('\n\n')
 }
 
-function ocbcEmail(text = alertBody()) {
-  return alertEmail({ from: 'noreply@notify.ocbc.com', subject: 'Card transaction alert', receivedAt: RECEIVED, text })
+function ocbcEmail(text = alertBody(), receivedAt = RECEIVED) {
+  return alertEmail({ from: 'noreply@notify.ocbc.com', subject: 'Card transaction alert', receivedAt, text })
 }
 
 const parse = (text: string) => parseAlert(ocbcEmail(text))
@@ -114,7 +115,10 @@ describe('OCBC card alerts', () => {
     ['23:59 on 29-Feb-28', '2028-02-29T15:59:00Z'],
     ['12:30 on 05-MAY-26', '2026-05-05T04:30:00Z'],
   ])('reads %s as a time in Singapore, eight hours ahead of UTC', (when, utc) => {
-    expect(parse(alertBody(charge({ when })))?.occurredAt).toBe(seconds(utc))
+    // The email came two minutes after the time that the alert states.
+    const email = ocbcEmail(alertBody(charge({ when })), seconds(utc) + 120)
+
+    expect(parseAlert(email)?.occurredAt).toBe(seconds(utc))
   })
 
   it('knows every month by its three letters', () => {
@@ -122,8 +126,32 @@ describe('OCBC card alerts', () => {
 
     for (const [index, month] of months.entries()) {
       const noon = seconds(`2026-${String(index + 1).padStart(2, '0')}-15T12:00:00+08:00`)
-      expect(parse(alertBody(charge({ when: `12:00 on 15-${month}-26` })))?.occurredAt).toBe(noon)
+      const email = ocbcEmail(alertBody(charge({ when: `12:00 on 15-${month}-26` })), noon + 120)
+      expect(parseAlert(email)?.occurredAt).toBe(noon)
     }
+  })
+
+  it.each([
+    ['two days after', 2 * DAY],
+    ['two days before', -2 * DAY],
+  ])('goes by the time that the alert states when the email came %s it', (_, later) => {
+    expect(parseAlert(ocbcEmail(alertBody(), STATED + later))?.occurredAt).toBe(STATED)
+  })
+
+  it.each([
+    ['a second more than two days after it', STATED + 2 * DAY + 1],
+    ['a second more than two days before it', STATED - 2 * DAY - 1],
+    ['a year after it', seconds('2027-10-09T20:03:00+08:00')],
+  ])('dates the purchase by the email when it came %s', (_, receivedAt) => {
+    expect(parseAlert(ocbcEmail(alertBody(), receivedAt))?.occurredAt).toBe(receivedAt)
+  })
+
+  it.each([
+    ['a far-off year', '20:01 on 09-Oct-99'],
+    ['the year before', '20:01 on 09-Oct-25'],
+    ['the month after', '20:01 on 09-Nov-26'],
+  ])('stores no purchase at a time of %s that an alert states, and dates it by the email', (_, when) => {
+    expect(parse(alertBody(charge({ when })))).toEqual({ ...PURCHASE, occurredAt: RECEIVED, parser: 'ocbc' })
   })
 
   it.each([

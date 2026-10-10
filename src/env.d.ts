@@ -11,6 +11,10 @@ declare namespace Cloudflare {
     PUBLIC_BASE_URL: string
     OPERATOR_NAME: string
     OPERATOR_CONTACT: string
+    // The three of the bot's assistant. With no key, the bot has no assistant. The other two have defaults.
+    AI_API_KEY?: string
+    AI_BASE_URL?: string
+    AI_MODEL?: string
   }
   interface GlobalProps {
     mainModule: typeof import('./index')

@@ -97,6 +97,17 @@ describe('UOB card alerts', () => {
     },
   )
 
+  it.each(['unauthorised', 'unauthorized'])('ends the merchant where the warning begins, spelt "%s"', (spelling) => {
+    const spelt = (body: string) => body.replace('unauthorised', spelling)
+    const unclosed = transaction({ merchant: 'SAMPLE EATERY' }).slice(0, -1)
+
+    expect(spelt(alertBody())).toContain(`If ${spelling}, call`)
+    // The name keeps its full stops. Were the warning not found, it would end at the first that closes a word.
+    expect(parse(spelt(alertBody()))?.merchant).toBe('SAMPLE EATERY PTE. LT')
+    // And the warning is no part of a name that no full stop closes. Not found, it would be read as the name went on.
+    expect(parse(spelt(alertBody(unclosed)))?.merchant).toBeNull()
+  })
+
   it('trims the merchant, and keeps no more than 80 characters of it', () => {
     const merchantOf = (merchant: string) => parse(alertBody(transaction({ merchant })))?.merchant
 
@@ -138,10 +149,28 @@ describe('UOB card alerts', () => {
   it.each([
     ['the day after', '2026-10-10T00:00:00+08:00'],
     ['the day before', '2026-10-08T23:59:59+08:00'],
-    ['a week later', '2026-10-16T15:20:00+08:00'],
+    ['at the end of the second day after', '2026-10-11T23:59:59+08:00'],
+    ['at the start of the second day before', '2026-10-07T00:00:00+08:00'],
     ['the day after, though it is still the same day by UTC', '2026-10-09T16:00:00Z'],
   ])('takes noon in Singapore on the day that the alert states, when the email came %s', (_, at) => {
     expect(parseAlert(uobEmail(alertBody(), seconds(at)))?.occurredAt).toBe(NOON)
+  })
+
+  it.each([
+    ['on the third day after', '2026-10-12T00:00:00+08:00'],
+    ['on the third day before', '2026-10-06T23:59:59+08:00'],
+    ['a week later', '2026-10-16T15:20:00+08:00'],
+    ['a year later', '2027-10-09T15:20:00+08:00'],
+  ])('dates the purchase by the email when that came more than two days from the stated day: %s', (_, at) => {
+    expect(parseAlert(uobEmail(alertBody(), seconds(at)))?.occurredAt).toBe(seconds(at))
+  })
+
+  it.each([
+    ['a far-off year', '09/10/99'],
+    ['the year before', '09/10/25'],
+    ['the month after', '09/11/26'],
+  ])('stores no purchase on a day of %s that an alert states, and dates it by the email', (_, date) => {
+    expect(parse(alertBody(transaction({ date })))).toEqual({ ...PURCHASE, occurredAt: RECEIVED, parser: 'uob' })
   })
 
   it.each([
@@ -149,7 +178,10 @@ describe('UOB card alerts', () => {
     ['01/01/27', '2027-01-01T12:00:00+08:00'],
     ['29/02/28', '2028-02-29T12:00:00+08:00'],
   ])('reads %s with the day first, as a day in Singapore', (date, noon) => {
-    expect(parse(alertBody(transaction({ date })))?.occurredAt).toBe(seconds(noon))
+    // The email came the morning after, so noon stands in for the time of the purchase.
+    const receivedAt = seconds(noon) + 20 * 3600
+
+    expect(parseAlert(uobEmail(alertBody(transaction({ date })), receivedAt))?.occurredAt).toBe(seconds(noon))
   })
 
   it.each([

@@ -270,7 +270,30 @@ describe('a new alert', () => {
     expect(outside.telegrams[0]).not.toHaveProperty('entities')
   })
 
-  it('is stored without a message when the purchase is six hours old or older', async () => {
+  it('is told of when its email has just come, though it dates its purchase more than six hours back', async () => {
+    const chat = await connectedChat(JANE)
+    // UOB states a day and no time. Ten minutes after midnight, an alert has just come for the day before, and its
+    // purchase is dated at noon of that day.
+    clock.now = new Date('2026-10-10T00:10:00+08:00')
+    const sentence = 'A transaction of SGD 45.60 was made with your UOB Card ending 1234 on 09/10/26 at SAMPLE EATERY.'
+    outside.mailboxes[JANE] = [
+      gmailMessage({
+        from: 'UOB <unialerts@uobgroup.com>',
+        receivedAt: now() - 5 * 60,
+        results: [gmailResults('pass', 'uobgroup.com')],
+        content: textPart(`${sentence} If unauthorised, call 24/7 Fraud Hotline now`),
+      }),
+    ]
+
+    await runCheck(deps)
+
+    expect(await purchasesOf(await chat.userId())).toMatchObject([
+      { source_id: 'msg-1', parser: 'uob', occurred_at: seconds('2026-10-09T12:00:00+08:00') },
+    ])
+    expect(sent.map((message) => message.text)).toEqual([`Card ••••1234: SGD 45.60 at SAMPLE EATERY\n${ADD_CARD_HINT}`])
+  })
+
+  it('is stored without a message when its email came six hours ago or longer', async () => {
     const chat = await connectedChat(JANE)
     outside.mailboxes[JANE] = [
       alert('msg-3', 6 * 60 - 1, alertText('SGD 3.00', '1234')),
@@ -332,8 +355,14 @@ describe('a new alert for a card that is linked to a product', () => {
   }
 
   it.each([
-    ['in another currency', 'USD 5.00', 'COFFEE PLACE', 'fx', 'Foreign currency'],
-    ['at a merchant that the product lists', 'SGD 5.00', 'NETFLIX.COM', 'selected', 'Gym, telco and streaming'],
+    ['in another currency', 'USD 5.00', 'COFFEE PLACE', 'fx', 'Overseas Foreign Currency Spend'],
+    [
+      'at a merchant that the product lists',
+      'SGD 5.00',
+      'NETFLIX.COM',
+      'selected',
+      'Selected Gym, Telco and Streaming Spend',
+    ],
   ])('is told of with where a rule sorted it, when it is %s', async (_, amount, merchant, category, name) => {
     const chat = await chatWithProduct()
     outside.mailboxes[JANE] = [alert('msg-1', 5, alertText(amount, '1234', merchant))]
@@ -347,12 +376,16 @@ describe('a new alert for a card that is linked to a product', () => {
     expect(message.text.split('\n')).toEqual([
       `evol ••••1234: ${amount} at ${merchant}`,
       `Running total: ${amount} in 1 purchase, resets 1 Nov`,
-      `#${stored.id}: ${name}`,
+      `ID ${stored.id}: ${name}`,
     ])
-    expect(message.buttons).toBeUndefined()
+    // It can be flagged, or put with the online purchases.
+    expect(message.buttons).toEqual([
+      [{ text: 'Mark as Online / Mobile Contactless Spend', data: `${stored.id}:online` }],
+      [{ text: 'Mark as Other Spend', data: `${stored.id}:other` }],
+    ])
   })
 
-  it('comes with the buttons that sort it, when no rule settles where it belongs', async () => {
+  it('is told of as online, with the one button that flags it, when no rule settles where it belongs', async () => {
     const chat = await chatWithProduct()
     outside.mailboxes[JANE] = [alert('msg-1', 5)]
 
@@ -364,46 +397,39 @@ describe('a new alert for a card that is linked to a product', () => {
     expect(message.text).toBe(
       'evol ••••1234: SGD 12.40 at COFFEE PLACE\n' +
         'Running total: SGD 12.40 in 1 purchase, resets 1 Nov\n' +
-        `#${id}: not sorted. Which was it?`,
+        `ID ${id}: Online / Mobile Contactless Spend`,
     )
     expect(message.entities).toEqual([{ type: 'code', offset: 28, length: 12 }])
-    expect(message.buttons).toEqual([
-      [{ text: 'Online', data: `${id}:online` }],
-      [{ text: 'Phone tap', data: `${id}:mobile` }],
-      [{ text: 'Physical card or other', data: `${id}:other` }],
-      [{ text: "Doesn't count", data: `${id}:excluded` }],
-    ])
+    expect(message.buttons).toEqual([[{ text: 'Mark as Other Spend', data: `${id}:other` }]])
 
-    // A press sorts it. The message keeps what it said of the purchase and of the card, and its last line changes.
-    expect(await chat.press(message, 'Online')).toEqual({ answer: `#${id}: Online`, sent: [] })
+    // A press flags it. The message keeps what it said of the purchase and of the card, its last line changes, and
+    // its button becomes the one that takes the flag off.
+    expect(await chat.press(message, 'Mark as Other Spend')).toEqual({ answer: `ID ${id}: Other Spend`, sent: [] })
     expect(message.text).toBe(
       'evol ••••1234: SGD 12.40 at COFFEE PLACE\n' +
         'Running total: SGD 12.40 in 1 purchase, resets 1 Nov\n' +
-        `#${id}: Online`,
+        `ID ${id}: Other Spend`,
     )
     expect(message.entities).toEqual([{ type: 'code', offset: 28, length: 12 }])
-    expect(message.buttons).toBeUndefined()
-    expect((await sortedOf(await chat.userId()))['msg-1'].category).toBe('online')
+    expect(message.buttons).toEqual([[{ text: 'Mark as Online / Mobile Contactless Spend', data: `${id}:online` }]])
+    expect((await sortedOf(await chat.userId()))['msg-1'].category).toBe('other')
   })
 
-  it('starts where its user put the last purchase at the same merchant', async () => {
+  it('starts online at a merchant where its user flagged the last purchase, as a flag is of one purchase', async () => {
     const chat = await chatWithProduct()
     outside.mailboxes[JANE] = [alert('msg-1', 5)]
     await runCheck(deps)
-    await chat.press(posted[0], 'Phone tap')
-    outside.mailboxes[JANE].unshift(alert('msg-2', 1), alert('msg-3', 2, alertText('SGD 9.00', '1234', 'BOOK SHOP')))
+    await chat.press(posted[0], 'Mark as Other Spend')
+    outside.mailboxes[JANE].unshift(alert('msg-2', 1))
 
-    await runCheck(deps)
     await runCheck(deps)
 
     const stored = await sortedOf(await chat.userId())
-    expect(stored['msg-2'].category).toBe('mobile')
-    expect(stored['msg-3'].category).toBeNull()
-    const [, coffee, books] = posted
-    expect(coffee.text.split('\n')[2]).toBe(`#${stored['msg-2'].id}: Phone tap`)
-    expect(coffee.buttons).toBeUndefined()
-    expect(books.text.split('\n')[2]).toBe(`#${stored['msg-3'].id}: not sorted. Which was it?`)
-    expect(books.buttons).toHaveLength(4)
+    expect(stored['msg-1'].category).toBe('other')
+    expect(stored['msg-2'].category).toBeNull()
+    const [, later] = posted
+    expect(later.text.split('\n')[2]).toBe(`ID ${stored['msg-2'].id}: Online / Mobile Contactless Spend`)
+    expect(later.buttons).toEqual([[{ text: 'Mark as Other Spend', data: `${stored['msg-2'].id}:other` }]])
   })
 
   it('is sorted by the rules even when it is too old to be told of', async () => {
@@ -416,7 +442,7 @@ describe('a new alert for a card that is linked to a product', () => {
     expect((await sortedOf(await chat.userId()))['msg-1'].category).toBe('fx')
   })
 
-  it('is posted to Telegram with its buttons as an inline keyboard, a row to each', async () => {
+  it('is posted to Telegram with its button as an inline keyboard', async () => {
     const chat = await chatWithProduct()
     outside.mailboxes[JANE] = [alert('msg-1', 5)]
 
@@ -426,17 +452,10 @@ describe('a new alert for a card that is linked to a product', () => {
     expect(outside.telegrams).toEqual([
       {
         chat_id: chat.telegramId,
-        text: expect.stringMatching(/\n#\d+: not sorted\. Which was it\?$/),
+        text: expect.stringMatching(/\nID \d+: Online \/ Mobile Contactless Spend$/),
         entities: [{ type: 'code', offset: 28, length: 12 }],
         link_preview_options: { is_disabled: true },
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: 'Online', callback_data: `${id}:online` }],
-            [{ text: 'Phone tap', callback_data: `${id}:mobile` }],
-            [{ text: 'Physical card or other', callback_data: `${id}:other` }],
-            [{ text: "Doesn't count", callback_data: `${id}:excluded` }],
-          ],
-        },
+        reply_markup: { inline_keyboard: [[{ text: 'Mark as Other Spend', callback_data: `${id}:other` }]] },
       },
     ])
   })
@@ -454,8 +473,10 @@ describe('a new alert for a card that is linked to a product', () => {
 
     expect((await sortedOf(await jane.userId()))['msg-1'].category).toBe('fx')
     expect((await sortedOf(await sam.userId()))['msg-1'].category).toBeNull()
-    expect(posted.map((message) => [message.chatId, message.text.split('\n').length, message.buttons])).toEqual([
-      [jane.telegramId, 3, undefined],
+    // Only the message about the card with a product says where the purchase is, and has buttons.
+    const told = posted.map(({ chatId, text, buttons }) => [chatId, text.split('\n').length, buttons?.length])
+    expect(told).toEqual([
+      [jane.telegramId, 3, 2],
       [sam.telegramId, 2, undefined],
     ])
   })
@@ -1119,7 +1140,7 @@ describe('the cost of a run', () => {
     const turnedAway = HEADER_CHECKS_PER_RUN - MESSAGES_PER_RUN
     const lookalikes = Array.from({ length: turnedAway }, (_, index) => lookalike(`lookalike-${index}`))
     // And then as many purchases as a run reads, each one to tell the user of with a card's total. The card is
-    // linked to a product, which takes one query more: for what the user chose for the merchant before.
+    // linked to a product, whose rules sort a purchase with no query more.
     await chat.say('/addcard visa 1234 calendar uob-evol')
     const fresh = Array.from({ length: MESSAGES_PER_RUN }, (_, index) => alert(`fresh-${index}`, 5))
     outside.mailboxes[JANE] = [...known, ...lookalikes, ...fresh]
@@ -1141,9 +1162,9 @@ describe('the cost of a run', () => {
     expect(requests).toBe(5 + 1 + 5 + HEADER_CHECKS_PER_RUN + 2 * MESSAGES_PER_RUN)
     expect(requests).toBe(23)
     // The sweep and a look for each of its 5 mailboxes, the turn, 5 pages, the page token, a note of each message
-    // turned away, 4 for each purchase (find its card, look up its merchant, store it, total the card), and the mark.
-    expect(queries).toBe(1 + 5 + 1 + 5 + 1 + turnedAway + 4 * MESSAGES_PER_RUN + 1)
-    expect(queries).toBe(27)
+    // turned away, 3 for each purchase (find its card, store it, total the card), and the mark.
+    expect(queries).toBe(1 + 5 + 1 + 5 + 1 + turnedAway + 3 * MESSAGES_PER_RUN + 1)
+    expect(queries).toBe(26)
     expect(Math.max(requests, queries)).toBeLessThan(50)
   })
 })

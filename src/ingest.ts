@@ -19,7 +19,7 @@ export async function ingestAlert(store: Store, email: AlertEmail): Promise<Inge
   const transaction = parseAlert(email)
   if (!transaction) return { status: 'unparsed' }
   const card = (await store.listCards()).find((each) => each.last4 === transaction.cardLast4)
-  const category = await startingCategoryOn(store, card, transaction)
+  const category = startingCategoryOn(card, transaction)
   const id = await store.insertTransaction({ ...transaction, sourceId: email.sourceId, category })
   if (id === null) return { status: 'duplicate' }
   return { status: 'stored', transaction: { ...transaction, id, category }, card }

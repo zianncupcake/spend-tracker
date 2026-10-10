@@ -1,4 +1,4 @@
-import { categoriesOf } from '../catalogue'
+import { categoryOf } from '../catalogue'
 import type { Product } from '../catalogue/types'
 import type { CategoryTotal } from '../store'
 
@@ -11,11 +11,9 @@ export interface Amount {
 export interface Breakdown {
   /** One for each group of the product, in the product's order, with what was spent in the group's categories. */
   groups: { name: string; spent: Amount[]; limitMinor?: number }[]
-  /** What is sorted into no category of the product. */
+  /** What is in no category of the product. Only a product with no default category leaves a purchase so. */
   unsorted: Amount[]
-  /** What the bank pays nothing on. */
-  excluded: Amount[]
-  /** What counts towards the minimum spend: the purchases in the product's own currency, but for the excluded ones. */
+  /** What counts towards the minimum spend: the purchases in the product's own currency. */
   countedMinor: number
   /** Whether other purchases would count too, were they not in other currencies: what they come to is not known. */
   foreignLeftOut: boolean
@@ -30,11 +28,11 @@ export function perCurrency(amounts: Amount[]): Amount[] {
 
 /** `sums` are those of the window, a currency and a category at a time, as a store's `sumByCategory` gives them. */
 export function breakDown(product: Product, sums: CategoryTotal[]): Breakdown {
-  const { groups, excluded, homeCurrency } = product
-  const known = categoriesOf(product).map((category) => category.key)
+  const { groups, homeCurrency } = product
+  // A sum is told apart by what is stored for its purchases. Where they are is what the product makes of that.
+  const placed = sums.map((sum) => ({ ...sum, category: categoryOf(product, sum.category) }))
   const spentIn = (keys: string[]) =>
-    perCurrency(sums.filter((sum) => sum.category !== null && keys.includes(sum.category)))
-  const counted = sums.filter((sum) => sum.category !== excluded.key)
+    perCurrency(placed.filter((sum) => sum.category !== null && keys.includes(sum.category)))
 
   return {
     groups: groups.map(({ name, limitMinor, categories }) => ({
@@ -42,12 +40,10 @@ export function breakDown(product: Product, sums: CategoryTotal[]): Breakdown {
       spent: spentIn(categories.map((category) => category.key)),
       limitMinor,
     })),
-    // A category that the product does not have is one of a product that the card was linked to before.
-    unsorted: perCurrency(sums.filter((sum) => sum.category === null || !known.includes(sum.category))),
-    excluded: spentIn([excluded.key]),
-    countedMinor: counted
+    unsorted: perCurrency(placed.filter((sum) => sum.category === null)),
+    countedMinor: sums
       .filter((sum) => sum.currency === homeCurrency)
       .reduce((total, sum) => total + sum.amountMinor, 0),
-    foreignLeftOut: counted.some((sum) => sum.currency !== homeCurrency),
+    foreignLeftOut: sums.some((sum) => sum.currency !== homeCurrency),
   }
 }

@@ -56,7 +56,12 @@ const CATCH_UP_DAYS = 35
  */
 const MAX_MESSAGE_SIZE = '1M'
 
-/** A purchase older than this is stored without a message, so that catching up on history does not flood the chat. */
+/**
+ * A purchase whose alert came longer ago than this is stored without a message, so that catching up on history does
+ * not flood the chat. It is the time the email came that counts, and not the time of the purchase: an alert can
+ * state a day and no time, and its purchase is then dated at noon of that day, which is hours before an alert that
+ * comes in the evening, or after midnight.
+ */
 const NEWS_HOURS = 6
 
 const HOUR = 3600
@@ -205,7 +210,7 @@ async function readAlert(deps: Deps, mailbox: Mailbox, accessToken: string, id: 
   const store = storeFor(deps.db, mailbox.ownerId)
   const result = await ingestAlert(store, { sourceId: id, from, subject, receivedAt, text: message.text() })
   if (result.status === 'unparsed') await mail.markSeen(id, 'unparsed')
-  if (result.status === 'stored' && now - result.transaction.occurredAt < NEWS_HOURS * HOUR) {
+  if (result.status === 'stored' && now - receivedAt < NEWS_HOURS * HOUR) {
     await tellOfPurchase(deps, mailbox, result.transaction, result.card)
   }
   return true
@@ -257,7 +262,7 @@ async function tellOfPurchase(
   const text = `${spent}\nRunning total: ${describeTotals(totals, mailbox.timezone)}`
   const product = productOf(card.product)
   if (!product) return deps.messenger.send(mailbox.chatId, text, marked)
-  // On a card with a product, the message ends with where the purchase is sorted, or with the buttons that sort it.
+  // On a card with a product, the message ends with where the purchase is sorted, and has the buttons that move it.
   const { line, buttons } = sortEnd(product, purchase)
   return deps.messenger.send(mailbox.chatId, `${text}\n${line}`, marked, buttons)
 }

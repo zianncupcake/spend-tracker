@@ -2,15 +2,20 @@ import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
 import { storeFor } from '../src/store'
 import { handleUpdate } from '../src/telegram/handler'
-import { answered, deps, openChat, posted, sent, type Posted } from './connect-helpers'
+import { answered, deps, openChat, sent, type Posted } from './connect-helpers'
 import { buy, userCount } from './helpers'
 
-// Sorting purchases into the categories of a card's product: /sort, and the buttons under the bot's messages. The
-// clock stands at 12:00 on 9 October 2026 in Singapore.
+// Moving purchases between the categories of a card's product: /sort, and the buttons under the bot's messages. On
+// the UOB EVOL Card a purchase is online until its user flags it as made with the physical card, which one button
+// does and undoes. The clock stands at 12:00 on 9 October 2026 in Singapore.
 
-const BUTTONS = ['Online', 'Phone tap', 'Physical card or other', "Doesn't count"]
+/** What the bank calls the two categories: the one that a purchase is in until it is flagged, and the one after. */
+const ONLINE = 'Online / Mobile Contactless Spend'
+const OTHER = 'Other Spend'
+
+const FLAG = `Mark as ${OTHER}`
+const UNFLAG = `Mark as ${ONLINE}`
 const REFUSED = 'That button no longer works.'
-const ALL_SORTED = 'Every purchase on evol ••••1234 in its current window is sorted.'
 
 type Chat = ReturnType<typeof openChat>
 
@@ -36,8 +41,7 @@ function markedIn({ text, entities = [] }: Posted): string[] {
   return entities.map(({ offset, length }) => text.slice(offset, offset + length))
 }
 
-// The two functions below read the tables directly, to see what is stored.
-
+/** The category that is stored for a purchase. It reads the table directly, to see what is stored. */
 async function categoryOf(purchaseId: number): Promise<string | null | undefined> {
   const row = await env.DB.prepare('SELECT category FROM transactions WHERE id = ?').bind(purchaseId).first<{
     category: string | null
@@ -45,71 +49,21 @@ async function categoryOf(purchaseId: number): Promise<string | null | undefined
   return row?.category
 }
 
-async function rememberedBy(userId: number) {
-  const { results } = await env.DB.prepare(
-    'SELECT product, merchant, category FROM merchant_categories WHERE owner_id = ? ORDER BY merchant',
-  )
-    .bind(userId)
-    .all()
-  return results
-}
-
 describe('/sort with a card', () => {
-  it('shows the earliest unsorted purchase of the current window, with a button for each choice', async () => {
+  it('says where every purchase counts unless it is marked otherwise, and how to mark one', async () => {
     const chat = await chatWithCard()
-    const userId = await chat.userId()
-    await buy(userId, { at: '2026-09-30T10:00:00+08:00', merchant: 'LAST MONTH' })
-    await buy(userId, { at: '2026-10-01T10:00:00+08:00', merchant: 'SORTED ALREADY', category: 'online' })
-    await buy(userId, { at: '2026-10-03T10:00:00+08:00', merchant: 'BOOK SHOP' })
-    const coffee = await buy(userId, { at: '2026-10-02T10:00:00+08:00' })
-    await buy(userId, { at: '2026-10-01T09:00:00+08:00', merchant: 'ON ANOTHER CARD', cardLast4: '0005' })
+    const id = await buy(await chat.userId())
 
     const message = await ask(chat, '/sort evol')
 
-    expect(message.text).toBe(`#${coffee} 2 Oct · SGD 12.40 · COFFEE PLACE\n#${coffee}: not sorted. Which was it?`)
-    expect(markedIn(message)).toEqual(['COFFEE PLACE'])
-    expect(labels(message)).toEqual(BUTTONS)
-    // A row to each button.
-    expect(message.buttons?.map((row) => row.length)).toEqual([1, 1, 1, 1])
-  })
-
-  it('sorts the purchase when a button is pressed, says so in the message, and goes on to the next one', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    const coffee = await buy(userId, { at: '2026-10-02T10:00:00+08:00' })
-    const books = await buy(userId, { at: '2026-10-03T10:00:00+08:00', merchant: 'BOOK SHOP', amountMinor: 3000 })
-    const first = await ask(chat, '/sort evol')
-
-    const pressed = await chat.press(first, 'Phone tap')
-
-    expect(pressed.answer).toBe(`#${coffee}: Phone tap`)
-    expect(await categoryOf(coffee)).toBe('mobile')
-    // The message now ends with where the purchase is, and has no buttons. The merchant's name is still marked.
-    expect(first.text).toBe(`#${coffee} 2 Oct · SGD 12.40 · COFFEE PLACE\n#${coffee}: Phone tap`)
-    expect(markedIn(first)).toEqual(['COFFEE PLACE'])
-    expect(first.buttons).toBeUndefined()
-    // And the next unsorted purchase follows, with buttons that will bring the one after it.
-    const [second, ...more] = pressed.sent
-    expect(more).toEqual([])
-    expect(second.text).toBe(`#${books} 3 Oct · SGD 30.00 · BOOK SHOP\n#${books}: not sorted. Which was it?`)
-    expect(labels(second)).toEqual(BUTTONS)
-
-    const last = await chat.press(second, "Doesn't count")
-
-    expect(last.answer).toBe(`#${books}: Doesn't count`)
-    expect(await categoryOf(books)).toBe('excluded')
-    expect(second.text).toBe(`#${books} 3 Oct · SGD 30.00 · BOOK SHOP\n#${books}: Doesn't count`)
-    expect(last.sent.map((message) => message.text)).toEqual([ALL_SORTED])
-    expect(last.sent[0].buttons).toBeUndefined()
-  })
-
-  it('says that everything is sorted when nothing in the window is left to sort', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    await buy(userId, { at: '2026-09-30T10:00:00+08:00', merchant: 'LAST MONTH' })
-    await buy(userId, { category: 'online' })
-
-    expect(await chat.say('/sort evol')).toBe(ALL_SORTED)
+    expect(message.text).toBe(
+      'Every purchase on evol ••••1234 counts as Online / Mobile Contactless Spend unless it is marked otherwise. ' +
+        'Other Spend is where a purchase made with the physical card goes. ' +
+        'To mark one, send /sort <purchase id>. /spend evol shows the ids.',
+    )
+    // There is no purchase to go through, so nothing to press and nothing changed.
+    expect(message.buttons).toBeUndefined()
+    expect(await categoryOf(id)).toBeNull()
   })
 
   it('says how to link a product when the card is linked to none', async () => {
@@ -125,63 +79,109 @@ describe('/sort with a card', () => {
 })
 
 describe('/sort with the id of a purchase', () => {
-  it('shows the purchase with the buttons, and ticks the one for where it is now', async () => {
+  it('shows a purchase that nothing is stored for as online, with the one button that flags it', async () => {
     const chat = await chatWithCard()
-    const id = await buy(await chat.userId(), { category: 'mobile', parser: 'manual' })
+    const id = await buy(await chat.userId(), { parser: 'manual' })
 
     const message = await ask(chat, `/sort ${id}`)
 
-    expect(message.text).toBe(`#${id} 5 Oct · SGD 12.40 · COFFEE PLACE · by hand\n#${id}: Phone tap. Which was it?`)
-    expect(labels(message)).toEqual(['Online', '✓ Phone tap', 'Physical card or other', "Doesn't count"])
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE · by hand\nID ${id}: ${ONLINE}`)
+    expect(markedIn(message)).toEqual(['COFFEE PLACE'])
+    expect(message.buttons).toEqual([[{ text: FLAG, data: `${id}:other` }]])
   })
 
-  it('sorts the purchase again when a button is pressed, and sends nothing more', async () => {
+  it('flags the purchase when the button is pressed, says so in the message, and flips the button', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
-    const id = await buy(userId, { category: 'mobile' })
-    const unsorted = await buy(userId, { merchant: 'BOOK SHOP' })
-    // With the # that the id is shown with.
+    const id = await buy(userId)
+    const untouched = await buy(userId, { merchant: 'BOOK SHOP' })
+    // With a # before the id, which is taken as the id alone is.
     const message = await ask(chat, `/sort #${id}`)
 
-    const pressed = await chat.press(message, 'Online')
+    const pressed = await chat.press(message, FLAG)
 
-    expect(pressed).toEqual({ answer: `#${id}: Online`, sent: [] })
-    expect(await categoryOf(id)).toBe('online')
-    expect(message.text).toBe(`#${id} 5 Oct · SGD 12.40 · COFFEE PLACE\n#${id}: Online`)
-    expect(message.buttons).toBeUndefined()
-    expect(await categoryOf(unsorted)).toBeNull()
+    expect(pressed).toEqual({ answer: `ID ${id}: ${OTHER}`, sent: [] })
+    expect(await categoryOf(id)).toBe('other')
+    // The message now ends with where the purchase is. The merchant's name is still marked.
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${OTHER}`)
+    expect(markedIn(message)).toEqual(['COFFEE PLACE'])
+    expect(message.buttons).toEqual([[{ text: UNFLAG, data: `${id}:online` }]])
+    expect(await categoryOf(untouched)).toBeNull()
   })
 
-  it('shows a purchase that a rule sorted with no button ticked, and moves it from where the rule put it', async () => {
+  it('takes the flag off again when the button is pressed once more, and flips the button back', async () => {
     const chat = await chatWithCard()
-    const id = await buy(await chat.userId(), { currency: 'USD', merchant: 'AIRLINE', category: 'fx' })
+    const id = await buy(await chat.userId())
+    const message = await ask(chat, `/sort ${id}`)
+    await chat.press(message, FLAG)
+
+    const pressed = await chat.press(message, UNFLAG)
+
+    expect(pressed).toEqual({ answer: `ID ${id}: ${ONLINE}`, sent: [] })
+    expect(await categoryOf(id)).toBe('online')
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${ONLINE}`)
+    expect(message.buttons).toEqual([[{ text: FLAG, data: `${id}:other` }]])
+
+    // And so on, as often as it is pressed.
+    await chat.press(message, FLAG)
+    expect(await categoryOf(id)).toBe('other')
+    expect(labels(message)).toEqual([UNFLAG])
+  })
+
+  it('shows a purchase that is flagged with the button that takes the flag off', async () => {
+    const chat = await chatWithCard()
+    const id = await buy(await chat.userId(), { category: 'other' })
 
     const message = await ask(chat, `/sort ${id}`)
 
-    expect(message.text).toBe(`#${id} 5 Oct · USD 12.40 · AIRLINE\n#${id}: Foreign currency. Which was it?`)
-    expect(labels(message)).toEqual(BUTTONS)
-
-    expect((await chat.press(message, "Doesn't count")).answer).toBe(`#${id}: Doesn't count`)
-    expect(await categoryOf(id)).toBe('excluded')
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${OTHER}`)
+    expect(labels(message)).toEqual([UNFLAG])
   })
 
-  it('sorts a purchase of an earlier window too', async () => {
+  it('shows a purchase that a rule placed with both buttons, which flag it or put it with the others', async () => {
+    const chat = await chatWithCard()
+    const userId = await chat.userId()
+    const abroad = await buy(userId, { currency: 'USD', merchant: 'AIRLINE', category: 'fx' })
+    const listed = await buy(userId, { merchant: 'NETFLIX.COM', category: 'selected' })
+
+    const [first, second] = [await ask(chat, `/sort ${abroad}`), await ask(chat, `/sort ${listed}`)]
+
+    expect(first.text).toBe(`ID ${abroad} · 5 Oct · USD 12.40 · AIRLINE\nID ${abroad}: Overseas Foreign Currency Spend`)
+    expect(second.text).toBe(
+      `ID ${listed} · 5 Oct · SGD 12.40 · NETFLIX.COM\nID ${listed}: Selected Gym, Telco and Streaming Spend`,
+    )
+    // A row to each button.
+    expect(first.buttons).toEqual([
+      [{ text: UNFLAG, data: `${abroad}:online` }],
+      [{ text: FLAG, data: `${abroad}:other` }],
+    ])
+    expect(labels(second)).toEqual([UNFLAG, FLAG])
+
+    expect((await chat.press(first, FLAG)).answer).toBe(`ID ${abroad}: ${OTHER}`)
+    expect((await chat.press(second, UNFLAG)).answer).toBe(`ID ${listed}: ${ONLINE}`)
+
+    expect([await categoryOf(abroad), await categoryOf(listed)]).toEqual(['other', 'online'])
+    // From then on each has the one button, as any purchase that is not where a rule put it.
+    expect([labels(first), labels(second)]).toEqual([[UNFLAG], [FLAG]])
+  })
+
+  it('moves a purchase of an earlier window too', async () => {
     const chat = await chatWithCard()
     const id = await buy(await chat.userId(), { at: '2026-08-20T10:00:00+08:00' })
 
     const message = await ask(chat, `/sort ${id}`)
-    await chat.press(message, 'Online')
+    await chat.press(message, FLAG)
 
-    expect(message.text).toBe(`#${id} 20 Aug · SGD 12.40 · COFFEE PLACE\n#${id}: Online`)
+    expect(message.text).toBe(`ID ${id} · 20 Aug · SGD 12.40 · COFFEE PLACE\nID ${id}: ${OTHER}`)
   })
 
   it('goes by the card when a card has a number for a nickname, and by the purchase when the id has a #', async () => {
     const chat = openChat()
     await chat.say('/addcard 2024 1234 calendar uob-evol')
-    const id = await buy(await chat.userId(), { category: 'online' })
+    const id = await buy(await chat.userId())
 
-    expect(await chat.say('/sort 2024')).toBe('Every purchase on 2024 ••••1234 in its current window is sorted.')
-    expect((await ask(chat, `/sort #${id}`)).text).toContain(`#${id}: Online. Which was it?`)
+    expect(await chat.say('/sort 2024')).toContain(`Every purchase on 2024 ••••1234 counts as ${ONLINE}`)
+    expect((await ask(chat, `/sort #${id}`)).text).toContain(`ID ${id}: ${ONLINE}`)
   })
 
   it.each([
@@ -190,8 +190,8 @@ describe('/sort with the id of a purchase', () => {
     ['/sort my!card', 'Usage:\n/sort <nickname>\n/sort <purchase id>'],
     ['/sort #evol', 'Usage:\n/sort <nickname>\n/sort <purchase id>'],
     ['/sort visa', 'You have no card called visa.'],
-    ['/sort 999999999', 'You have no purchase #999999999.'],
-    ['/sort #999999999', 'You have no purchase #999999999.'],
+    ['/sort 999999999', 'You have no purchase with ID 999999999.'],
+    ['/sort #999999999', 'You have no purchase with ID 999999999.'],
   ])('answers "%s" with what is wrong', async (message, reply) => {
     const chat = await chatWithCard()
     await buy(await chat.userId())
@@ -208,61 +208,66 @@ describe('/sort with the id of a purchase', () => {
 
     for (const id of [onAmex, onNone]) {
       expect(await chat.say(`/sort ${id}`)).toBe(
-        `#${id} is on a card that is linked to no product, so there is nothing to sort it into.`,
+        `ID ${id} is on a card that is linked to no product, so there is nothing to sort it into.`,
       )
     }
   })
 })
 
-describe('what is chosen for a merchant', () => {
-  it('is remembered, and is where the later purchases at that merchant start', async () => {
+describe('a flag', () => {
+  it('is of the one purchase: a later purchase at the same merchant starts online, as any other does', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
-    const first = await buy(userId, { merchant: 'Corner Cafe' })
-    await chat.press(await ask(chat, `/sort ${first}`), 'Phone tap')
+    const flagged = await buy(userId, { merchant: 'Corner Cafe' })
+    await chat.press(await ask(chat, `/sort ${flagged}`), FLAG)
+    expect(await categoryOf(flagged)).toBe('other')
 
-    expect(await rememberedBy(userId)).toEqual([{ product: 'uob-evol', merchant: 'Corner Cafe', category: 'mobile' }])
+    // The same merchant, as it was written and in another case.
+    const replies = [await ask(chat, '/add evol 4.50 Corner Cafe'), await ask(chat, '/add evol 4.50 CORNER CAFE')]
 
-    // The same merchant in any case. Added by hand, as a purchase from an alert is stored: with where it starts.
-    const reply = await ask(chat, '/add evol 4.50 CORNER CAFE')
-    expect(reply.text).toMatch(/^#\d+ 9 Oct · SGD 4\.50 · CORNER CAFE · by hand\n.*\n#\d+: Phone tap$/)
-    expect(reply.buttons).toBeUndefined()
-  })
-
-  it('is what was chosen last, and is kept for each product of each user by itself', async () => {
-    const [chat, bystander] = [await chatWithCard(), await chatWithCard()]
-    const userId = await chat.userId()
-    const [first, second] = [await buy(userId), await buy(userId)]
-
-    await chat.press(await ask(chat, `/sort ${first}`), 'Phone tap')
-    await chat.press(await ask(chat, `/sort ${second}`), 'Online')
-
-    expect(await rememberedBy(userId)).toEqual([{ product: 'uob-evol', merchant: 'COFFEE PLACE', category: 'online' }])
-    expect(await rememberedBy(await bystander.userId())).toEqual([])
-    // What one user chose is nothing to another: their purchase at the merchant is left for them to sort.
-    expect((await ask(bystander, '/add evol 4.50 COFFEE PLACE')).text).toContain(': not sorted. Which was it?')
+    for (const reply of replies) {
+      expect(reply.text).toMatch(/\nID \d+: Online \/ Mobile Contactless Spend$/)
+      expect(labels(reply)).toEqual([FLAG])
+    }
+    // Nothing is stored for where the later two are, and the first is still the one that is flagged.
+    const { results } = await env.DB.prepare('SELECT category FROM transactions WHERE owner_id = ? ORDER BY id')
+      .bind(userId)
+      .all()
+    expect(results).toEqual([{ category: 'other' }, { category: null }, { category: null }])
   })
 
   it('changes no other purchase, not even one at the same merchant', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
-    const [first, second, third] = [await buy(userId), await buy(userId), await buy(userId, { category: 'other' })]
+    const [first, second, third] = [await buy(userId), await buy(userId), await buy(userId, { category: 'online' })]
 
-    await chat.press(await ask(chat, `/sort ${first}`), 'Online')
+    await chat.press(await ask(chat, `/sort ${first}`), FLAG)
 
     const categories = [await categoryOf(first), await categoryOf(second), await categoryOf(third)]
-    expect(categories).toEqual(['online', null, 'other'])
+    expect(categories).toEqual(['other', null, 'online'])
   })
 
-  it('is not remembered for a purchase that names no merchant', async () => {
+  it('is put on a purchase that names no merchant too', async () => {
     const chat = await chatWithCard()
-    const userId = await chat.userId()
-    const id = await buy(userId, { merchant: null })
+    const id = await buy(await chat.userId(), { merchant: null })
 
-    await chat.press(await ask(chat, `/sort ${id}`), 'Online')
+    await chat.press(await ask(chat, `/sort ${id}`), FLAG)
 
-    expect(await categoryOf(id)).toBe('online')
-    expect(await rememberedBy(userId)).toEqual([])
+    expect(await categoryOf(id)).toBe('other')
+  })
+
+  it('moves the one purchase that a rule placed, and the rule goes on placing the later ones', async () => {
+    const chat = await chatWithCard()
+    const id = await buy(await chat.userId(), { merchant: 'NETFLIX.COM', category: 'selected' })
+
+    const pressed = await chat.press(await ask(chat, `/sort ${id}`), FLAG)
+
+    expect(pressed.answer).toBe(`ID ${id}: ${OTHER}`)
+    expect(await categoryOf(id)).toBe('other')
+    // The next purchase there starts where the rule puts it.
+    const reply = await ask(chat, '/add evol 15.98 NETFLIX.COM')
+    expect(reply.text).toMatch(/\nID \d+: Selected Gym, Telco and Streaming Spend$/)
+    expect(labels(reply)).toEqual([UNFLAG, FLAG])
   })
 })
 
@@ -275,24 +280,23 @@ describe('a press that is refused', () => {
     const before = message.text
 
     // What a button under the owner's message would hold, sent from the other user's chat.
-    const pressed = await other.pressWith(message, `${theirs}:online`)
+    const pressed = await other.pressWith(message, `${theirs}:other`)
 
     expect(pressed).toEqual({ answer: REFUSED, sent: [] })
     expect(await categoryOf(theirs)).toBeNull()
     expect(await categoryOf(own)).toBeNull()
     expect(message.text).toBe(before)
-    expect(labels(message)).toEqual(BUTTONS)
-    expect(await rememberedBy(await other.userId())).toEqual([])
-    expect(await rememberedBy(await owner.userId())).toEqual([])
+    expect(labels(message)).toEqual([FLAG])
   })
 
   it.each([
     ['a category that only a rule gives', (id: number) => `${id}:fx`],
     ['a category that the product does not have', (id: number) => `${id}:dining`],
-    ['a purchase that there is not', () => '999999999:online'],
+    ['a category that the product had once', (id: number) => `${id}:mobile`],
+    ['a purchase that there is not', () => '999999999:other'],
     ['no category', (id: number) => `${id}`],
-    ['words', () => 'online'],
-    ['more than a button holds', (id: number) => `${id}:online:next:${id}:mobile`],
+    ['words', () => 'other'],
+    ['more than a button holds', (id: number) => `${id}:other:next`],
     ['nothing', () => ''],
   ])('changes nothing when it brings %s', async (_, data) => {
     const chat = await chatWithCard()
@@ -303,7 +307,7 @@ describe('a press that is refused', () => {
 
     expect(pressed).toEqual({ answer: REFUSED, sent: [] })
     expect(await categoryOf(id)).toBeNull()
-    expect(labels(message)).toEqual(BUTTONS)
+    expect(labels(message)).toEqual([FLAG])
   })
 
   it('changes nothing once the purchase has been taken out, or its card is linked to no product', async () => {
@@ -313,10 +317,10 @@ describe('a press that is refused', () => {
     const [first, second] = [await ask(chat, `/sort ${removed}`), await ask(chat, `/sort ${unlinked}`)]
 
     await chat.say(`/remove ${removed}`)
-    expect(await chat.press(first, 'Online')).toEqual({ answer: REFUSED, sent: [] })
+    expect(await chat.press(first, FLAG)).toEqual({ answer: REFUSED, sent: [] })
 
     await chat.say('/product evol none')
-    expect(await chat.press(second, 'Online')).toEqual({ answer: REFUSED, sent: [] })
+    expect(await chat.press(second, FLAG)).toEqual({ answer: REFUSED, sent: [] })
     expect(await categoryOf(unlinked)).toBeNull()
   })
 
@@ -345,7 +349,7 @@ describe('a press that is ignored', () => {
     const under = { message_id: message.id, chat: chatOf(chat.telegramId), text: message.text }
 
     await handleUpdate(deps, {
-      callback_query: { id: 'press-ignored', from: { id: chat.telegramId }, data: `${id}:online`, message: under },
+      callback_query: { id: 'press-ignored', from: { id: chat.telegramId }, data: `${id}:other`, message: under },
     })
 
     expect(await categoryOf(id)).toBeNull()
@@ -358,7 +362,7 @@ describe('a press that is ignored', () => {
     const id = await buy(await chat.userId())
     const under = { message_id: 1, chat: { id: chat.telegramId, type: 'private' }, text: 'A line\nAnother' }
 
-    const data = `${id}:online`
+    const data = `${id}:other`
 
     await handleUpdate(deps, { callback_query: { id: 'press-ignored', data, message: under } })
     await handleUpdate(deps, { callback_query: { from: { id: chat.telegramId }, data, message: under } })
@@ -369,39 +373,71 @@ describe('a press that is ignored', () => {
 })
 
 describe('a press', () => {
-  it('is acted on once when the same button is pressed twice', async () => {
+  it('stores nothing when it is for online, on a purchase that is online with nothing stored for it', async () => {
+    const chat = await chatWithCard()
+    const untouched = await buy(await chat.userId())
+    const message = await ask(chat, `/sort ${untouched}`)
+
+    // What no button under the message holds.
+    const pressed = await chat.pressWith(message, `${untouched}:online`)
+
+    expect(pressed).toEqual({ answer: `ID ${untouched}: ${ONLINE}`, sent: [] })
+    expect(await categoryOf(untouched)).toBeNull()
+    expect(labels(message)).toEqual([FLAG])
+  })
+
+  it('is carried through again when the same button is pressed twice, with the purchase moved once', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
-    const [first, second] = [await buy(userId), await buy(userId, { merchant: 'BOOK SHOP' })]
-    const message = await ask(chat, '/sort evol')
-    // The message as it stood when both presses were made: Telegram tells of each with the buttons still there.
+    const id = await buy(userId)
+    const message = await ask(chat, `/sort ${id}`)
+    // The message as it stood when both presses were made: Telegram tells of each with the button as it was.
     const asItStood = { ...message }
 
-    const once = await chat.press(asItStood, 'Online')
-    const twice = await chat.press(asItStood, 'Online')
+    const once = await chat.press(asItStood, FLAG)
+    const twice = await chat.press(asItStood, FLAG)
 
-    expect(once.answer).toBe(`#${first}: Online`)
-    expect(once.sent.map((each) => each.text)).toEqual([
-      `#${second} 5 Oct · SGD 12.40 · BOOK SHOP\n#${second}: not sorted. Which was it?`,
-    ])
-    // The second is answered with where the purchase is. It edits nothing, and sends no second copy of what follows.
-    expect(twice).toEqual({ answer: `#${first}: Online`, sent: [] })
-    expect(posted.filter((each) => each.text.includes(`#${second}`))).toHaveLength(1)
+    expect(once).toEqual({ answer: `ID ${id}: ${OTHER}`, sent: [] })
+    // The second cannot be told from a press that comes after Telegram failed the first, so it does what that one
+    // would: it leaves the message as the first press made it.
+    expect(twice).toEqual(once)
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${OTHER}`)
+    expect(labels(message)).toEqual([UNFLAG])
+    expect(await categoryOf(id)).toBe('other')
   })
 
-  it('moves the purchase when another button is pressed after the first', async () => {
+  it('brings the message up to date when Telegram failed the edit of its first', async () => {
     const chat = await chatWithCard()
     const id = await buy(await chat.userId())
-    const asItStood = { ...(await ask(chat, `/sort ${id}`)) }
+    const message = await ask(chat, `/sort ${id}`)
+    // The purchase is flagged, and then Telegram does not take the edit of the message.
+    vi.spyOn(deps.messenger, 'edit').mockRejectedValueOnce(new Error('Telegram editMessageText failed'))
+    await expect(chat.press(message, FLAG)).rejects.toThrow('Telegram editMessageText failed')
+    expect(await categoryOf(id)).toBe('other')
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${ONLINE}`)
+    expect(labels(message)).toEqual([FLAG])
 
-    await chat.press(asItStood, 'Online')
-    const again = await chat.press(asItStood, 'Phone tap')
+    // The message still has the button that flags, so the same one is pressed again.
+    const again = await chat.press(message, FLAG)
 
-    expect(again.answer).toBe(`#${id}: Phone tap`)
-    expect(await categoryOf(id)).toBe('mobile')
+    expect(again).toEqual({ answer: `ID ${id}: ${OTHER}`, sent: [] })
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${OTHER}`)
+    expect(labels(message)).toEqual([UNFLAG])
   })
 
-  it('sorts the purchase, and leaves the message as it is, when Telegram no longer gives its text', async () => {
+  it('moves the purchase when the other button is pressed after the first, under a message that had both', async () => {
+    const chat = await chatWithCard()
+    const id = await buy(await chat.userId(), { merchant: 'NETFLIX.COM', category: 'selected' })
+    const asItStood = { ...(await ask(chat, `/sort ${id}`)) }
+
+    await chat.press(asItStood, UNFLAG)
+    const again = await chat.press(asItStood, FLAG)
+
+    expect(again.answer).toBe(`ID ${id}: ${OTHER}`)
+    expect(await categoryOf(id)).toBe('other')
+  })
+
+  it('moves the purchase, and leaves the message as it is, when Telegram no longer gives its text', async () => {
     const chat = await chatWithCard()
     const id = await buy(await chat.userId())
     const message = await ask(chat, `/sort ${id}`)
@@ -410,12 +446,13 @@ describe('a press', () => {
     const under = { message_id: message.id, chat: { id: chat.telegramId, type: 'private' }, date: 0 }
 
     await handleUpdate(deps, {
-      callback_query: { id: 'press-old', from: { id: chat.telegramId }, data: `${id}:online`, message: under },
+      callback_query: { id: 'press-old', from: { id: chat.telegramId }, data: `${id}:other`, message: under },
     })
 
-    expect(answered).toEqual([{ pressId: 'press-old', text: `#${id}: Online` }])
-    expect(await categoryOf(id)).toBe('online')
+    expect(answered).toEqual([{ pressId: 'press-old', text: `ID ${id}: ${OTHER}` }])
+    expect(await categoryOf(id)).toBe('other')
     expect(message.text).toBe(before)
+    expect(labels(message)).toEqual([FLAG])
   })
 
   it('keeps every line of the message but the last, with what was marked in them', async () => {
@@ -425,20 +462,17 @@ describe('a press', () => {
     const reply = await ask(chat, '/add evol 3.00 𝒳 /start https://attacker.test')
     const [purchased, total] = reply.text.split('\n')
 
-    await chat.press(reply, 'Online')
+    await chat.press(reply, FLAG)
 
-    expect(reply.text).toMatch(new RegExp(`^.*\\n.*\\n#\\d+: Online$`))
+    expect(reply.text).toMatch(new RegExp(`^.*\\n.*\\nID \\d+: Other Spend$`))
     expect(reply.text.split('\n').slice(0, 2)).toEqual([purchased, total])
     expect(markedIn(reply)).toEqual(['𝒳 /start https://attacker.test'])
     expect(await categoryOf(id)).toBeNull()
   })
 
-  it('takes six queries and three requests to Telegram at its most: with the next purchase to follow it', async () => {
+  it('takes four queries and two requests to Telegram at its most: when it moves a purchase', async () => {
     const chat = await chatWithCard()
-    const userId = await chat.userId()
-    await buy(userId)
-    await buy(userId, { merchant: 'BOOK SHOP' })
-    const message = await ask(chat, '/sort evol')
+    const message = await ask(chat, `/sort ${await buy(await chat.userId())}`)
     const queried = vi.spyOn(env.DB, 'prepare')
     const [answer, edit, send] = [
       vi.spyOn(deps.messenger, 'answer'),
@@ -446,24 +480,26 @@ describe('a press', () => {
       vi.spyOn(deps.messenger, 'send'),
     ]
 
-    await chat.press(message, 'Online')
+    await chat.press(message, FLAG)
 
-    // The user, the purchase, the cards, the sorting, the choice to remember, and the next unsorted purchase.
-    expect(queried).toHaveBeenCalledTimes(6)
+    // The user, the purchase, the cards, and the move.
+    expect(queried).toHaveBeenCalledTimes(4)
     // Each of these is one request: see the messenger's own test, in webhook.test.ts.
-    expect([answer, edit, send].map((spy) => spy.mock.calls.length)).toEqual([1, 1, 1])
+    expect([answer, edit, send].map((spy) => spy.mock.calls.length)).toEqual([1, 1, 0])
   })
 
-  it("sorts a user's own purchases only, when two users sort at once", async () => {
+  it("moves a user's own purchases only, when two users press at once", async () => {
     const [first, second] = [await chatWithCard(), await chatWithCard()]
-    const [firstId, secondId] = [await buy(await first.userId()), await buy(await second.userId())]
-    const [toFirst, toSecond] = [await ask(first, '/sort evol'), await ask(second, '/sort evol')]
+    const firstId = await buy(await first.userId())
+    const secondId = await buy(await second.userId(), { category: 'other' })
+    const [toFirst, toSecond] = [await ask(first, `/sort ${firstId}`), await ask(second, `/sort ${secondId}`)]
 
-    await Promise.all([first.press(toFirst, 'Online'), second.press(toSecond, "Doesn't count")])
+    await Promise.all([first.press(toFirst, FLAG), second.press(toSecond, UNFLAG)])
 
-    expect([await categoryOf(firstId), await categoryOf(secondId)]).toEqual(['online', 'excluded'])
+    expect([await categoryOf(firstId), await categoryOf(secondId)]).toEqual(['other', 'online'])
     expect(await storeFor(env.DB, await first.userId()).findTransaction(secondId)).toBeNull()
-    expect(toFirst.text).toContain(`#${firstId}: Online`)
-    expect(toSecond.text).toContain(`#${secondId}: Doesn't count`)
+    expect(toFirst.text).toContain(`ID ${firstId}: ${OTHER}`)
+    expect(toSecond.text).toContain(`ID ${secondId}: ${ONLINE}`)
+    expect([labels(toFirst), labels(toSecond)]).toEqual([[UNFLAG], [FLAG]])
   })
 })

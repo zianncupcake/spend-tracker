@@ -10,7 +10,7 @@ const hostileContactEscaped = '&quot;O&#39;Neil &amp; Co&quot; &lt;img src=x one
 
 const everyPage: [name: string, page: () => Response][] = [
   ['the homepage', () => homePage(operator)],
-  ['the privacy policy', () => privacyPage(operator)],
+  ['the privacy policy', () => privacyPage(operator, true)],
   ['the code page', () => codePage('123456')],
   ['the expired-link page', () => problemPage('expired')],
   ['the failure page', () => problemPage('failed')],
@@ -38,20 +38,73 @@ describe('the homepage', () => {
 })
 
 describe('the privacy policy', () => {
+  /** The policy as a reader has it, to whom the line breaks in the page's source are only spaces. */
+  const policy = async (assistant: boolean) => (await privacyPage(operator, assistant).text()).replace(/\s+/g, ' ')
+
+  // What the policy says of the bot's assistant, which a service has when it is set up with an AI provider.
+  const ASSISTANT = [
+    '<h2>Questions that you ask the bot</h2>',
+    'A text message that you send the bot is read as a question when it is not a command, and is not the 6-digit ' +
+      'code of a sign-in.',
+    'To answer it, your question and the card and purchase details needed to answer it are sent to an AI provider ' +
+      'chosen by Example Operator, which produces the answer.',
+    'The details are those that the answering calls for, out of these: your time zone, the nickname, last four ' +
+      'digits, window, totals and number of purchases of each of your cards and, of your purchases, the id, the ' +
+      'time, the last four digits of the card, the amount, the currency, the merchant and the reward category.',
+    'Nothing is sent to the AI provider unless you ask a question.',
+    'An AI provider chosen by Example Operator answers the questions that you ask the bot. It is sent each ' +
+      'question and the card and purchase details needed to answer it, and nothing unless you ask a question.',
+  ]
+
   it('names the operator and how to reach them, and when it was last updated', async () => {
-    const response = privacyPage(operator)
+    const response = privacyPage(operator, true)
     const html = await response.text()
 
     expect(response.status).toBe(200)
     expect(html).toContain('<h1>Privacy policy</h1>')
-    expect(html).toContain('Last updated: 10 October 2026')
+    expect(html).toContain('Last updated: 11 October 2026')
     expect(html).toContain('Example Operator')
     expect(html).toContain('contact: privacy@spend-tracker.test')
   })
 
-  it('says what is accessed, what is stored, who else handles it and how to remove it', async () => {
-    // Line breaks in the page's source are only spaces to a reader.
-    const text = (await privacyPage(operator).text()).replace(/\s+/g, ' ')
+  it('says what becomes of a question, where the bot has an assistant: what is sent, to whom, and when', async () => {
+    const text = await policy(true)
+
+    for (const words of ASSISTANT) expect(text).toContain(words)
+    // Nobody turns the assistant on, so nothing is said of turning it on or off.
+    expect(text).not.toMatch(/turn(ed|s|ing)? (it|the assistant) (on|off)/i)
+    // Each is said where it belongs: on its own after what is stored, and with who else handles the data.
+    const [stored, questions, others, google] = [
+      '<h2>What is stored</h2>',
+      '<h2>Questions that you ask the bot</h2>',
+      '<h2>Who else handles your data</h2>',
+      '<h2>Data from Google</h2>',
+    ].map((heading) => text.indexOf(heading))
+    expect(stored).toBeGreaterThan(-1)
+    expect(questions).toBeGreaterThan(stored)
+    expect(questions).toBeLessThan(others)
+    expect(text.indexOf('An AI provider chosen by Example Operator answers')).toBeGreaterThan(others)
+    expect(text.indexOf('An AI provider chosen by Example Operator answers')).toBeLessThan(google)
+    // Nothing is kept of a question, so nothing is said of one with what is stored.
+    expect(text.slice(stored, questions)).not.toMatch(/question/i)
+  })
+
+  it('says nothing of questions that are asked, or of an AI provider, where the bot has no assistant', async () => {
+    const text = await policy(false)
+
+    for (const words of [...ASSISTANT, 'AI provider', 'question and', 'Questions']) {
+      expect(text).not.toContain(words)
+    }
+    expect(text).toContain('Last updated: 11 October 2026')
+    // The assistant that a user connects with a token of their own is another thing, and is still there.
+    expect(text).toContain('An AI assistant that you connect with your assistant access token')
+  })
+
+  it.each([
+    ['with an assistant', true],
+    ['with none', false],
+  ])('says what is accessed, what is stored, who else handles it and how to remove it, %s', async (_, assistant) => {
+    const text = await policy(assistant)
 
     for (const words of [
       'read-only access',
@@ -61,9 +114,9 @@ describe('the privacy policy', () => {
       "Your time zone, which is Singapore's unless you set another.",
       'The card nicknames, last four digits and window settings that you enter.',
       'The card product that you link a card to.',
-      'The purchases that you add by hand: the amount, currency, merchant and date that you give each one.',
-      'The reward category that each purchase is sorted into, and the category that you last chose for a merchant, ' +
-        'kept so that your later purchases there start in it.',
+      'The purchases that you add by hand: the amount, currency, merchant and date that you give each one, with ' +
+        'the id of the Telegram message that added it, so that it is not counted twice.',
+      'The reward category that each purchase is sorted into.',
       'A purchase that you take out, which stays stored and marked as taken out, so that its alert is not counted ' +
         'again. It is left out of every total and list, and is deleted with everything else.',
       'The id of any alert that was fetched but not recorded, and why it was not, ' +
@@ -93,10 +146,13 @@ describe('the privacy policy', () => {
   })
 
   it("escapes the operator's details", async () => {
-    const html = await privacyPage(hostile).text()
+    const html = (await privacyPage(hostile, true).text()).replace(/\s+/g, ' ')
 
     expect(html).toContain(hostileNameEscaped)
     expect(html).toContain(hostileContactEscaped)
+    // The name is in what is said of the assistant too, in two places.
+    expect(html).toContain(`an AI provider chosen by ${hostileNameEscaped}, which produces the answer`)
+    expect(html).toContain(`An AI provider chosen by ${hostileNameEscaped} answers the questions`)
     expect(html).not.toContain('<script')
     expect(html).not.toContain('<img')
   })

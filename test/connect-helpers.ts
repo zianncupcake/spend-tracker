@@ -5,16 +5,17 @@ import { depsFor, type Deps } from '../src/deps'
 import { decryptToken } from '../src/google/crypto'
 import { GMAIL_READONLY } from '../src/google/oauth'
 import { findOrCreateUser } from '../src/store'
-import type { MessageEntity, Outgoing } from '../src/telegram/api'
+import type { MessageEntity, Outgoing, RichMessage } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
+import { AI_URL, type Completion } from './ai-helpers'
 import { headersOf, type Message } from './gmail-helpers'
 import { newTelegramId } from './helpers'
 
 // What the tests of Google sign-in and of the mail checker share: a stand-in
-// for Google and Telegram, a clock, an outbox, chats with the bot and a
-// browser. There is one of each for everybody in a test, as the real service
-// has, and a test file that imports this gets them made new before each of
-// its tests, with the users of the test before deleted.
+// for Google, Telegram and the AI provider, a clock, an outbox, chats with the
+// bot and a browser. There is one of each for everybody in a test, as the real
+// service has, and a test file that imports this gets them made new before
+// each of its tests, with the users of the test before deleted.
 
 export const NOW = new Date('2026-10-09T12:00:00+08:00')
 export const MINUTE = 60_000
@@ -63,6 +64,14 @@ interface Outside {
   fetchedHeaders: string[]
   /** The ids of the messages fetched whole from Gmail. */
   fetched: string[]
+  /** What the AI provider was posted, oldest first: the body of each request, with the key that came with it. */
+  completions: { key: string | null; body: Completion }[]
+  /**
+   * How the AI provider answers the requests that come next, the first of them first: with a body of its own, such
+   * as `saying` and `calling` make, or with whatever a function returns or throws. A test puts these here before a
+   * question is asked. With none left, a request to the provider is one that a test should not have made.
+   */
+  model: (object | (() => Response | Promise<Response>))[]
 }
 
 function newOutside(): Outside {
@@ -81,6 +90,8 @@ function newOutside(): Outside {
     listings: [],
     fetchedHeaders: [],
     fetched: [],
+    completions: [],
+    model: [],
   }
 }
 
@@ -101,6 +112,9 @@ export type Posted = Outgoing & { id: number; chatId: number }
  */
 export const posted: Posted[] = []
 
+/** The rich messages that the bot has sent, whole: `rich` takes each reply out. */
+export const sentRich: { chatId: number; message: RichMessage }[] = []
+
 /** What each press of a button was answered with, which Telegram shows to whoever pressed. */
 export const answered: { pressId: string; text: string }[] = []
 
@@ -112,6 +126,9 @@ export const deps: Deps = {
       sent.push({ chatId, text })
       posted.push({ id: posted.length + 1, chatId, text, entities, buttons })
     },
+    async sendRich(chatId, message) {
+      sentRich.push({ chatId, message })
+    },
     async answer(pressId, text) {
       answered.push({ pressId, text })
     },
@@ -120,14 +137,21 @@ export const deps: Deps = {
       if (!message) throw new Error('A test edited a message that was never sent')
       Object.assign(message, { text, entities, buttons })
     },
+    // Nothing is kept of this. A test that is about it watches for it.
+    async typing() {},
   },
 }
+
+/** The AI provider that the service is set up with. A test takes it away by setting `deps.ai` to nothing. */
+const { ai } = deps
 
 beforeEach(async () => {
   Object.assign(outside, newOutside())
   clock.now = NOW
+  deps.ai = ai
   sent.length = 0
   posted.length = 0
+  sentRich.length = 0
   answered.length = 0
   vi.stubGlobal('fetch', fakeFetch)
   // The service looks across all users for the mailbox whose turn it is, and for who else holds a mailbox. What
@@ -141,11 +165,13 @@ afterEach(() => {
 })
 
 /**
- * Google and Telegram are reached with the global fetch. This takes its place,
- * so no test signs in to anything real. Its Google has an account for every
- * authorisation code: "code-for-jane@example.test" is exchanged for tokens of
- * the mailbox jane@example.test, and each token names the mailbox it is for.
- * As at Google, revoking one token of an account ends them all.
+ * Google, Telegram and the AI provider are reached with the global fetch. This
+ * takes its place, so no test signs in to anything real, or asks a real model
+ * anything. Its Google has an account for every authorisation code:
+ * "code-for-jane@example.test" is exchanged for tokens of the mailbox
+ * jane@example.test, and each token names the mailbox it is for. As at Google,
+ * revoking one token of an account ends them all. Its AI provider says what a
+ * test has it say: see `Outside`.
  */
 async function fakeFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const { origin, pathname, searchParams } = new URL(url)
@@ -227,6 +253,16 @@ async function fakeFetch(url: string, init: RequestInit = {}): Promise<Response>
       outside.telegrams.push(message)
       return Response.json({ ok: true })
     }
+    case AI_URL: {
+      const key = new Headers(init.headers).get('authorization')
+      outside.completions.push({ key, body: JSON.parse(String(init.body)) })
+      const reply = outside.model.shift()
+      if (reply === undefined) throw new Error('A test made a request it should not have')
+      const { signal } = init
+      // As fetch does: a request whose time runs out before it is answered fails with why it was ended.
+      const ended = new Promise<never>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))
+      return Promise.race([typeof reply === 'function' ? reply() : Response.json(reply), ended])
+    }
     default:
       throw new Error('A test made a request it should not have')
   }
@@ -239,14 +275,24 @@ function mailboxOf(refreshToken: string): string {
 
 type Chat = ReturnType<typeof openChat>
 
+let lastMessage = 0
 let lastPress = 0
 
 /** A new user's private chat with the bot. */
 export function openChat() {
   const telegramId = newTelegramId()
-  /** Sends the bot a message. Its reply is left in `sent`. */
-  const send = (text: string) =>
-    handleUpdate(deps, { message: { text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } } })
+  /**
+   * Sends the bot a message. Its reply is left in `sent`. Telegram gives every message an id that no other has, and
+   * so does this, unless it is told the id: a message sent with the id of an earlier one is that message, delivered
+   * a second time. What the bot leaves for when Telegram has been answered, which is the answering of a question,
+   * is done here at once.
+   */
+  const send = async (text: string, messageId = ++lastMessage) => {
+    const later = await handleUpdate(deps, {
+      message: { message_id: messageId, text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } },
+    })
+    if (later) await later()
+  }
 
   /**
    * Tells the bot of the press of a button under a message, as Telegram does: with what the button holds, and with
@@ -274,14 +320,30 @@ export function openChat() {
       expect(reply.chatId).toBe(telegramId)
       return reply.text
     },
-    /** Sends the bot a message and returns its replies whole, however many there are. They are taken out of `sent`. */
-    async ask(text: string): Promise<Posted[]> {
+    /**
+     * Sends the bot a message and returns its replies whole, however many there are. They are taken out of `sent`.
+     * With `messageId`, the message has that id, as for `send`.
+     */
+    async ask(text: string, messageId?: number): Promise<Posted[]> {
       const [before, beforePosted] = [sent.length, posted.length]
-      await send(text)
+      await send(text, messageId)
       sent.splice(before)
       const replies = posted.slice(beforePosted)
       for (const reply of replies) expect(reply.chatId).toBe(telegramId)
       return replies
+    },
+    /**
+     * Sends the bot a message and returns the rich message that is its one reply, which is taken out of `sentRich`.
+     * The bot is to send no message of text with it.
+     */
+    async rich(text: string): Promise<RichMessage> {
+      const [before, beforeRich] = [sent.length, sentRich.length]
+      await send(text)
+      expect(sent).toHaveLength(before)
+      expect(sentRich).toHaveLength(beforeRich + 1)
+      const [reply] = sentRich.splice(beforeRich)
+      expect(reply.chatId).toBe(telegramId)
+      return reply.message
     },
     pressWith,
     /** Presses the button with the label under a message. */

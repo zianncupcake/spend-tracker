@@ -333,24 +333,52 @@ describe('list_transactions', () => {
     expect(dataIn(await call(userId, 'list_transactions')).transactions).toMatchObject([{ merchant: null }])
   })
 
-  it('gives each purchase the id that its user knows it by, and the category it is sorted into or null', async () => {
+  it('gives each purchase the id that its user knows it by, and the category that it is in', async () => {
     const chat = openChat()
     await chat.say('/addcard evol 1234 calendar uob-evol')
+    await chat.say('/addcard amex 0005 calendar')
     const userId = await chat.userId()
-    const sorted = await buy(userId, { at: '2026-10-08T10:00:00+08:00', merchant: 'BOOK SHOP', category: 'online' })
-    const unsorted = await buy(userId, { at: '2026-10-07T10:00:00+08:00' })
+    const flagged = await buy(userId, { at: '2026-10-08T10:00:00+08:00', merchant: 'BOOK SHOP', category: 'other' })
+    // No category is stored for this one, so it is where its card's product takes a purchase to be: online.
+    const untouched = await buy(userId, { at: '2026-10-07T10:00:00+08:00' })
     const foreign = { currency: 'USD', category: 'fx' }
     const byHand = await buy(userId, { ...foreign, at: '2026-10-06T10:00:00+08:00', parser: 'manual' })
+    // On a card that is linked to no product, and on one that is not added, such a purchase is in no category.
+    const onAmex = await buy(userId, { at: '2026-10-05T10:00:00+08:00', cardLast4: '0005' })
+    const onNone = await buy(userId, { at: '2026-10-04T10:00:00+08:00', cardLast4: '7777' })
 
     const { transactions } = dataIn(await call(userId, 'list_transactions'))
 
     expect(transactions).toMatchObject([
-      { id: sorted, merchant: 'BOOK SHOP', category: 'online' },
-      { id: unsorted, merchant: 'COFFEE PLACE', category: null },
+      { id: flagged, merchant: 'BOOK SHOP', category: 'other' },
+      { id: untouched, merchant: 'COFFEE PLACE', category: 'online' },
       { id: byHand, currency: 'USD', category: 'fx' },
+      { id: onAmex, cardLast4: '0005', category: null },
+      { id: onNone, cardLast4: '7777', category: null },
     ])
-    // What the user sees as #57 in the chat is what an assistant is given.
-    expect(await chat.say(`/sort ${sorted}`)).toContain(`#${sorted}: Online`)
+    // The same when one card is asked for.
+    expect(dataIn(await call(userId, 'list_transactions', { card: 'evol' })).transactions).toMatchObject([
+      { id: flagged, category: 'other' },
+      { id: untouched, category: 'online' },
+      { id: byHand, category: 'fx' },
+    ])
+    // What the user sees as ID 57 in the chat is what an assistant is given.
+    expect(await chat.say(`/sort ${untouched}`)).toContain(`ID ${untouched}: Online / Mobile Contactless Spend`)
+  })
+
+  it("goes by the product of the user's own card, whatever another user's card with the same digits has", async () => {
+    const [linked, plain] = [openChat(), openChat()]
+    await linked.say('/addcard main 1234 calendar uob-evol')
+    await plain.say('/addcard main 1234 calendar')
+    const [first, second] = [await buy(await linked.userId()), await buy(await plain.userId())]
+
+    const categoriesOf = async (userId: number) =>
+      dataIn(await call(userId, 'list_transactions')).transactions.map(
+        (purchase: { id: number; category: string | null }) => [purchase.id, purchase.category],
+      )
+
+    expect(await categoriesOf(await linked.userId())).toEqual([[first, 'online']])
+    expect(await categoriesOf(await plain.userId())).toEqual([[second, null]])
   })
 })
 

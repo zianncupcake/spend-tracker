@@ -11,8 +11,16 @@ export interface Product {
   /** What has to be spent in a statement month before the groups with a limit earn their rate. */
   minimumSpendMinor: number
   groups: Group[]
-  /** Where the purchases go that the bank pays nothing on. They do not count towards the minimum spend either. */
-  excluded: Choice
+  /**
+   * The key of the category that a purchase is in when no rule and no stored choice says otherwise. A product
+   * without one leaves such a purchase unsorted, for its user to sort.
+   */
+  defaultCategory?: string
+  /**
+   * What a user is told, with how the card's purchases are sorted, of the sorting that is left to them: a sentence
+   * for what the names of the categories do not say.
+   */
+  sortingNote?: string
 }
 
 /** Categories that earn at one rate and, when the rate is paid on no more than so much spend, share that limit. */
@@ -26,7 +34,10 @@ export interface Group {
 /** What a purchase is sorted into. */
 export interface Category {
   key: string
-  /** The words on the button that puts a purchase here. A category without them cannot be chosen by hand. */
+  /**
+   * What the category is called on the button that puts a purchase here, which reads "Mark as" and then this. A
+   * category without it cannot be chosen by hand.
+   */
   label?: string
   /**
    * What puts a purchase here with nobody choosing: that it was made in another currency than the product's, or

@@ -1,4 +1,4 @@
-import { hundredths, merchantIn, singaporeTime, singleSpaced } from './shared'
+import { hundredths, MAX_FROM_EMAIL, merchantIn, singaporeTime, singleSpaced } from './shared'
 import type { Parser } from './types'
 
 // UOB (Singapore) tells of a purchase made with one of its cards in one sentence of an email. The values in this
@@ -18,8 +18,9 @@ import type { Parser } from './types'
 const TRANSACTION =
   /\b([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12})(\.\d{1,2}|) was made with your UOB .{0,40}?ending (\d{4}) on (\d\d)\/(\d\d)\/(\d\d) at /
 
-// What the bank puts after the sentence. It tells where the merchant's name ends.
-const FOLLOWING = ' If unauthorised'
+// What the bank puts after the sentence. It tells where the merchant's name ends. The word is spelt with an s or
+// with a z, "unauthorised" or "unauthorized", so it is matched as far as the two spellings are the same.
+const FOLLOWING = ' If unauthori'
 
 const DAY = 24 * 3600
 
@@ -48,10 +49,12 @@ export const uob: Parser = {
  * When the purchase was made, from the start of the day that the alert states and the time the email came. An email
  * that came on that day in Singapore is taken to have come when the purchase was made. For one that came on another
  * day, noon stands in for the time. And when the alert states a date that does not exist, so that `dayStart` is
- * null, the purchase is dated by the email.
+ * null, or a day that is more than two days from when the email came, the purchase is dated by the email.
  */
 function purchaseTime(dayStart: number | null, receivedAt: number): number {
   if (dayStart === null) return receivedAt
   const cameThatDay = receivedAt >= dayStart && receivedAt < dayStart + DAY
-  return cameThatDay ? receivedAt : dayStart + DAY / 2
+  // To either side of the day: the email came more than two days before it began, or after it ended.
+  const farOff = receivedAt < dayStart - MAX_FROM_EMAIL || receivedAt >= dayStart + DAY + MAX_FROM_EMAIL
+  return cameThatDay || farOff ? receivedAt : dayStart + DAY / 2
 }

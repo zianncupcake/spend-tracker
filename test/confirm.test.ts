@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { refreshAccessToken } from '../src/google/gmail'
+import { saying } from './ai-helpers'
 import {
   approve,
   attemptOf,
@@ -20,6 +21,7 @@ import {
   signIn,
   tokenIn,
 } from './connect-helpers'
+import { linesOf } from './helpers'
 
 const NOTHING_WAITING =
   'No sign-in is waiting for a code. It may have expired, or had too many wrong codes. Send /connect to start again.'
@@ -134,6 +136,8 @@ describe('the confirmation code', () => {
     const link = linkIn(await chat.say('/connect'))
     expect(await chat.say('123456')).toBe(NOTHING_WAITING)
 
+    // Six digits are a code whether or not one is waited for, and never a question for the assistant.
+    expect(outside.completions).toEqual([])
     expect(outside.revoked).toEqual([])
     expect((await open(link)).status).toBe(302)
     expect(await chat.say(await codeOn(await approve(link, 'jane@example.test')))).toContain('Connected')
@@ -147,18 +151,35 @@ describe('the confirmation code', () => {
   )
 
   it.each(['12345', '1234567', '12345a', '123 456', '123456 please'])(
-    'does not take "%s" for a code',
+    'does not take "%s" for a code: it is a question for the assistant',
     async (message) => {
       const chat = openChat()
       const code = await signIn(chat, 'jane@example.test')
+      outside.model = [saying('I can only answer questions about your card spending.')]
 
-      expect((await chat.say(message)).startsWith('Commands:\n/addcard')).toBe(true)
+      const answer = await chat.rich(message)
 
+      // The model was asked what the message says, and its answer is the reply.
+      expect(outside.completions).toHaveLength(1)
+      expect(outside.completions[0].body.messages[1]).toEqual({ role: 'user', content: message })
+      expect(linesOf(answer)).toEqual(['I can only answer questions about your card spending.'])
       // It was not counted as a try either.
       expect(await attemptOf(await chat.userId())).toMatchObject({ confirm_tries: 0 })
       expect(await chat.say(code)).toContain('Connected')
     },
   )
+
+  it.each([
+    ['the right code', (code: string) => code, 'Connected jane@example.test'],
+    ['a wrong one', otherThan, 'That code is not right.'],
+  ])('takes six digits for a code, and asks the assistant nothing, when they are %s', async (_, digits, reply) => {
+    const chat = openChat()
+    const code = await signIn(chat, 'jane@example.test')
+
+    expect(await chat.say(digits(code))).toContain(reply)
+
+    expect(outside.completions).toEqual([])
+  })
 })
 
 describe('a link opened by somebody else', () => {

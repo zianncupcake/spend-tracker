@@ -7,17 +7,18 @@ import { homePage, privacyPage } from './pages'
 import { handleUpdate, type Update } from './telegram/handler'
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const { pathname, searchParams } = new URL(request.url)
     const operator = { name: env.OPERATOR_NAME, contact: env.OPERATOR_CONTACT }
 
     switch (`${request.method} ${pathname}`) {
       case 'POST /telegram':
-        return telegramWebhook(request, env)
+        return telegramWebhook(request, env, ctx)
       case 'GET /':
         return homePage(operator)
       case 'GET /privacy':
-        return privacyPage(operator)
+        // The policy says what becomes of a question only when the bot has an assistant to answer one.
+        return privacyPage(operator, depsFor(env).ai !== undefined)
       case 'GET /oauth/start':
         return oauthStart(depsFor(env), searchParams)
       case 'GET /oauth/callback':
@@ -40,20 +41,27 @@ export default {
   },
 } satisfies ExportedHandler<Env>
 
-async function telegramWebhook(request: Request, env: Env): Promise<Response> {
+async function telegramWebhook(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
   if (!(await secretsMatch(secret, env.TELEGRAM_WEBHOOK_SECRET))) {
     return new Response('Unauthorized\n', { status: 401 })
   }
 
+  // Telegram resends an update until it gets a 200, so a failure is logged
+  // and still acknowledged. Only the error's name is logged: an error
+  // message can quote its input, and message text must never reach the logs.
+  const logFailure = (error: unknown) =>
+    console.error('telegram update failed:', error instanceof Error ? error.name : typeof error)
+
   try {
     const update = await request.json<Update>()
-    await handleUpdate(depsFor(env), update)
+    const later = await handleUpdate(depsFor(env), update)
+    // What is left is the answering of a question, which takes a model some seconds. Telegram resends an update
+    // that it has waited too long to hear of, too. So that goes on after this response, for as long as a Worker is
+    // given for it: 30 seconds.
+    if (later) ctx.waitUntil(later().catch(logFailure))
   } catch (error) {
-    // Telegram resends an update until it gets a 200, so a failure is logged
-    // and still acknowledged. Only the error's name is logged: an error
-    // message can quote its input, and message text must never reach the logs.
-    console.error('telegram update failed:', error instanceof Error ? error.name : typeof error)
+    logFailure(error)
   }
   return new Response('ok\n')
 }

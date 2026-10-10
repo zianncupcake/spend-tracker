@@ -2,10 +2,10 @@ import { expect, it } from 'vitest'
 import {
   describeTotals,
   describeWindow,
+  formatAmount,
   formatMoney,
   formatShortDate,
   formatShortDateTime,
-  formatSpend,
   maskLast4,
   shortDateIn,
 } from '../src/telegram/format'
@@ -17,6 +17,15 @@ it('formats money from hundredths', () => {
   expect(formatMoney(0, 'USD')).toBe('USD 0.00')
   expect(formatMoney(99999999999999, 'SGD')).toBe('SGD 999,999,999,999.99')
   expect(formatMoney(-1240, 'SGD')).toBe('SGD -12.40')
+})
+
+it('formats an amount from hundredths as the number that money has, with no currency', () => {
+  expect(formatAmount(123456)).toBe('1,234.56')
+  expect(formatAmount(1240)).toBe('12.40')
+  expect(formatAmount(5)).toBe('0.05')
+  expect(formatAmount(0)).toBe('0.00')
+  expect(formatAmount(99999999999999)).toBe('999,999,999,999.99')
+  expect(formatAmount(-1240)).toBe('-12.40')
 })
 
 it('formats a short date as seen in the time zone', () => {
@@ -70,15 +79,6 @@ it('describes every statement day with its English ordinal ending', () => {
       )
     }
   }
-})
-
-it('formats what was spent a currency at a time, and nothing spent as none of the currency given', () => {
-  const sgd = { currency: 'SGD', amountMinor: 124696 }
-  const usd = { currency: 'USD', amountMinor: 500 }
-
-  expect(formatSpend([sgd, usd], 'SGD')).toBe('SGD 1,246.96 + USD 5.00')
-  expect(formatSpend([usd], 'SGD')).toBe('USD 5.00')
-  expect(formatSpend([], 'SGD')).toBe('SGD 0.00')
 })
 
 it("describes what a card's window holds, and when it starts again", () => {

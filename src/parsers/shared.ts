@@ -1,5 +1,5 @@
-// What the parsers of the banks' alerts have in common: how the text of an alert is spaced, and how an amount, a
-// merchant's name and a time in Singapore are read from it.
+// What the parsers of the banks' alerts have in common: how the text of an alert is spaced, how an amount, a
+// merchant's name and a time in Singapore are read from it, and how far the date that it states is gone by.
 //
 // Email text can be hostile. Of the two patterns here, one matches a run of blanks and nothing after it, and the
 // other holds no repetition, so neither can backtrack.
@@ -11,6 +11,13 @@ const SENTENCE_END = /\.(?: |$)/
 
 // Singapore is eight hours ahead of UTC all year round.
 const SINGAPORE_OFFSET = 8 * 3600
+
+/**
+ * How far what an alert states of when its purchase was made may be from when its email came: two days, in seconds.
+ * A bank sends an alert as the purchase is made, so a date further off than that, such as a day of another year, is
+ * not gone by, and the purchase is dated by the email instead.
+ */
+export const MAX_FROM_EMAIL = 2 * 24 * 3600
 
 /**
  * The text with every run of blanks as one space. The sentence of an alert can arrive wrapped across lines, or

@@ -5,29 +5,27 @@ import { currentWindow } from './window'
 
 /**
  * How many of the purchases in a card's window are read at once: the latest of them. A request has little CPU time
- * and Telegram takes a few messages at a time, and no card comes near this many purchases in a month.
+ * and Telegram takes a few messages at a time, and no card comes near this many purchases in a month. The rich
+ * message that lists them has a row for each, and Telegram takes 500 blocks and rows in one: see RichMessage.
  */
 export const WINDOW_LIMIT = 200
 
 /**
- * The category that a purchase on the card starts in. Null when the card is linked to no product, and when nothing
- * settles where the purchase belongs, which leaves it for its user to sort.
+ * The category that is stored for a new purchase on the card. Null when the card is linked to no product, and when
+ * no rule of its product places the purchase: see `startingCategory`.
  */
-export async function startingCategoryOn(
-  store: Store,
+export function startingCategoryOn(
   card: Card | undefined,
   purchase: { currency: string; merchant: string | null },
-): Promise<string | null> {
+): string | null {
   const product = productOf(card?.product)
-  if (!product) return null
-  const remembered = purchase.merchant ? await store.rememberedCategory(product.key, purchase.merchant) : null
-  return startingCategory(product, purchase, remembered)
+  return product ? startingCategory(product, purchase) : null
 }
 
 /**
- * Sorts the purchases in the card's current window that the product's own rules settle, and that are not sorted
- * yet. This is for a card that has just been linked to the product: its purchases until then were stored unsorted,
- * and the categories that only a rule gives have no button to choose them by.
+ * Sorts the purchases in the card's current window that the product's own rules settle, and that no category is
+ * stored for yet. This is for a card that has just been linked to the product: its purchases until then were stored
+ * with no category, and the categories that only a rule gives have no button to choose them by.
  */
 export async function sortByRules(
   store: Store,
@@ -40,7 +38,7 @@ export async function sortByRules(
   const purchases = await store.listTransactions(card.last4, start.getTime() / 1000, end.getTime() / 1000, WINDOW_LIMIT)
   const sorted = new Map<string, number[]>()
   for (const purchase of purchases) {
-    const category = purchase.category === null ? startingCategory(product, purchase, null) : null
+    const category = purchase.category === null ? startingCategory(product, purchase) : null
     if (category) sorted.set(category, [...(sorted.get(category) ?? []), purchase.id])
   }
   // One statement for each category that a rule gives, which is a few at most.

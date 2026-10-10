@@ -23,6 +23,9 @@ export default defineConfig(async () => {
             PUBLIC_BASE_URL: 'https://spend-tracker.test',
             OPERATOR_NAME: 'Example Operator',
             OPERATOR_CONTACT: 'privacy@spend-tracker.test',
+            // With a key the bot has its assistant. AI_BASE_URL and AI_MODEL are left out, as a service may leave
+            // them: test/assistant.test.ts sets them where it is about them.
+            AI_API_KEY: 'test-ai-key',
           },
           // No test may reach the network. A test that needs an outside
           // service replaces fetch, as test/webhook.test.ts does for Telegram.

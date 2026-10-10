@@ -3,12 +3,17 @@ import type { WindowRule } from '../domain/window'
 
 const thousands = new Intl.NumberFormat('en-US')
 
-/** Money from hundredths of a unit: 123456 in SGD is "SGD 1,234.56". */
-export function formatMoney(amountMinor: number, currency: string): string {
+/** An amount from hundredths of a unit, with no currency: 123456 is "1,234.56". */
+export function formatAmount(amountMinor: number): string {
   const sign = amountMinor < 0 ? '-' : ''
   const amount = Math.abs(amountMinor)
   const cents = String(amount % 100).padStart(2, '0')
-  return `${currency} ${sign}${thousands.format(Math.floor(amount / 100))}.${cents}`
+  return `${sign}${thousands.format(Math.floor(amount / 100))}.${cents}`
+}
+
+/** Money from hundredths of a unit: 123456 in SGD is "SGD 1,234.56". */
+export function formatMoney(amountMinor: number, currency: string): string {
+  return `${currency} ${formatAmount(amountMinor)}`
 }
 
 /** A day and month as seen in the time zone, such as "16 Oct". */
@@ -48,12 +53,6 @@ export function describeTotals({ window, totals, count }: CardTotals, timeZone: 
   const amounts = totals.map((total) => formatMoney(total.amountMinor, total.currency)).join(' + ')
   const spent = count === 0 ? 'no purchases' : `${amounts} in ${count} ${count === 1 ? 'purchase' : 'purchases'}`
   return `${spent}, resets ${formatShortDate(window.end, timeZone)}`
-}
-
-/** What was spent, a currency at a time, such as "SGD 12.40 + USD 5.00". Nothing spent is none of `currency`. */
-export function formatSpend(amounts: { currency: string; amountMinor: number }[], currency: string): string {
-  if (amounts.length === 0) return formatMoney(0, currency)
-  return amounts.map((amount) => formatMoney(amount.amountMinor, amount.currency)).join(' + ')
 }
 
 export function maskLast4(last4: string): string {

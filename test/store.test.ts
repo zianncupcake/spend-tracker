@@ -4,6 +4,7 @@ import {
   deleteUser,
   findOrCreateUser,
   findUser,
+  MAX_BY_HAND_PER_DAY,
   MAX_CARDS,
   setTimezone,
   storeFor,
@@ -195,6 +196,32 @@ describe('a store', () => {
     expect(await store.sumByCurrency('1234', ...ANY_TIME)).toEqual([{ currency: 'SGD', amountMinor: 1000, count: 1 }])
   })
 
+  it('inserts no purchase added by hand beyond the most that a user may add in 24 hours', async () => {
+    const store = await newStore()
+    const other = await newStore()
+    const byHand = (number: number) => purchase({ sourceId: `manual:${number}`, parser: 'manual' })
+    const ids: (number | null)[] = []
+    for (let number = 1; number < MAX_BY_HAND_PER_DAY; number++) ids.push(await store.insertTransaction(byHand(number)))
+
+    expect(MAX_BY_HAND_PER_DAY).toBe(100)
+    expect(ids).not.toContain(null)
+    // There is room for one more, and only for one: not even for two that come together.
+    const together = await Promise.all([store.insertTransaction(byHand(100)), store.insertTransaction(byHand(101))])
+    expect(together.filter((id) => id !== null)).toHaveLength(1)
+    expect(await store.insertTransaction(byHand(102))).toBeNull()
+    // The limit is each user's own. And it is on what is added by hand: a purchase from an alert is stored anyway.
+    expect(await other.insertTransaction(byHand(1))).not.toBeNull()
+    expect(await store.insertTransaction(purchase({ sourceId: 'msg-1' }))).not.toBeNull()
+
+    // One that has been taken out was a row written all the same, so it makes no room.
+    expect(await store.removeTransaction(ids[0] ?? 0)).not.toBeNull()
+    expect(await store.insertTransaction(byHand(103))).toBeNull()
+    // One that was added 24 hours ago does.
+    await db.prepare('UPDATE transactions SET created_at = unixepoch() - 86400 WHERE id = ?').bind(ids[1]).run()
+    expect(await store.insertTransaction(byHand(104))).not.toBeNull()
+    expect(await store.insertTransaction(byHand(105))).toBeNull()
+  })
+
   it('sums one card per currency from start up to, but not including, end', async () => {
     const store = await newStore()
     const rows: [sourceId: string, occurredAt: number, amountMinor: number, currency: string, cardLast4: string][] = [
@@ -316,7 +343,7 @@ describe('the purchases of a store', () => {
     const rows: [amountMinor: number, currency: string, category: string | null, at?: number, last4?: string][] = [
       [100, 'SGD', 'online'],
       [20, 'SGD', 'online'],
-      [3, 'SGD', 'mobile'],
+      [3, 'SGD', 'other'],
       [4000, 'SGD', null],
       [50000, 'USD', 'fx'],
       [600000, 'USD', null],
@@ -330,11 +357,11 @@ describe('the purchases of a store', () => {
     }
     await other.insertTransaction(purchase({ amountMinor: 7000000, occurredAt: 1500, category: 'online' }))
 
-    // In each currency, those that are not sorted come first.
+    // In each currency, those that no category is stored for come first.
     expect(await store.sumByCategory('1234', 1000, 2000)).toEqual([
       { currency: 'SGD', category: null, amountMinor: 4000, count: 1 },
-      { currency: 'SGD', category: 'mobile', amountMinor: 3, count: 1 },
       { currency: 'SGD', category: 'online', amountMinor: 120, count: 2 },
+      { currency: 'SGD', category: 'other', amountMinor: 3, count: 1 },
       { currency: 'USD', category: null, amountMinor: 600000, count: 1 },
       { currency: 'USD', category: 'fx', amountMinor: 50000, count: 1 },
     ])
@@ -342,38 +369,27 @@ describe('the purchases of a store', () => {
   })
 
   it('are found by their ids, each by its own user only', async () => {
-    const { store, id } = await storeWith({ category: 'mobile' })
+    const { store, id } = await storeWith({ category: 'other' })
     const { store: other, id: theirs } = await storeWith({ amountMinor: 7 })
 
-    expect(await store.findTransaction(id)).toEqual({ ...STORED, id, parser: 'example-bank', category: 'mobile' })
+    expect(await store.findTransaction(id)).toEqual({ ...STORED, id, parser: 'example-bank', category: 'other' })
     expect(await store.findTransaction(theirs)).toBeNull()
     expect(await other.findTransaction(id)).toBeNull()
     expect(await store.findTransaction(999_999_999)).toBeNull()
   })
 
-  it('are looked through for the earliest that is not sorted, on one card and in a stretch of time', async () => {
-    const store = await newStore()
-    const other = await newStore()
-    const rows: [sourceId: string, occurredAt: number, category: string | null, cardLast4?: string][] = [
-      ['before', 999, null],
-      ['sorted', 1000, 'online'],
-      ['later', 1800, null],
-      ['earlier', 1500, null],
-      ['same-second', 1500, null],
-      ['other-card', 1200, null, '5678'],
-      ['at-end', 2000, null],
-    ]
-    const ids: Record<string, number | null> = {}
-    for (const [sourceId, occurredAt, category, cardLast4 = '1234'] of rows) {
-      ids[sourceId] = await store.insertTransaction(purchase({ sourceId, occurredAt, category, cardLast4 }))
-    }
-    await other.insertTransaction(purchase({ occurredAt: 1100 }))
+  it('are found by the source ids they are stored under, taken out or not, each by its own user only', async () => {
+    const { store, id } = await storeWith({ sourceId: 'manual:7', parser: 'manual', category: 'other' })
+    const { store: other } = await storeWith({ sourceId: 'manual:8' })
 
-    // Of two in the same second, the one that was stored first.
-    expect(await store.oldestUnsorted('1234', 1000, 2000)).toMatchObject({ id: ids.earlier, occurredAt: 1500 })
-    expect(await store.oldestUnsorted('5678', 1000, 2000)).toMatchObject({ id: ids['other-card'] })
-    expect(await store.oldestUnsorted('1234', 1600, 1800)).toBeNull()
-    expect(await store.oldestUnsorted('0000', ...ANY_TIME)).toBeNull()
+    const found = { ...STORED, id, parser: 'manual', category: 'other' }
+    expect(await store.findBySourceId('manual:7')).toEqual({ ...found, removedAt: null })
+    expect(await store.findBySourceId('manual:8')).toBeNull()
+    expect(await other.findBySourceId('manual:7')).toBeNull()
+
+    // One that was taken out is still found, with when it was: it is what keeps its source from being stored again.
+    await store.removeTransaction(id)
+    expect(await store.findBySourceId('manual:7')).toEqual({ ...found, removedAt: expect.any(Number) })
   })
 
   it('are sorted one at a time: once into a category, and by their own user only', async () => {
@@ -383,11 +399,11 @@ describe('the purchases of a store', () => {
     expect(await store.setCategory(id, 'online')).toBe(true)
     // It is there already. So of two requests that sort it the same way, the second changes nothing.
     expect(await store.setCategory(id, 'online')).toBe(false)
-    expect(await store.setCategory(id, 'mobile')).toBe(true)
+    expect(await store.setCategory(id, 'other')).toBe(true)
     expect(await store.setCategory(theirs, 'online')).toBe(false)
     expect(await store.setCategory(999_999_999, 'online')).toBe(false)
 
-    expect(await store.findTransaction(id)).toMatchObject({ category: 'mobile' })
+    expect(await store.findTransaction(id)).toMatchObject({ category: 'other' })
     expect(await other.findTransaction(theirs)).toMatchObject({ category: null })
   })
 
@@ -449,8 +465,7 @@ describe('the purchases of a store', () => {
     ])
     expect((await store.listTransactions(null, ...ANY_TIME, 10)).map((each) => each.id)).toEqual([kept])
     expect(await store.findTransaction(removed)).toBeNull()
-    expect(await store.oldestUnsorted('1234', ...ANY_TIME)).toMatchObject({ id: kept })
-    expect(await store.setCategory(removed, 'mobile')).toBe(false)
+    expect(await store.setCategory(removed, 'other')).toBe(false)
     // The row is still there, so the alert that it was read from is not stored a second time.
     expect(await store.insertTransaction(purchase({ sourceId: 'msg-2' }))).toBeNull()
     const rows = await db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE id = ?').bind(removed).first('n')
@@ -459,55 +474,22 @@ describe('the purchases of a store', () => {
   })
 })
 
-describe('what a user chose for a merchant', () => {
-  it('is kept for each product, in place of what they chose before, and for their own purchases only', async () => {
-    const store = await newStore()
-    const other = await newStore()
+describe('the database', () => {
+  it('has no table of what a user chose for a merchant: a choice is kept for its own purchase alone', async () => {
+    const { results } = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all<{ name: string }>()
+    const tables = results.map((table) => table.name)
 
-    expect(await store.rememberedCategory('uob-evol', 'COFFEE PLACE')).toBeNull()
-
-    await store.rememberCategory('uob-evol', 'COFFEE PLACE', 'online')
-    await store.rememberCategory('uob-evol', 'COFFEE PLACE', 'mobile')
-    await store.rememberCategory('uob-evol', 'BOOK SHOP', 'other')
-    await store.rememberCategory('made-up-card', 'COFFEE PLACE', 'dining')
-    await other.rememberCategory('uob-evol', 'COFFEE PLACE', 'excluded')
-
-    expect(await store.rememberedCategory('uob-evol', 'COFFEE PLACE')).toBe('mobile')
-    expect(await store.rememberedCategory('uob-evol', 'BOOK SHOP')).toBe('other')
-    expect(await store.rememberedCategory('made-up-card', 'COFFEE PLACE')).toBe('dining')
-    expect(await store.rememberedCategory('made-up-card', 'BOOK SHOP')).toBeNull()
-    expect(await other.rememberedCategory('uob-evol', 'COFFEE PLACE')).toBe('excluded')
-    expect(await other.rememberedCategory('uob-evol', 'BOOK SHOP')).toBeNull()
+    // The migrations that came before made the table, and the last of them drops it.
+    expect(tables).toContain('transactions')
+    expect(tables).not.toContain('merchant_categories')
   })
 
-  it('goes by the text of the merchant in any case, and by all of the text', async () => {
-    const store = await newStore()
-    await store.rememberCategory('uob-evol', 'Coffee Place', 'online')
+  it('has no table of how many questions a user asked: a question is not counted', async () => {
+    const { results } = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all<{ name: string }>()
+    const tables = results.map((table) => table.name)
 
-    expect(await store.rememberedCategory('uob-evol', 'COFFEE PLACE')).toBe('online')
-    expect(await store.rememberedCategory('uob-evol', 'coffee place')).toBe('online')
-    expect(await store.rememberedCategory('uob-evol', 'COFFEE')).toBeNull()
-    expect(await store.rememberedCategory('uob-evol', 'COFFEE PLACE 2')).toBeNull()
-    expect(await store.rememberedCategory('uob-evol', 'COFFEE%')).toBeNull()
-
-    // A choice for the same merchant in another case takes the place of the first.
-    await store.rememberCategory('uob-evol', 'COFFEE PLACE', 'mobile')
-    expect(await store.rememberedCategory('uob-evol', 'Coffee Place')).toBe('mobile')
-  })
-
-  it("is deleted with its user, and nobody else's is", async () => {
-    const leaving = await findOrCreateUser(db, newTelegramId())
-    const staying = await findOrCreateUser(db, newTelegramId())
-    for (const user of [leaving, staying]) {
-      await storeFor(db, user.id).rememberCategory('uob-evol', 'COFFEE PLACE', 'online')
-    }
-
-    await deleteUser(db, leaving.id)
-
-    const { results } = await db
-      .prepare('SELECT owner_id FROM merchant_categories WHERE owner_id IN (?, ?)')
-      .bind(leaving.id, staying.id)
-      .all()
-    expect(results).toEqual([{ owner_id: staying.id }])
+    // An earlier migration made the table, and a later one drops it.
+    expect(tables).toContain('users')
+    expect(tables).not.toContain('ai_questions')
   })
 })

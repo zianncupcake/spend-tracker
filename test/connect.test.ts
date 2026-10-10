@@ -182,7 +182,7 @@ describe('GET /oauth/start', () => {
 describe('through the Worker', () => {
   /** Posts a message to the webhook as Telegram would, and returns what the bot then sent to Telegram. */
   async function tell(telegramId: number, text: string): Promise<string> {
-    const message = { text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } }
+    const message = { message_id: 1, text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } }
     const response = await exports.default.fetch('https://spend-tracker.test/telegram', {
       method: 'POST',
       headers: { 'X-Telegram-Bot-Api-Secret-Token': env.TELEGRAM_WEBHOOK_SECRET },

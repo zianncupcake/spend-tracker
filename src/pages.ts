@@ -63,14 +63,32 @@ amount, currency, merchant, last four card digits and time from each one. The te
   )
 }
 
-/** Keep this in step with what the code does: it is a promise to the people who connect their mail. */
-export function privacyPage(operator: Operator): Response {
+/**
+ * Keep this in step with what the code does: it is a promise to the people who connect their mail. `assistant` is
+ * whether the bot has one, which it has when the service is set up with an AI provider. What becomes of a question
+ * is said only where a question is answered.
+ */
+export function privacyPage(operator: Operator, assistant: boolean): Response {
   const name = escapeHtml(operator.name)
   const contact = escapeHtml(operator.contact)
+  // What the policy says of the assistant, each where it belongs: what is sent to the AI provider and when, and that
+  // provider among those who handle a user's data.
+  const questions = `
+<h2>Questions that you ask the bot</h2>
+<p>A text message that you send the bot is read as a question when it is not a command, and is not the 6-digit
+code of a sign-in. To answer it, your question and the card and purchase details needed to answer it are sent to an
+AI provider chosen by ${name}, which produces the answer. The details are those that the answering calls for, out
+of these: your time zone, the nickname, last four digits, window, totals and number of purchases of each of your
+cards and, of your purchases, the id, the time, the last four digits of the card, the amount, the currency, the
+merchant and the reward category. Nothing is sent to the AI provider unless you ask a question.</p>
+`
+  const provider = `
+<li>An AI provider chosen by ${name} answers the questions that you ask the bot. It is sent each question and the
+card and purchase details needed to answer it, and nothing unless you ask a question.</li>`
   return page(
     'Privacy policy - Spend Tracker',
     `<h1>Privacy policy</h1>
-<p>Last updated: 10 October 2026</p>
+<p>Last updated: 11 October 2026</p>
 <p>Spend Tracker is a Telegram bot that keeps a running total of what you spend on each credit card. It is run
 by ${name}. For any question about this policy or about your data, contact: ${contact}</p>
 
@@ -88,9 +106,9 @@ digits of the card and the time.</p>
 <li>The card product that you link a card to.</li>
 <li>The details taken from each alert: amount, currency, merchant, last four card digits and time, with the bank
 that sent the alert and an id of the alert, so that it is not counted twice.</li>
-<li>The purchases that you add by hand: the amount, currency, merchant and date that you give each one.</li>
-<li>The reward category that each purchase is sorted into, and the category that you last chose for a merchant,
-kept so that your later purchases there start in it.</li>
+<li>The purchases that you add by hand: the amount, currency, merchant and date that you give each one, with the
+id of the Telegram message that added it, so that it is not counted twice.</li>
+<li>The reward category that each purchase is sorted into.</li>
 <li>A purchase that you take out, which stays stored and marked as taken out, so that its alert is not counted
 again. It is left out of every total and list, and is deleted with everything else.</li>
 <li>The id of any alert that was fetched but not recorded, and why it was not, kept so that it is not fetched
@@ -100,7 +118,7 @@ again.</li>
 <li>A hash of your assistant access token, if you create one.</li>
 </ul>
 <p>The text of an email is never stored.</p>
-
+${assistant ? questions : ''}
 <h2>Who else handles your data</h2>
 <ul>
 <li>Cloudflare hosts the service and its database.</li>
@@ -108,7 +126,7 @@ again.</li>
 them.</li>
 <li>Google provides the sign-in.</li>
 <li>An AI assistant that you connect with your assistant access token can read your card totals and purchases,
-until you remove the token with <code>/mcp revoke</code>.</li>
+until you remove the token with <code>/mcp revoke</code>.</li>${assistant ? provider : ''}
 </ul>
 <p>Your data is not sold and is not used for advertising.</p>
 

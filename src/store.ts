@@ -18,7 +18,10 @@ export interface Transaction extends ParsedTransaction {
   /** The id of its row, which is what its user knows the purchase by. */
   id: number
   parser: string
-  /** The key of a category of its card's product. Null while the purchase is not sorted. */
+  /**
+   * The key of a category of its card's product. Null when none is stored for the purchase, which is then in the
+   * product's default category, if the product has one.
+   */
   category: string | null
 }
 
@@ -40,6 +43,14 @@ export const MAX_CARDS = 20
 
 /** What a transaction has for its parser when no alert was parsed for it: its user added the purchase by hand. */
 export const MANUAL = 'manual'
+
+/**
+ * How many purchases a user may add by hand in 24 hours. Each is a row written, and the database takes only so many
+ * writes in a day, from all of its users together.
+ */
+export const MAX_BY_HAND_PER_DAY = 100
+
+const DAY = 86_400
 
 export async function findOrCreateUser(db: D1Database, telegramId: number): Promise<User> {
   const find = () => db.prepare('SELECT id, timezone FROM users WHERE telegram_id = ?').bind(telegramId).first<User>()
@@ -135,18 +146,27 @@ export function storeFor(db: D1Database, ownerId: number) {
     /**
      * The id of the row that the transaction is stored in. Null, with nothing inserted, when the user already has
      * a transaction with that source id: one that they have taken out counts too, so it is never stored again.
+     * Null as well for a purchase added by hand, when the user has added as many in the last 24 hours as a user
+     * may. Those that they have taken out since count there too, as each of them was a row written.
      */
     async insertTransaction(transaction: NewTransaction): Promise<number | null> {
       const { sourceId, cardLast4, amountMinor, currency, merchant, occurredAt, parser, category = null } = transaction
+      // Only what is added by hand has a limit. The count is part of the statement, so purchases added at the same
+      // moment cannot go past the limit together.
+      const limit = parser === MANUAL ? MAX_BY_HAND_PER_DAY : null
       return db
         .prepare(
           `INSERT INTO transactions
              (owner_id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+           WHERE ?10 IS NULL OR ?10 > (
+             SELECT COUNT(*) FROM transactions
+             WHERE owner_id = ?1 AND parser = ?8 AND created_at > unixepoch() - ?11
+           )
            ON CONFLICT (owner_id, source_id) DO NOTHING
            RETURNING id`,
         )
-        .bind(ownerId, sourceId, cardLast4, amountMinor, currency, merchant, occurredAt, parser, category)
+        .bind(ownerId, sourceId, cardLast4, amountMinor, currency, merchant, occurredAt, parser, category, limit, DAY)
         .first<number>('id')
     },
 
@@ -166,8 +186,8 @@ export function storeFor(db: D1Database, ownerId: number) {
     },
 
     /**
-     * The same for one card, with each currency's purchases told apart by the category they are sorted into. Those
-     * that are not sorted have null for it.
+     * The same for one card, with each currency's purchases told apart by the category that is stored for them.
+     * Those that none is stored for have null for it.
      */
     async sumByCategory(cardLast4: string, start: number, end: number): Promise<CategoryTotal[]> {
       const { results } = await db
@@ -216,24 +236,22 @@ export function storeFor(db: D1Database, ownerId: number) {
         .first<Transaction>()
     },
 
-    /** The earliest of one card's purchases over `start <= occurred_at < end` that is not sorted yet, or null. */
-    async oldestUnsorted(cardLast4: string, start: number, end: number): Promise<Transaction | null> {
+    /**
+     * The user's purchase that is stored under the source id, with when they took it out: null while they have
+     * not. The whole is null when they have none under that id.
+     */
+    async findBySourceId(sourceId: string): Promise<(Transaction & { removedAt: number | null }) | null> {
       return db
         .prepare(
-          `SELECT ${TRANSACTION}
-           FROM transactions
-           WHERE owner_id = ? AND card_last4 = ? AND occurred_at >= ? AND occurred_at < ?
-             AND category IS NULL AND removed_at IS NULL
-           ORDER BY occurred_at, id
-           LIMIT 1`,
+          `SELECT ${TRANSACTION}, removed_at AS removedAt FROM transactions WHERE owner_id = ? AND source_id = ?`,
         )
-        .bind(ownerId, cardLast4, start, end)
-        .first<Transaction>()
+        .bind(ownerId, sourceId)
+        .first<Transaction & { removedAt: number | null }>()
     },
 
     /**
-     * Sorts a purchase into a category. False, with nothing changed, when it is in that category already, and when
-     * the user has no such purchase. So of two requests that sort it the same way, one finds it done.
+     * Stores a category for a purchase. False, with nothing changed, when that category is stored for it already,
+     * and when the user has no such purchase. So of two requests that move it the same way, one finds it done.
      */
     async setCategory(id: number, category: string): Promise<boolean> {
       const result = await db
@@ -246,7 +264,7 @@ export function storeFor(db: D1Database, ownerId: number) {
       return result.meta.changes > 0
     },
 
-    /** Sorts into a category those of the purchases with the ids that are not sorted yet. */
+    /** Stores a category for those of the purchases with the ids that none is stored for yet. */
     async sortUnsorted(ids: number[], category: string): Promise<void> {
       // The ids go in as one JSON array, as a statement takes 100 bound values at most.
       await db
@@ -272,25 +290,6 @@ export function storeFor(db: D1Database, ownerId: number) {
         )
         .bind(ownerId, id)
         .first<Transaction>()
-    },
-
-    /** Keeps the category that the user chose for a purchase at the merchant, in place of any they chose before. */
-    async rememberCategory(product: string, merchant: string, category: string): Promise<void> {
-      await db
-        .prepare(
-          `INSERT INTO merchant_categories (owner_id, product, merchant, category) VALUES (?, ?, ?, ?)
-           ON CONFLICT (owner_id, product, merchant) DO UPDATE SET category = excluded.category`,
-        )
-        .bind(ownerId, product, merchant, category)
-        .run()
-    },
-
-    /** The category that the user last chose for a purchase at the merchant on a card of the product, or null. */
-    async rememberedCategory(product: string, merchant: string): Promise<string | null> {
-      return db
-        .prepare('SELECT category FROM merchant_categories WHERE owner_id = ? AND product = ? AND merchant = ?')
-        .bind(ownerId, product, merchant)
-        .first<string>('category')
     },
   }
 }

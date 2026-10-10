@@ -1,9 +1,10 @@
 // What the MCP tools answer with: one user's card totals and purchases, as
 // plain data. Both tools only read, and only through that user's own store.
 
+import { categoryOf, productOf } from '../catalogue'
 import { cardTotals } from '../domain/totals'
 import { startOfDay } from '../domain/window'
-import type { Store } from '../store'
+import type { Card, Store } from '../store'
 
 /** How far back a listing goes when it is not told where to start. */
 export const DEFAULT_DAYS = 30
@@ -53,19 +54,25 @@ export async function listTransactions(store: Store, args: ListArguments, now: D
   const start = from === undefined ? end - DEFAULT_DAYS * DAY : boundary('from', from, timeZone)
   if (start >= end) throw new ToolError('`from` must be earlier than `to`, or than now when no `to` is given.')
 
-  const transactions = await store.listTransactions(await last4Of(store, card), start, end, limit)
+  const cards = await store.listCards()
+  const transactions = await store.listTransactions(last4Of(cards, card), start, end, limit)
+  const products = new Map(cards.map((each) => [each.last4, productOf(each.product)]))
   return {
     timeZone,
-    transactions: transactions.map(({ id, occurredAt, cardLast4, amountMinor, currency, merchant, category }) => ({
-      id,
-      time: new Date(occurredAt * 1000).toISOString(),
-      cardLast4,
-      amount: decimal(amountMinor),
-      amountMinor,
-      currency,
-      merchant,
-      category,
-    })),
+    transactions: transactions.map(({ id, occurredAt, cardLast4, amountMinor, currency, merchant, category }) => {
+      // The category that a purchase is in is what its card's product makes of the one that is stored for it.
+      const product = products.get(cardLast4)
+      return {
+        id,
+        time: new Date(occurredAt * 1000).toISOString(),
+        cardLast4,
+        amount: decimal(amountMinor),
+        amountMinor,
+        currency,
+        merchant,
+        category: product ? categoryOf(product, category) : category,
+      }
+    }),
   }
 }
 
@@ -86,10 +93,9 @@ function boundary(name: 'from' | 'to', value: string, timeZone: string): number 
   throw new ToolError(`\`${name}\` must be a date such as 2026-10-01, or an instant such as 2026-10-01T09:30:00+08:00.`)
 }
 
-/** The last four digits of the card with the nickname. Null when no card was asked for. */
-async function last4Of(store: Store, nickname: string | undefined): Promise<string | null> {
+/** The last four digits of the one of the user's `cards` with the nickname. Null when no card was asked for. */
+function last4Of(cards: Card[], nickname: string | undefined): string | null {
   if (nickname === undefined) return null
-  const cards = await store.listCards()
   const card = cards.find((each) => each.nickname === nickname)
   if (card) return card.last4
   const nicknames = cards.map((each) => each.nickname).join(', ')
