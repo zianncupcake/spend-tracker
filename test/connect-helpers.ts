@@ -9,7 +9,7 @@ import type { MessageEntity, Outgoing, RichMessage } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
 import { AI_URL, type Completion } from './ai-helpers'
 import { headersOf, type Message } from './gmail-helpers'
-import { newTelegramId } from './helpers'
+import { linesOf, newTelegramId } from './helpers'
 
 // What the tests of Google sign-in and of the mail checker share: a stand-in
 // for Google, Telegram and the AI provider, a clock, an outbox, chats with the
@@ -355,6 +355,22 @@ export function openChat() {
     return { answer: answered.find((each) => each.pressId === pressId)?.text, sent: posted.slice(beforePosted) }
   }
 
+  /**
+   * Sends the bot a message and returns the rich message that is its one reply, which is taken out of `sentRich`.
+   * The bot is to send no message of text with it, and to leave none in the chat: the placeholder of a question
+   * is gone by the time its answer is there.
+   */
+  async function rich(text: string): Promise<RichMessage> {
+    const [before, beforePosted, beforeRich] = [sent.length, posted.length, sentRich.length]
+    await send(text)
+    expect(sent).toHaveLength(before)
+    expect(posted).toHaveLength(beforePosted)
+    expect(sentRich).toHaveLength(beforeRich + 1)
+    const [reply] = sentRich.splice(beforeRich)
+    expect(reply.chatId).toBe(telegramId)
+    return reply.message
+  }
+
   return {
     telegramId,
     send,
@@ -384,20 +400,14 @@ export function openChat() {
       for (const reply of replies) expect(reply.chatId).toBe(telegramId)
       return replies
     },
+    rich,
     /**
-     * Sends the bot a message and returns the rich message that is its one reply, which is taken out of `sentRich`.
-     * The bot is to send no message of text with it, and to leave none in the chat: the placeholder of a question
-     * is gone by the time its answer is there.
+     * Sends the bot a message and returns what the rich message that is its one reply says, a line at a time: each
+     * row of a table with " | " between its cells, and the text of each paragraph. See `linesOf`. It is how a test
+     * reads a reply that is a table: /cards, /spend, /products and /status.
      */
-    async rich(text: string): Promise<RichMessage> {
-      const [before, beforePosted, beforeRich] = [sent.length, posted.length, sentRich.length]
-      await send(text)
-      expect(sent).toHaveLength(before)
-      expect(posted).toHaveLength(beforePosted)
-      expect(sentRich).toHaveLength(beforeRich + 1)
-      const [reply] = sentRich.splice(beforeRich)
-      expect(reply.chatId).toBe(telegramId)
-      return reply.message
+    async lines(text: string): Promise<string[]> {
+      return linesOf(await rich(text))
     },
     sendPhoto,
     /**

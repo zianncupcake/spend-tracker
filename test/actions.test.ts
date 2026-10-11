@@ -6,7 +6,19 @@ import { userOfToken } from '../src/mcp/tokens'
 import { TelegramError, type RichMessage } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
 import { connectedChat, connectionOf, deps, openChat, sentRich, signIn, type Posted } from './connect-helpers'
-import { bold, buy, headerRow, plain, purchaseRow, rowsOwnedBy, sumRow, tableOf, userCount } from './helpers'
+import {
+  bold,
+  buy,
+  CARDS_HEADER,
+  headerRow,
+  linesOf,
+  plain,
+  purchaseRow,
+  rowsOwnedBy,
+  sumRow,
+  tableOf,
+  userCount,
+} from './helpers'
 import { catchConsole } from './log-helpers'
 import {
   bought,
@@ -56,14 +68,15 @@ beforeEach(() => {
 /**
  * Has the assistant make these actions of every message that follows, after one request and a call for each. `how`
  * says what the answer has besides: whether the model had read before it asked for them, and how many of its calls
- * the assistant did not hand on.
+ * the assistant did not hand on. The model says with none of them that there is more to do: test/assistant.test.ts
+ * has a message whose things come an answer at a time.
  */
 function actingWith(how: { afterReading?: boolean; dropped?: number }, ...actions: Action[]): void {
   const { afterReading = false, dropped = 0 } = how
   answering.mockImplementation(async (_deps, _provider, _user, _question, taken) => {
     taken.requests++
     taken.tool_calls += actions.length
-    return { status: 'acting', actions, afterReading, dropped }
+    return { status: 'acting', actions, afterReading, dropped, more: false }
   })
 }
 
@@ -163,7 +176,7 @@ describe('what was spent, when the assistant makes out that it is to be shown', 
     expect(rich).toEqual([await chat.rich('/spend visa'), await chat.rich('/spend evol')])
   })
 
-  it('is shown in full for five cards at the most: a user with six is shown what /spend with no card named shows, in one message of text', async () => {
+  it('is shown in full for five cards at the most: a user with six is shown what /spend with no card named shows, which is one table of them all', async () => {
     const chat = openChat()
     for (let card = 1; card <= 5; card++) await chat.say(`/addcard card-${card} 000${card} calendar`)
     await buy(await chat.userId(), { cardLast4: '0003' })
@@ -174,11 +187,13 @@ describe('what was spent, when the assistant makes out that it is to be shown', 
     await chat.say('/addcard card-6 0006 calendar')
     const { rich, texts } = await told(chat)
 
-    expect(rich).toEqual([])
-    const [said, ...more] = texts.map((message) => message.text)
+    // One rich message, and not six: a table with a row for each card.
+    const [shown, ...more] = rich
     expect(more).toEqual([])
-    expect(said).toContain('card-3 ••••0003: SGD 12.40 in 1 purchase, resets 1 Nov')
-    expect(said).toBe(await chat.say('/spend'))
+    expect(texts).toEqual([])
+    expect(linesOf(shown)).toHaveLength(1 + 6 + 2)
+    expect(linesOf(shown)).toContain('card-3 | SGD 12.40 | 1 | 29 Sep to 29 Oct | 1 Nov')
+    expect(shown).toEqual(await chat.rich('/spend'))
   })
 
   it('is answered with how to add a card, for a user who has none', async () => {
@@ -350,6 +365,67 @@ describe('a command that the assistant gives to be run', () => {
     )
   })
 
+  it('is run at once when it renames a card, and so is each of two in one message: each is answered with the command’s reply', async () => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    const coffee = await buy(userId)
+    acting(command('/renamecard visa travel'), command('/renamecard evol daily'))
+    const logged = catchConsole()
+
+    const { rich, texts } = await told(chat)
+
+    expect(rich).toEqual([])
+    expect(texts.map((message) => [message.text, message.buttons])).toEqual([
+      ['Renamed visa ••••1234 to travel.', undefined],
+      ['Renamed evol ••••5678 to daily.', undefined],
+    ])
+    const done = { kind: 'command', command: 'renamecard', outcome: 'done' }
+    expect(logged.events()).toEqual(loggedFor(userId, [done, done]))
+    // Each card is as it was but for its nickname, and its purchases are still its own: they go by its digits.
+    expect(await chat.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      'travel | ••••1234 | calendar month | -',
+      'daily | ••••5678 | calendar month | UOB EVOL Card',
+    ])
+    const shown = await chat.rich('/spend travel')
+    expect(shown.blocks[0]).toEqual(bold('travel ••••1234: 1 Oct to 31 Oct'))
+    expect(shown.blocks).toContainEqual(
+      tableOf(headerRow('SGD'), purchaseRow(coffee, '5 Oct', '12.40', 'COFFEE PLACE'), sumRow('Total', '12.40')),
+    )
+  })
+
+  it('is answered with the table that the command replies with, when it is one that shows things in a table', async () => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    const shows = ['/cards', '/products', '/status']
+    acting(...shows.map(command))
+    const logged = catchConsole()
+
+    const { rich, texts } = await told(chat)
+
+    // A rich message for each, in their order, and no text beside them.
+    expect(texts).toEqual([])
+    expect(rich.map((message) => linesOf(message)[0])).toEqual([
+      CARDS_HEADER,
+      'The card products whose reward rules are known:',
+      'Gmail | not connected',
+    ])
+    expect(linesOf(rich[0])).toEqual([
+      CARDS_HEADER,
+      'visa | ••••1234 | calendar month | -',
+      'evol | ••••5678 | calendar month | UOB EVOL Card',
+    ])
+    const done = (name: string) => ({ kind: 'command', command: name, outcome: 'done' })
+    expect(logged.events()).toEqual([
+      ...loggedFor(userId, ['cards', 'products', 'status'].map(done)).slice(0, 4),
+      { ...loggedFor(userId, [{}, {}, {}])[4], sent: 'rich' },
+    ])
+    // Each is what its user is sent when they send the command themselves.
+    const sentDirectly = []
+    for (const line of shows) sentDirectly.push(await chat.rich(line))
+    expect(rich).toEqual(sentDirectly)
+  })
+
   it('is not run when it removes or revokes: each of the five is asked about, with what it concerns, and changes nothing', async () => {
     const chat = await connectedChat('jane@example.test')
     await chat.say('/addcard evol 5678 calendar uob-evol')
@@ -401,7 +477,7 @@ describe('a command that the assistant gives to be run', () => {
     ])
     // Nothing was removed and nothing was revoked: the purchase, the card, the Gmail and the token are as they were.
     expect(await rowsOf(userId)).toMatchObject([{ id: purchase, removed_at: null }])
-    expect(await chat.say('/cards')).toContain('evol ••••5678')
+    expect(await chat.lines('/cards')).toContain('evol | ••••5678 | calendar month | UOB EVOL Card')
     expect(await connectionOf(userId)).toMatchObject({ email: 'jane@example.test', status: 'active' })
     expect(await tokenOf()).toBe(token)
   })
@@ -714,7 +790,7 @@ describe('what the model asks for after a tool has read for it', () => {
     ])
     // Nothing of the three was done: the time zone, the cards and the product are as they were.
     expect(await chat.say('/timezone')).toContain('Your time zone is Asia/Singapore.')
-    expect(await chat.say('/cards')).toBe('evol ••••5678: calendar month, UOB EVOL Card')
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••5678 | calendar month | UOB EVOL Card'])
 
     // A press of "Do it" then runs the one that its button holds, and the one that adds the purchases adds them.
     expect((await chat.press(texts[1], 'Do it')).sent.map((message) => message.text)).toEqual([TOKYO])
@@ -728,8 +804,51 @@ describe('what the model asks for after a tool has read for it', () => {
 
     const { rich, texts } = await told(chat)
 
+    // The reply is the table that the command replies with, and nothing beside it.
+    expect(texts).toEqual([])
+    expect(rich).toEqual([await chat.rich('/spend')])
+  })
+
+  it('has the renaming of a card wait for "Do it" too: nothing is renamed until the press, which renames the card', async () => {
+    const chat = await chatWithCard()
+    const userId = await chat.userId()
+    actingWith({ afterReading: true }, command('/renamecard  evol   daily'))
+    const logged = catchConsole()
+
+    const { rich, texts } = await told(chat)
+
+    // The line under the buttons is made from what the model's line was read to mean, and is none of its text.
     expect(rich).toEqual([])
-    expect(texts.map((message) => message.text)).toEqual([await chat.say('/spend')])
+    expect(texts.map((message) => [message.text, message.buttons])).toEqual([
+      ['Rename evol ••••5678 to daily?', buttonsFor('/renamecard evol daily')],
+    ])
+    const action = { event: 'action', user: userId, kind: 'command', command: 'renamecard' }
+    expect(logged.events('action')).toEqual([{ ...action, outcome: 'asked' }])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••5678 | calendar month | UOB EVOL Card'])
+
+    const pressed = await chat.press(texts[0], 'Do it')
+
+    expect(pressed.answer).toBe('Done.')
+    expect(pressed.sent.map((message) => message.text)).toEqual(['Renamed evol ••••5678 to daily.'])
+    expect(texts[0].text).toBe('Rename evol ••••5678 to daily?\nDone.')
+    expect(texts[0].buttons).toBeUndefined()
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'daily | ••••5678 | calendar month | UOB EVOL Card'])
+    const press = { event: 'confirm_press', user: userId, command: 'renamecard', outcome: 'done' }
+    expect(logged.events('confirm_press')).toEqual([press])
+  })
+
+  it.each<[what: string, line: string, said: string]>([
+    ['a card that its user has not got', '/renamecard visa daily', 'You have no card called visa.'],
+    ['a card to the nickname that it has', '/renamecard evol evol', 'You already have a card called evol.'],
+  ])('has nothing asked where there is nothing to rename: for %s, what the command would say, and no buttons', async (_, line, said) => {
+    const chat = await chatWithCard()
+    actingWith({ afterReading: true }, command(line))
+    const logged = catchConsole()
+
+    const { texts } = await told(chat)
+
+    expect(texts.map((message) => [message.text, message.buttons])).toEqual([[said, undefined]])
+    expect(logged.events('action')).toMatchObject([{ command: 'renamecard', outcome: 'refused' }])
   })
 })
 

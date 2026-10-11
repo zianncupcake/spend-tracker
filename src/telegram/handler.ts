@@ -1,4 +1,4 @@
-import { answerQuestion, type Action } from '../ai/assistant'
+import { answerQuestion, type Action, type Answer } from '../ai/assistant'
 import { asPhotoCard, MAX_PURCHASES_PER_PHOTO, readPhoto, type PhotoReading } from '../ai/photo'
 import type { AiProvider } from '../ai/provider'
 import { categoriesOf, categoryName, categoryOf, choicesOf, productOf, products } from '../catalogue'
@@ -40,6 +40,7 @@ import {
   type RichBlock,
   type RichMessage,
   type RichText,
+  type TableCell,
 } from './api'
 import {
   carriedNotes,
@@ -50,6 +51,7 @@ import {
   describeWindow,
   formatShortDate,
   formatShortDateTime,
+  formatTotals,
   maskLast4,
   shortDateIn,
 } from './format'
@@ -283,7 +285,7 @@ interface Doing extends Adding {
   begun: boolean
 }
 
-/** How many queries the actions of one answer may still run: see ACTION_QUERIES. */
+/** How many queries the things that are done for one message may still run: see ACTION_QUERIES. */
 interface Room {
   left: number
 }
@@ -323,6 +325,19 @@ interface Carried {
  * room left for it, and `late` when the time of whoever waits was up.
  */
 type Came = Carried | 'full' | 'late'
+
+/**
+ * What the carrying out of the actions of one answer came to: the replies, in their order, and what came of each
+ * action. `outcomes` is there when every action was carried out, and is missing when the carrying out ended at one
+ * that failed, or at one that there was no room for: the model is then asked for nothing more.
+ */
+interface Acted {
+  replies: Sent[]
+  outcomes?: Carried['outcome'][]
+}
+
+/** An answer of the assistant's that asks for things to be done: see `Answer` in ../ai/assistant. */
+type Acting = Extract<Answer, { status: 'acting' }>
 
 /** Purchases that are stored on one card: its last four digits, and the card, when their user has one with those. */
 interface OnCard {
@@ -421,6 +436,7 @@ const COMMAND_NAMES = [
   'products',
   'product',
   'removecard',
+  'renamecard',
   'spend',
   'add',
   'remove',
@@ -436,17 +452,28 @@ const COMMAND_NAMES = [
 
 /**
  * The commands that the assistant has run at once, as if their user had sent them: the adding of a card, the
- * linking of one to a product and the changing of the time zone, each of which is undone in one step, and those
- * that only show things. It is a list of what is run, and not of what is not: a command that the bot is given later
- * is run for no model until somebody puts it here. See runAsked for what becomes of every other line.
+ * renaming of one, the linking of one to a product and the changing of the time zone, each of which is undone in
+ * one step, and those that only show things. It is a list of what is run, and not of what is not: a command that the
+ * bot is given later is run for no model until somebody puts it here. See runAsked for what becomes of every other
+ * line.
  */
-const RUN_AT_ONCE = ['addcard', 'product', 'timezone', 'cards', 'spend', 'sort', 'products', 'status'] as const
+const RUN_AT_ONCE = [
+  'addcard',
+  'renamecard',
+  'product',
+  'timezone',
+  'cards',
+  'spend',
+  'sort',
+  'products',
+  'status',
+] as const
 
 /**
  * Those of them that change something. They are asked about first, as the commands below are, when the model had
  * read with a tool before it asked for them: see Asking.
  */
-const CHANGING = ['addcard', 'product', 'timezone'] as const
+const CHANGING = ['addcard', 'renamecard', 'product', 'timezone'] as const
 
 /**
  * The commands that are asked about first, whatever the model had read: those that remove or revoke. They are the
@@ -463,15 +490,16 @@ const ASKED_FIRST = ['remove', 'removecard', 'disconnect', 'mcp', 'connect'] as 
 const CONFIRMABLE = [...ASKED_FIRST, ...CHANGING] as const
 
 /**
- * The most queries that the actions of one answer may run between them, each counted at the most that it can run.
- * An action that there is no room left for is not begun, and neither is any after it: see act.
+ * The most queries that the things which are done for one message may run between them, each counted at the most
+ * that it can run: the actions of all the answers that the model gives to the message, when it gives them one at a
+ * time. An action that there is no room left for is not begun, and neither is any after it: see act.
  *
- * A request may run 50 queries, and the answering has run its own by the time anything is done. Two of them are
- * run for every answer: one for the user, and one for their cards. The calls of the tool that reads can have run
- * twelve besides, whether they gave the model a listing or were told what was wrong with them: six of them are
- * answered, and a listing is two queries. See MAX_TOOL_CALLS in ../ai/assistant. That is 14 at the most, so the
- * actions of an answer leave a request inside the 50, whether or not anything was read for the model before it
- * asked for them.
+ * A request may run 50 queries, and the answering runs its own. Two of them are run for every message: one for the
+ * user, and one for their cards. The calls of the tool that reads can run twelve besides, whether they give the
+ * model a listing or are told what is wrong with them: six of them are answered for a question, however many
+ * answers it has, and a listing is two queries. See MAX_TOOL_CALLS in ../ai/assistant. That is 14 at the most, so
+ * the actions leave a request inside the 50, whether or not anything was read for the model before it asked for
+ * them.
  */
 const ACTION_QUERIES = 30
 
@@ -510,11 +538,14 @@ const SORT_USAGE = 'Usage:\n/sort <nickname>\n/sort <purchase id>'
 
 const PRODUCT_USAGE = 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'
 
+const RENAME_CARD_USAGE = 'Usage: /renamecard <nickname> <new nickname>'
+
 const COMMANDS = `Commands:
 /addcard <nickname> <last4> statement <day> - track a card by statement cycle; <day> is the day of the month it closes
 /addcard <nickname> <last4> calendar - track a card by calendar month
 /cards - list your cards
 /removecard <nickname> - stop tracking a card
+/renamecard <nickname> <new nickname> - give a card another nickname
 /spend - what you have spent on each card in its current window
 /spend <nickname> - every purchase on one card in its current window
 /add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant
@@ -627,6 +658,12 @@ const NOT_DONE =
 const NO_MORE =
   'The bot does only so much for one message. What is not answered above was not done: ask for it again, a little ' +
   'at a time.'
+
+/**
+ * What is said after the replies to what was done, when the model said that there was more to do and could not be
+ * asked what: the provider refused the request, or did not answer it in time. See actInRounds.
+ */
+const REST_NOT_DONE = 'The rest of what you asked for was not done. Ask for it again.'
 
 /** What goes before a command that is too long to ride under a button: see confirmButtons. */
 const SEND_YOURSELF = 'The bot does this only when you send the command yourself:'
@@ -1049,16 +1086,11 @@ async function reply(
     case '/cards': {
       const cards = await storeFor(db, (await user()).id).listCards()
       if (cards.length === 0) return NO_CARDS
-      return cards.map(describeCard).join('\n')
+      return cardsReply(cards)
     }
 
     case '/products':
-      return [
-        'The card products whose reward rules are known:',
-        ...products.map((product) => `${product.key} - ${product.name}`),
-        '',
-        'To link a card to one, send /product <nickname> <product key>. Or add the key to the end of /addcard.',
-      ].join('\n')
+      return productsReply()
 
     case '/product': {
       const [nickname = '', key = ''] = args
@@ -1083,6 +1115,18 @@ async function reply(
       return removed ? `Removed ${nickname}.` : `You have no card called ${nickname}.`
     }
 
+    case '/renamecard': {
+      const [nickname = '', renamed = ''] = args
+      if (args.length !== 2 || !NICKNAME.test(nickname) || !NICKNAME.test(renamed)) return RENAME_CARD_USAGE
+      const store = storeFor(db, (await user()).id)
+      const card = (await store.listCards()).find((each) => each.nickname === nickname)
+      if (!card) return `You have no card called ${nickname}.`
+      // The store gives no card a nickname that a card of its user's has already, which the card's own is too. The
+      // card's digits, its window and its product stay as they are, and its purchases go by its digits.
+      const done = await store.renameCard(nickname, renamed)
+      return done ? `Renamed ${label(card)} to ${renamed}.` : `You already have a card called ${renamed}.`
+    }
+
     case '/spend': {
       const [nickname = ''] = args
       if (args.length > 1 || (args.length === 1 && !NICKNAME.test(nickname))) return 'Usage:\n/spend\n/spend <nickname>'
@@ -1094,14 +1138,7 @@ async function reply(
         const card = cards.find((each) => each.nickname === nickname)
         return card ? spendDetail(store, card, now(), timezone) : `You have no card called ${nickname}.`
       }
-      const totals = await cardTotals(store, cards, now(), timezone)
-      // Under each card comes which days of purchases its total counts, when they are not those of its window, and
-      // why is said once for them all: a line of both under each of twenty cards is more than a message takes. One
-      // formatter writes all the dates: see shortDateIn.
-      const shortDate = shortDateIn(timezone)
-      const lines = totals.flatMap((each) => [spendLine(each, timezone), ...countedDays(each.window, shortDate)])
-      const why = totals.some(({ window }) => window.counts) ? [COUNTED_BY_POSTING] : []
-      return [...lines, '', ...why, 'Totals are estimated from bank alerts.'].join('\n')
+      return spendReply(await cardTotals(store, cards, now(), timezone), timezone)
     }
 
     case '/add': {
@@ -1257,8 +1294,8 @@ function whatIsSent({ ai }: Deps, ofQuestion: string): string[] {
  * answer takes the seconds that a model takes over it: see sendLater for what its user is shown in the meantime.
  *
  * The assistant answers, or makes out what the message asks the bot to do. What it makes out is done here, and by
- * nothing of its own: see act. `messageId` is Telegram's id of the message, which purchases that it asks to have
- * added are stored under.
+ * nothing of its own: see actInRounds. `messageId` is Telegram's id of the message, which purchases that it asks to
+ * have added are stored under.
  */
 function ask(
   deps: Deps,
@@ -1298,16 +1335,9 @@ function ask(
           // The placeholder says to ask again when it is still there in half a minute, which is not to be said of a
           // message that things are done for.
           await instead(DOING)
-          const { actions, afterReading, dropped } = result
           const room: Room = { left: ACTION_QUERIES }
-          const replies = await act(deps, { user, telegramId, messageId, doing, room, afterReading }, actions)
-          if (!replies) return outOfTime()
-          // What the model asked for and the assistant did not hand on was not done either, and is not passed over
-          // in silence: the reply ends with the line that says so, once, however many those were.
-          const last = replies.at(-1)
-          const said = Array.isArray(last) ? last.at(-1)?.text : undefined
-          if (dropped > 0 && said !== NOT_DONE) replies.push([{ text: NOT_DONE }])
-          return { outcome: 'acted', replies }
+          const replies = await actInRounds(deps, { user, telegramId, messageId, doing, room }, result, asked)
+          return replies ? { outcome: 'acted', replies } : outOfTime()
         }
         case 'busy':
           return { outcome: 'busy', notice: busyReply(result.retryAfter), error: result.error }
@@ -1332,10 +1362,71 @@ function ask(
 }
 
 /**
- * Carries out what the assistant made of a message: its actions, in their order. The model has only said what was
- * asked for. Each thing is done here, by the code that the bot's commands run, and each is answered with a reply of
- * its own, which is the bot's and not the model's. Returns the replies, or nothing when the time of whoever waits
- * was up: nothing is begun from then on.
+ * Carries out all that the assistant makes of one message, an answer at a time: the actions of the answer and then,
+ * while the model said that there is more to do and can be asked again, those of the answer that it gives next. A
+ * model gives one call to a message, so the things of a message that asks for several come one to an answer: see
+ * `next` of Answer in ../ai/assistant. Returns the replies to all of them, in their order, or nothing when the time
+ * of whoever waits was up. `how` is whom the things are done for, and within what: the room of queries and the
+ * `doing` are those of all the answers together. The count of the actions is kept in `noted`, for the log.
+ *
+ * The model is told what came of each thing in one of three texts, and nothing else: see toldOf. It is asked no
+ * more when a thing failed, or there was no room for one, as its user has been told that the rest was not done.
+ * When it said that there was more on the last request that a question may make, its user is told so too. What it
+ * writes when it is asked again goes to nobody, as it was told to write nothing. And when it cannot be asked again,
+ * the replies to what was done are kept, and its user is told that the rest was not: see REST_NOT_DONE.
+ */
+async function actInRounds(
+  deps: Deps,
+  how: Omit<Asking, 'afterReading'>,
+  first: Acting,
+  noted: Pick<Asked, 'actions'>,
+): Promise<Sent[] | undefined> {
+  const replies: Sent[] = []
+  let [before, dropped] = [0, 0]
+  for (let answer = first; ; ) {
+    const { actions, afterReading } = answer
+    noted.actions = before + actions.length
+    dropped += answer.dropped
+    const acted = await act(deps, { ...how, afterReading }, actions, before)
+    if (!acted) return undefined
+    replies.push(...acted.replies)
+    before += actions.length
+    if (!acted.outcomes) break
+    if (!answer.next) {
+      if (answer.more) replies.push([{ text: NO_MORE }])
+      break
+    }
+    const next = await answer.next(acted.outcomes.map(toldOf))
+    if (how.doing.late) return undefined
+    if (next.status !== 'acting') {
+      if (next.status !== 'answered') replies.push([{ text: REST_NOT_DONE }])
+      break
+    }
+    answer = next
+  }
+  // What the model asked for and the assistant did not hand on was not done either, and is not passed over in
+  // silence: the reply ends with the line that says so, once, however many those were.
+  const last = replies.at(-1)
+  const said = Array.isArray(last) ? last.at(-1)?.text : undefined
+  if (dropped > 0 && said !== NOT_DONE) replies.push([{ text: NOT_DONE }])
+  return replies
+}
+
+/**
+ * What the model is told came of a thing that it asked to have done, when it is asked what else there is to do. It
+ * is one of three texts, by what came of the thing, and nothing of the reply or of what is stored: a model can take
+ * what it is told for its user's wish, and can repeat it.
+ */
+function toldOf(outcome: Carried['outcome']): string {
+  if (outcome === 'done') return 'Done.'
+  return outcome === 'asked' ? 'The user has been asked to confirm it.' : 'It was not done.'
+}
+
+/**
+ * Carries out the actions of one answer of the assistant's, in their order. The model has only said what was asked
+ * for. Each thing is done here, by the code that the bot's commands run, and each is answered with a reply of its
+ * own, which is the bot's and not the model's. Returns the replies with what came of each action, or nothing when
+ * the time of whoever waits was up: nothing is begun from then on.
  *
  * What removes or revokes is not done here at all: it is asked about, and done when its user presses a button. And
  * the deleting of everything is done for nobody but a user who sends the command themselves. See runAsked.
@@ -1352,9 +1443,10 @@ function ask(
  * came of it and nothing of what it held.
  *
  * `how` is whom the actions are carried out for, and within what. What is done is noted in its `doing` as it is
- * done: see Doing.
+ * done: see Doing. `before` is how many things of the message were carried out for the answers before this one,
+ * which the user is told of when one of these fails.
  */
-async function act(deps: Deps, how: Asking, actions: Action[]): Promise<Sent[] | undefined> {
+async function act(deps: Deps, how: Asking, actions: Action[], before: number): Promise<Acted | undefined> {
   const { user, doing } = how
   // What the log has of each action besides what came of it. A command is known by its name in the bot's own list.
   const noted = actions.map((action): Pick<Events['action'], 'user' | 'kind' | 'command'> => {
@@ -1366,6 +1458,7 @@ async function act(deps: Deps, how: Asking, actions: Action[]): Promise<Sent[] |
     for (const each of noted.slice(from)) log('action', { ...each, outcome: 'skipped' })
   }
   const replies: Sent[] = []
+  const outcomes: Carried['outcome'][] = []
 
   for (const [at, action] of actions.entries()) {
     if (doing.late) return undefined
@@ -1376,19 +1469,20 @@ async function act(deps: Deps, how: Asking, actions: Action[]): Promise<Sent[] |
       if (came === 'full') {
         replies.push([{ text: NO_MORE }])
         skip(at)
-        break
+        return { replies }
       }
       replies.push(...came.replies)
+      outcomes.push(came.outcome)
       log('action', { ...noted[at], outcome: came.outcome, stored: came.stored, held: came.held })
     } catch (error) {
       // Nothing of the error's message is logged: it could quote what the action held, or what is stored.
       logFailure('action', error, { ...noted[at], outcome: 'failed' })
-      replies.push([{ text: wentWrong(at, actions.length) }])
+      replies.push([{ text: wentWrong(before + at, before + actions.length) }])
       skip(at + 1)
-      break
+      return { replies }
     }
   }
-  return replies
+  return { replies, outcomes }
 }
 
 /** Carries out one action: see act. */
@@ -1444,7 +1538,7 @@ function wentWrong(answered: number, asked: number): string {
  * `nickname` is the card to show, as the assistant gave it, or nothing for every card. One card is shown as /spend
  * with its nickname shows it: see spendDetail. Every card is shown so too, each in a reply of its own and in the
  * order that /cards lists them in, when their user has no more of them than SHOWN_IN_FULL. A user with more is
- * shown what /spend with no card named shows: a line for each card, in one message.
+ * shown what /spend with no card named shows: a row for each card, in the one table of one message.
  *
  * The assistant gives the nickname of a card that the model was told of, and of no other. When that card is there no
  * longer, the reply is that something could not be done. It does not say the nickname back, which is a model's text.
@@ -1638,8 +1732,9 @@ async function runAsked(deps: Deps, how: Asking, line: string): Promise<Came> {
  * read to mean, and is none of the model's text.
  *
  * Where there is nothing that the command could do, it is answered with what the command itself would say of that,
- * and with no buttons: a purchase or a card that the user has not got, a Gmail that is not connected, and one that
- * is connected already. A line that the command would not take is answered with that it could not be done.
+ * and with no buttons: a purchase or a card that the user has not got, a nickname that a card of theirs has
+ * already, a Gmail that is not connected, and one that is connected already. A line that the command would not take
+ * is answered with that it could not be done.
  */
 async function confirmFor(
   deps: Deps,
@@ -1707,6 +1802,17 @@ async function confirmFor(
       const window = card.windowType === 'statement' ? `statement ${card.statementDay}` : 'calendar'
       const words = ['/addcard', card.nickname, card.last4, window, ...(card.product ? [card.product] : [])]
       return confirmation(words.join(' '), [{ text: 'Add this card?' }, { text: describeCard(card) }])
+    }
+    case 'renamecard': {
+      const [nickname = '', renamed = ''] = args
+      if (args.length !== 2 || !NICKNAME.test(nickname) || !NICKNAME.test(renamed)) return declined(NOT_DONE)
+      const cards = await storeFor(db, user.id).listCards()
+      const card = cards.find((each) => each.nickname === nickname)
+      if (!card) return declined(`You have no card called ${nickname}.`)
+      // The card's own nickname is one that a card has already, as it is to the command.
+      const taken = cards.some((each) => each.nickname === renamed)
+      if (taken) return declined(`You already have a card called ${renamed}.`)
+      return confirmation(`/renamecard ${nickname} ${renamed}`, [{ text: `Rename ${label(card)} to ${renamed}?` }])
     }
     case 'product': {
       const [nickname = '', key = ''] = args
@@ -2726,7 +2832,10 @@ function label(card: Card): string {
   return `${card.nickname} ${maskLast4(card.last4)}`
 }
 
-/** A card as /cards lists it: with its window and, when it is linked to one, the name of its product. */
+/**
+ * A card in one line, with its window and, when it is linked to one, the name of its product: as the bot says which
+ * card it has added, and as /cards lists a card when its reply is sent as text.
+ */
 function describeCard(card: Card): string {
   const product = productOf(card.product)
   return `${label(card)}: ${describeWindow(card)}${product ? `, ${product.name}` : ''}`
@@ -2734,6 +2843,94 @@ function describeCard(card: Card): string {
 
 function spendLine(each: CardTotals, timeZone: string): string {
   return `${label(each.card)}: ${describeTotals(each, timeZone)}`
+}
+
+// The replies that set values out in one table, so that each value is under a header, or beside a name, that says
+// what it is: those to /cards, to /spend with no card named, to /products and to /status. Each is one rich message.
+// As text, which is sent when Telegram does not take the rich message, each is the lines that the command replied
+// with before it had a table.
+
+/**
+ * A table of a rich message, drawn with lines: the row that names its columns, when it has one, and its rows.
+ * `right` are the columns whose cells are set to the right, as amounts and counts are in the tables of purchases.
+ */
+function tableOf(header: string[] | undefined, rows: string[][], right: number[] = []): RichBlock {
+  const cell = (text: string, column: number): TableCell =>
+    right.includes(column) ? { text, align: 'right' } : { text }
+  const named = (header ?? []).map((text, column): TableCell => ({ ...cell(text, column), is_header: true }))
+  const cells = [...(header ? [named] : []), ...rows.map((row) => row.map(cell))]
+  return { type: 'table', cells, is_bordered: true }
+}
+
+/** A reply that is one rich message of the blocks. `text` makes the text that is sent in its place: see Tabled. */
+function tabled(blocks: RichBlock[], text: () => string): Tabled {
+  return { rich: { blocks, skip_entity_detection: true }, asText: () => [{ text: text() }] }
+}
+
+/** A line of a reply as a block of its rich message. */
+function paragraphOf(text: string): RichBlock {
+  return { type: 'paragraph', text }
+}
+
+/**
+ * A user's cards, as /cards shows them: one table, with a row for each card. A card that is linked to no product
+ * has a dash where the name of its product would be, as a purchase with no merchant has one for its merchant. As
+ * text, it is a line for each card: see describeCard.
+ */
+function cardsReply(cards: Card[]): Tabled {
+  const rows = cards.map((card) => [
+    card.nickname,
+    maskLast4(card.last4),
+    describeWindow(card),
+    productOf(card.product)?.name ?? '-',
+  ])
+  return tabled([tableOf(['Nickname', 'Card', 'Window', 'Product'], rows)], () => cards.map(describeCard).join('\n'))
+}
+
+/**
+ * What a user has spent on each of their cards in its current window, as /spend with no card named shows it: one
+ * table, with a row for each card, and under it why some days are counted and that the totals are estimates.
+ *
+ * `Spent` is what the card's window comes to, a currency at a time. Nothing spent is none of the card's own
+ * currency, as in the tables of /spend with a card. `Counted` is the days of the purchases that the total counts,
+ * which are the window's own or some days earlier than those: see currentWindow. `Resets` is the day on which the
+ * total starts again, which is the first day of the next window. Why the days are other than the window's own is
+ * said once for all the cards, when it is so of any.
+ *
+ * As text, a card has a line, and under that which days its total counts, when they are not its window's own.
+ */
+function spendReply(totals: CardTotals[], timeZone: string): Tabled {
+  // One formatter writes all the dates: see shortDateIn.
+  const shortDate = shortDateIn(timeZone)
+  const why = totals.some(({ window }) => window.counts) ? [COUNTED_BY_POSTING] : []
+  const below = [...why, 'Totals are estimated from bank alerts.']
+  const rows = totals.map(({ card, window, totals: spent, count }) => {
+    const nothing = [{ currency: productOf(card.product)?.homeCurrency ?? DEFAULT_CURRENCY, amountMinor: 0 }]
+    const { start, end } = window.counts ?? window
+    // The last day that is counted is the one before the end, which is the first that is not.
+    const counted = `${shortDate(start)} to ${shortDate(new Date(end.getTime() - 1))}`
+    const resets = shortDate(window.end)
+    return [card.nickname, formatTotals(spent.length > 0 ? spent : nothing), String(count), counted, resets]
+  })
+  const table = tableOf(['Nickname', 'Spent', 'Purchases', 'Counted', 'Resets'], rows, [1, 2])
+  return tabled([table, ...below.map(paragraphOf)], () => {
+    const lines = totals.flatMap((each) => [spendLine(each, timeZone), ...countedDays(each.window, shortDate)])
+    return [...lines, '', ...below].join('\n')
+  })
+}
+
+/**
+ * The card products whose reward rules are known, as /products shows them: a table of the key of each and its name,
+ * under the line that says what they are and over the one that says how a card is linked to one. As text, a
+ * product has a line.
+ */
+function productsReply(): Tabled {
+  const above = 'The card products whose reward rules are known:'
+  const below = 'To link a card to one, send /product <nickname> <product key>. Or add the key to the end of /addcard.'
+  const rows = products.map(({ key, name }) => [key, name])
+  return tabled([paragraphOf(above), tableOf(['Key', 'Product'], rows), paragraphOf(below)], () =>
+    [above, ...products.map(({ key, name }) => `${key} - ${name}`), '', below].join('\n'),
+  )
 }
 
 /**
@@ -2808,15 +3005,37 @@ async function spendDetail(store: Store, card: Card, now: Date, timeZone: string
   }
 }
 
-function statusReply(connection: Connection | null, summary: MailSummary, timeZone: string): string {
+/**
+ * Whether a user's Gmail is connected and what has been read from it, as /status shows it: one table with no row of
+ * headers, in which a row is what a value is and the value. Whose Gmail it is comes first, and how it stands when
+ * there is one. Under the table is what there is to do about it, when there is anything: to connect it, or to
+ * connect it again. As text, it is three lines.
+ */
+function statusReply(connection: Connection | null, summary: MailSummary, timeZone: string): Tabled {
   const { lastCheckedAt, purchases, unparsed } = summary
   const checked = lastCheckedAt === null ? 'not yet' : formatShortDateTime(new Date(lastCheckedAt * 1000), timeZone)
-  return [
-    gmailStatus(connection),
-    `Alerts last fully checked: ${checked}`,
-    `Last ${STATUS_DAYS} days: ${purchases} ${purchases === 1 ? 'purchase' : 'purchases'} recorded, ` +
-      `${unparsed} ${unparsed === 1 ? 'alert' : 'alerts'} could not be read`,
-  ].join('\n')
+  const active = connection?.status === 'active'
+  const gmail = connection
+    ? [
+        ['Gmail', connection.email],
+        ['Status', active ? 'connected' : 'needs reconnecting'],
+      ]
+    : [['Gmail', 'not connected']]
+  const rows = [
+    ...gmail,
+    ['Alerts last fully checked', checked],
+    [`Purchases recorded, last ${STATUS_DAYS} days`, String(purchases)],
+    [`Alerts that could not be read, last ${STATUS_DAYS} days`, String(unparsed)],
+  ]
+  const toDo = active ? [] : [`Send /connect to ${connection ? 'reconnect' : 'connect'} it.`]
+  return tabled([tableOf(undefined, rows), ...toDo.map(paragraphOf)], () =>
+    [
+      gmailStatus(connection),
+      `Alerts last fully checked: ${checked}`,
+      `Last ${STATUS_DAYS} days: ${purchases} ${purchases === 1 ? 'purchase' : 'purchases'} recorded, ` +
+        `${unparsed} ${unparsed === 1 ? 'alert' : 'alerts'} could not be read`,
+    ].join('\n'),
+  )
 }
 
 function gmailStatus(connection: Connection | null): string {

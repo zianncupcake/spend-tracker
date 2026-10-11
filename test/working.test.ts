@@ -946,7 +946,7 @@ describe('a request that Telegram does not answer', () => {
   it('is given up on when it is the reply to a command, and the chat is told that something went wrong', async () => {
     timeoutsByFakeClock()
     const logged = catchConsole()
-    // Telegram does not answer the reply, and takes what comes after it.
+    // Telegram does not answer the reply, which is the table of /products, and takes what comes after it.
     const made = Promise.withResolvers<void>()
     telegram.mockImplementationOnce(() => {
       made.resolve()
@@ -962,12 +962,14 @@ describe('a request that Telegram does not answer', () => {
 
     // Telegram is told that the update was taken once the reply has been given up on, and not before.
     expect(await done).toBeUndefined()
-    const reply = expect.objectContaining({ chat_id: telegramId, text: expect.stringMatching(/^The card products/) })
-    expect(telegram.mock.calls).toEqual([['sendMessage', reply], said(telegramId, FAILED)])
+    // A rich message that Telegram did not answer is not sent again as text, as one that it refuses is: whether it
+    // took the first is not known.
+    const reply = expect.objectContaining({ chat_id: telegramId, rich_message: expect.anything() })
+    expect(telegram.mock.calls).toEqual([['sendRichMessage', reply], said(telegramId, FAILED)])
     // The reply had been made, so the command had been handled: it is the sending that was given up on.
     const line = { event: 'update', kind: 'command', command: 'products', outcome: 'failed', handled: true }
     expect(logged.events()).toEqual([
-      givenUp('sendMessage'),
+      givenUp('sendRichMessage'),
       { ...line, told: true, ms: 5_000, error: 'TimeoutError' },
     ])
   })

@@ -128,7 +128,7 @@ describe('purchases that the model was not sure of', () => {
     // The buttons are gone, and so is the batch.
     expect(asking.buttons).toBeUndefined()
     expect(await heldFor(userId)).toEqual([])
-    expect(await chat.say('/spend')).toContain('evol ••••5678: SGD 27.40 in 4 purchases, resets 1 Nov')
+    expect(await chat.lines('/spend')).toContain('evol | SGD 27.40 | 4 | 29 Sep to 29 Oct | 1 Nov')
     // The log has the press as an update that was replied to, and what came of it: whose it was, and the counts.
     expect(logged.events().slice(0, 2)).toEqual([
       { event: 'held_press', user: userId, outcome: 'added', held: 2, stored: 2 },

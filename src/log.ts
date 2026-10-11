@@ -105,6 +105,7 @@ export interface Events {
       | 'products'
       | 'product'
       | 'removecard'
+      | 'renamecard'
       | 'spend'
       | 'add'
       | 'remove'
@@ -143,7 +144,16 @@ export interface Events {
   }
   confirm_press: {
     user: number
-    command?: 'remove' | 'removecard' | 'disconnect' | 'mcp' | 'connect' | 'addcard' | 'product' | 'timezone'
+    command?:
+      | 'remove'
+      | 'removecard'
+      | 'disconnect'
+      | 'mcp'
+      | 'connect'
+      | 'addcard'
+      | 'renamecard'
+      | 'product'
+      | 'timezone'
     outcome: 'done' | 'cancelled' | 'refused'
   }
   assistant_tool: {

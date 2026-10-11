@@ -3,19 +3,34 @@ import { describe, expect, it, vi } from 'vitest'
 import { depsFor, type Deps } from '../src/deps'
 import { ingestAlert } from '../src/ingest'
 import { findOrCreateUser, storeFor } from '../src/store'
-import { ChatBlockedError, TelegramError } from '../src/telegram/api'
+import { ChatBlockedError, TelegramError, type RichMessage } from '../src/telegram/api'
 import { handleUpdate, type Update } from '../src/telegram/handler'
-import { alertEmail, alertText, buy, newTelegramId, rowsOwnedBy, seconds, userCount } from './helpers'
+import {
+  alertEmail,
+  alertText,
+  buy,
+  CARDS_HEADER,
+  COUNTED_BY_POSTING,
+  ESTIMATED,
+  linesOf,
+  newTelegramId,
+  rowsOwnedBy,
+  seconds,
+  SPEND_HEADER,
+  userCount,
+} from './helpers'
 import { catchConsole } from './log-helpers'
 
 const NOW = new Date('2026-10-09T12:00:00+08:00')
 
 /**
- * Dependencies with a Messenger that records what it is asked to send. The service that they make has no assistant:
- * test/assistant.test.ts has the one that has, and what comes of a question there.
+ * Dependencies with a Messenger that records what it is asked to send: its messages of text, and its rich messages.
+ * The service that they make has no assistant: test/assistant.test.ts has the one that has, and what comes of a
+ * question there.
  */
 function recorder() {
   const sent: { chatId: number; text: string }[] = []
+  const rich: { chatId: number; message: RichMessage }[] = []
   const deps: Deps = {
     ...depsFor(env),
     ai: undefined,
@@ -24,15 +39,17 @@ function recorder() {
       async send(chatId, text) {
         sent.push({ chatId, text })
       },
-      // No reply here is a rich message, which /spend with a card is, and an answer of the assistant's:
-      // test/detail-rich.test.ts and test/assistant.test.ts have those. And no reply to a message answers a press
-      // or edits a message. test/sort.test.ts has the presses. Nor is anything here sent for its id, or deleted,
-      // as the placeholder of a question is: test/working.test.ts has that. And no file is fetched, as a photo's
-      // is: test/photo.test.ts has that.
+      // A reply that is a table is a rich message: /cards, /spend, /products and /status have one. The tables of
+      // /spend with a card are in test/detail-rich.test.ts, and an answer of the assistant's is in
+      // test/assistant.test.ts. No reply to a message answers a press or edits a message: test/sort.test.ts has the
+      // presses. Nor is anything here sent for its id, or deleted, as the placeholder of a question is:
+      // test/working.test.ts has that. And no file is fetched, as a photo's is: test/photo.test.ts has that.
       async post() {
         return 0
       },
-      async sendRich() {},
+      async sendRich(chatId, message) {
+        rich.push({ chatId, message })
+      },
       async answer() {},
       async edit() {},
       async delete() {},
@@ -42,7 +59,7 @@ function recorder() {
       },
     },
   }
-  return { sent, deps }
+  return { sent, rich, deps }
 }
 
 let lastMessage = 0
@@ -56,16 +73,48 @@ function privateMessage(telegramId: number, text: string): Update {
 /** A new user's private chat with the bot. */
 function openChat() {
   const telegramId = newTelegramId()
-  const { sent, deps } = recorder()
+  const { sent, rich, deps } = recorder()
+  /** Sends the bot a message and returns the rich message that is its one reply, with which no text is sent. */
+  const richReply = async (text: string): Promise<RichMessage> => {
+    sent.length = 0
+    rich.length = 0
+    await handleUpdate(deps, privateMessage(telegramId, text))
+    expect(sent).toEqual([])
+    expect(rich).toHaveLength(1)
+    expect(rich[0].chatId).toBe(telegramId)
+    return rich[0].message
+  }
   return {
     telegramId,
-    /** Sends the bot a message and returns its one reply. */
+    /** Sends the bot a message and returns its one reply, which is a message of text. */
     async say(text: string): Promise<string> {
       sent.length = 0
+      rich.length = 0
       await handleUpdate(deps, privateMessage(telegramId, text))
+      expect(rich).toEqual([])
       expect(sent).toHaveLength(1)
       expect(sent[0].chatId).toBe(telegramId)
       return sent[0].text
+    },
+    rich: richReply,
+    /**
+     * Sends the bot a message and returns what the rich message that is its one reply says, a line at a time: each
+     * row of a table with " | " between its cells, and the text of each paragraph. See `linesOf`.
+     */
+    async lines(text: string): Promise<string[]> {
+      return linesOf(await richReply(text))
+    },
+    /** Sends the bot a message and returns its one reply as text, whichever of the two the reply is. */
+    async reply(text: string): Promise<string> {
+      sent.length = 0
+      rich.length = 0
+      await handleUpdate(deps, privateMessage(telegramId, text))
+      expect([...sent, ...rich]).toHaveLength(1)
+      return [...sent.map((each) => each.text), ...rich.flatMap(({ message }) => linesOf(message))].join('\n')
+    },
+    /** Has Telegram take no rich message from here on, so that a reply that is one is sent as text. */
+    refuseRich() {
+      vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 400))
     },
     async user() {
       return findOrCreateUser(env.DB, telegramId)
@@ -85,6 +134,7 @@ describe('/start', () => {
       '/addcard',
       '/cards',
       '/removecard',
+      '/renamecard',
       '/spend',
       '/timezone',
       '/connect',
@@ -111,9 +161,13 @@ describe('/start', () => {
     expect(reply).toContain('/timezone <name> - change it, for example /timezone Asia/Tokyo')
   })
 
-  it('lists the commands for purchases and for card products', async () => {
+  it('lists the commands for purchases and for card products, and the one that renames a card', async () => {
     const lines = (await openChat().say('/start')).split('\n')
 
+    // The renaming of a card comes after the removing of one.
+    const removing = lines.indexOf('/removecard <nickname> - stop tracking a card')
+    expect(removing).toBeGreaterThan(-1)
+    expect(lines[removing + 1]).toBe('/renamecard <nickname> <new nickname> - give a card another nickname')
     for (const line of [
       '/spend <nickname> - every purchase on one card in its current window',
       '/add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant',
@@ -133,13 +187,17 @@ describe('/addcard and /cards', () => {
     const chat = openChat()
 
     const added = [await chat.say('/addcard visa 1234 statement 15'), await chat.say('/addcard amex 0005 calendar')]
-    const listed = await chat.say('/cards')
+    const listed = await chat.lines('/cards')
 
     expect(added).toEqual([
       'Added visa ••••1234: statement closes on the 15th of the month.',
       'Added amex ••••0005: calendar month.',
     ])
-    expect(listed).toBe('visa ••••1234: statement closes on the 15th of the month\namex ••••0005: calendar month')
+    expect(listed).toEqual([
+      CARDS_HEADER,
+      'visa | ••••1234 | statement closes on the 15th of the month | -',
+      'amex | ••••0005 | calendar month | -',
+    ])
   })
 
   it('accepts values at the limits', async () => {
@@ -149,10 +207,11 @@ describe('/addcard and /cards', () => {
     expect(await chat.say(`/addcard ${longest} 0000 statement 1`)).toContain('Added')
     expect(await chat.say('/addcard My_card-2 9999 statement 31')).toContain('Added')
 
-    expect(await chat.say('/cards')).toBe(
-      `${longest} ••••0000: statement closes on the 1st of the month\n` +
-        'My_card-2 ••••9999: statement closes on the 31st of the month',
-    )
+    expect(await chat.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      `${longest} | ••••0000 | statement closes on the 1st of the month | -`,
+      'My_card-2 | ••••9999 | statement closes on the 31st of the month | -',
+    ])
   })
 
   it.each([
@@ -191,7 +250,7 @@ describe('/addcard and /cards', () => {
     expect(await chat.say('/addcard visa 5678 calendar')).toContain('You already have a card')
     expect(await chat.say('/addcard other 1234 statement 15')).toContain('You already have a card')
 
-    expect(await chat.say('/cards')).toBe('visa ••••1234: calendar month')
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | -'])
   })
 
   it('says how to add a card when there are none', async () => {
@@ -214,20 +273,79 @@ describe('/addcard and /cards', () => {
       'You have 20 cards, which is as many as can be tracked. To add another, first remove one with ' +
         '/removecard <nickname>.',
     )
-    expect((await chat.say('/cards')).split('\n')).toHaveLength(20)
+    // A row for each card, under the row that names the columns.
+    expect(await chat.lines('/cards')).toHaveLength(1 + 20)
 
-    // /spend runs a query for each card, after one for the user and one for the cards. A request may run 50. Under
-    // each card is the line that says which days its total counts, which takes no query, and the whole is inside the
-    // 4,096 characters that a message of text may have.
+    // /spend runs a query for each card, after one for the user and one for the cards. A request may run 50. Its
+    // table has a row for each card too, and two lines under it.
     const queried = vi.spyOn(env.DB, 'prepare')
-    const reply = await chat.say('/spend')
-    expect(reply.split('\n')).toHaveLength(2 * 20 + 3)
-    expect(reply.length).toBeLessThan(4096)
+    expect(await chat.lines('/spend')).toHaveLength(1 + 20 + 2)
     expect(queried).toHaveBeenCalledTimes(1 + 1 + 20)
     queried.mockRestore()
 
     expect(await chat.say('/removecard card-1')).toBe('Removed card-1.')
     expect(await chat.say('/addcard another 9999 calendar')).toContain('Added')
+
+    // As text, which is what is sent when Telegram does not take the table, each card has a line and under it the
+    // line that says which days its total counts. The whole is inside the 4,096 characters that a message of text
+    // may have, and so are the cards.
+    chat.refuseRich()
+    const [spent, cards] = [await chat.say('/spend'), await chat.say('/cards')]
+    expect(spent.split('\n')).toHaveLength(2 * 20 + 3)
+    expect(spent.length).toBeLessThan(4096)
+    expect(cards.split('\n')).toHaveLength(20)
+  })
+})
+
+describe('/cards', () => {
+  /** A user with three cards: one that is linked to a product, between two that are linked to none. */
+  async function chatWithCards() {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 statement 5')
+    await chat.say('/addcard evol 5678 calendar uob-evol')
+    await chat.say('/addcard amex 0005 calendar')
+    return chat
+  }
+
+  it('is one table: a row for each card, in the order that they were added, under a row that says what each value is', async () => {
+    const chat = await chatWithCards()
+
+    // As Telegram is posted it: this is all of the `rich_message`, and no text is sent with it. A card that is
+    // linked to no product has a dash for its product.
+    const header = (text: string) => ({ text, is_header: true })
+    expect(await chat.rich('/cards')).toEqual({
+      skip_entity_detection: true,
+      blocks: [
+        {
+          type: 'table',
+          is_bordered: true,
+          cells: [
+            [header('Nickname'), header('Card'), header('Window'), header('Product')],
+            [
+              { text: 'visa' },
+              { text: '••••1234' },
+              { text: 'statement closes on the 5th of the month' },
+              { text: '-' },
+            ],
+            [{ text: 'evol' }, { text: '••••5678' }, { text: 'calendar month' }, { text: 'UOB EVOL Card' }],
+            [{ text: 'amex' }, { text: '••••0005' }, { text: 'calendar month' }, { text: '-' }],
+          ],
+        },
+      ],
+    })
+  })
+
+  it('is a line for each card, as it was before it was a table, when Telegram does not take the table', async () => {
+    const chat = await chatWithCards()
+    chat.refuseRich()
+
+    expect(await chat.say('/cards')).toBe(
+      [
+        'visa ••••1234: statement closes on the 5th of the month',
+        'evol ••••5678: calendar month, UOB EVOL Card',
+        'amex ••••0005: calendar month',
+      ].join('\n'),
+    )
   })
 })
 
@@ -239,7 +357,7 @@ describe('/removecard', () => {
 
     expect(await chat.say('/removecard visa')).toBe('Removed visa.')
 
-    expect(await chat.say('/cards')).toBe('amex ••••0005: calendar month')
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'amex | ••••0005 | calendar month | -'])
     expect(await chat.say('/removecard visa')).toBe('You have no card called visa.')
   })
 
@@ -247,6 +365,64 @@ describe('/removecard', () => {
 
   it.each(malformed)('answers "%s" with the usage', async (message) => {
     expect(await openChat().say(message)).toBe('Usage: /removecard <nickname>')
+  })
+})
+
+describe('/renamecard', () => {
+  it('gives a card another nickname, and leaves its digits, its window, its product and its purchases as they were', async () => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 statement 15 uob-evol') // 16 September to 15 October
+    await chat.say('/addcard amex 0005 calendar')
+    await buy((await chat.user()).id)
+
+    expect(await chat.say('/renamecard visa travel')).toBe('Renamed visa ••••1234 to travel.')
+
+    expect(await chat.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      'travel | ••••1234 | statement closes on the 15th of the month | UOB EVOL Card',
+      'amex | ••••0005 | calendar month | -',
+    ])
+    // A purchase goes by the digits of its card, so the card has it still: test/actions.test.ts has it in the tables
+    // of /spend with the new nickname.
+    expect(await chat.lines('/spend')).toContain('travel | SGD 12.40 | 1 | 14 Sep to 13 Oct | 16 Oct')
+    // The card is known by its new nickname only.
+    expect(await chat.say('/renamecard visa travel')).toBe('You have no card called visa.')
+  })
+
+  it.each<[what: string, message: string, said: string]>([
+    ['a card that there is not', '/renamecard evol travel', 'You have no card called evol.'],
+    ['a nickname that another card has', '/renamecard visa amex', 'You already have a card called amex.'],
+    ["the card's own nickname", '/renamecard visa visa', 'You already have a card called visa.'],
+  ])('renames nothing when it is given %s, and says so', async (_, message, said) => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+    await chat.say('/addcard amex 0005 calendar')
+
+    expect(await chat.say(message)).toBe(said)
+
+    expect(await chat.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      'visa | ••••1234 | calendar month | -',
+      'amex | ••••0005 | calendar month | -',
+    ])
+  })
+
+  const malformed = [
+    '/renamecard',
+    '/renamecard visa',
+    '/renamecard visa travel daily',
+    '/renamecard visa my!card',
+    '/renamecard my!card travel',
+    `/renamecard visa ${'a'.repeat(21)}`,
+  ]
+
+  it.each(malformed)('answers "%s" with the usage', async (message) => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+
+    expect(await chat.say(message)).toBe('Usage: /renamecard <nickname> <new nickname>')
+
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | -'])
   })
 })
 
@@ -270,8 +446,22 @@ describe('/spend', () => {
       expect((await ingestAlert(store, email)).status).toBe('stored')
     }
 
-    // Under each card is which days of purchases its total counts: the last two days of a window are counted in the
-    // next one. Why is said once, under them all.
+    // One table, with a row for each card: what its window comes to, a currency at a time, how many purchases that
+    // is, which days of purchases the total counts, and the day that the window ends. The last two days of a window
+    // are counted in the next one, of a statement and of a month. Why is said once, under the table. A card with no
+    // purchases has spent none of its own currency.
+    expect(await chat.lines('/spend')).toEqual([
+      SPEND_HEADER,
+      'visa | SGD 1,246.96 + USD 5.00 | 3 | 14 Sep to 13 Oct | 16 Oct',
+      'amex | SGD 20.00 | 1 | 29 Sep to 29 Oct | 1 Nov',
+      'spare | SGD 0.00 | 0 | 29 Sep to 29 Oct | 1 Nov',
+      COUNTED_BY_POSTING,
+      ESTIMATED,
+    ])
+
+    // As text, which is sent when Telegram does not take the table, it is what it was before it was a table: under
+    // each card is which days of purchases its total counts.
+    chat.refuseRich()
     expect(await chat.say('/spend')).toBe(
       [
         'visa ••••1234: SGD 1,246.96 + USD 5.00 in 3 purchases, resets 16 Oct',
@@ -281,11 +471,44 @@ describe('/spend', () => {
         'spare ••••9999: no purchases, resets 1 Nov',
         'The total counts purchases made from 29 Sep to 29 Oct.',
         '',
-        'A bank counts a purchase by the day it is posted, so one made in the last days of a cycle or a month is ' +
-          'counted in the next one.',
-        'Totals are estimated from bank alerts.',
+        COUNTED_BY_POSTING,
+        ESTIMATED,
       ].join('\n'),
     )
+  })
+
+  it('is one rich message as Telegram is posted it: the amounts and the counts are set to the right', async () => {
+    const chat = openChat()
+    await chat.say('/addcard evol 5678 statement 15 uob-evol')
+
+    // A card with no purchases has spent none of its product's own currency.
+    expect(await chat.rich('/spend')).toEqual({
+      skip_entity_detection: true,
+      blocks: [
+        {
+          type: 'table',
+          is_bordered: true,
+          cells: [
+            [
+              { text: 'Nickname', is_header: true },
+              { text: 'Spent', is_header: true, align: 'right' },
+              { text: 'Purchases', is_header: true, align: 'right' },
+              { text: 'Counted', is_header: true },
+              { text: 'Resets', is_header: true },
+            ],
+            [
+              { text: 'evol' },
+              { text: 'SGD 0.00', align: 'right' },
+              { text: '0', align: 'right' },
+              { text: '14 Sep to 13 Oct' },
+              { text: '16 Oct' },
+            ],
+          ],
+        },
+        { type: 'paragraph', text: COUNTED_BY_POSTING },
+        { type: 'paragraph', text: ESTIMATED },
+      ],
+    })
   })
 
   it('says how to add a card when there are none', async () => {
@@ -314,7 +537,8 @@ describe('/timezone', () => {
     for (const each of [chat, bystander]) await each.say('/addcard visa 1234 statement 10')
     // It is noon on 9 October in Singapore, the day before the statement closes: a purchase of today is counted in
     // the cycle that begins on the 11th, which is the current one from today.
-    expect(await chat.say('/spend')).toContain('visa ••••1234: no purchases, resets 11 Nov')
+    const fromToday = 'visa | SGD 0.00 | 0 | 9 Oct to 8 Nov | 11 Nov'
+    expect(await chat.lines('/spend')).toContain(fromToday)
 
     const reply = await chat.say('/timezone America/Los_Angeles')
 
@@ -322,8 +546,8 @@ describe('/timezone', () => {
     expect((await chat.user()).timezone).toBe('America/Los_Angeles')
     // In Los Angeles it is nine in the evening of the 8th, and the cycle that closes on the 10th has three hours to
     // go as the current one.
-    expect(await chat.say('/spend')).toContain('visa ••••1234: no purchases, resets 11 Oct')
-    expect(await bystander.say('/spend')).toContain('visa ••••1234: no purchases, resets 11 Nov')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 0.00 | 0 | 9 Sep to 8 Oct | 11 Oct')
+    expect(await bystander.lines('/spend')).toContain(fromToday)
   })
 
   it('takes a name in any case, and keeps it as the IANA list spells it', async () => {
@@ -485,7 +709,7 @@ describe('a message that was edited', () => {
 
   it('is answered with that the bot does not read it again, and the command that it now is is not run', async () => {
     const telegramId = newTelegramId()
-    const { sent, deps } = recorder()
+    const { sent, rich, deps } = recorder()
     await handleUpdate(deps, privateMessage(telegramId, '/addcard visa 1234 calendar'))
     const { message } = privateMessage(telegramId, '/removecard visa')
 
@@ -494,8 +718,9 @@ describe('a message that was edited', () => {
 
     expect(later).toBeUndefined()
     expect(sent.map((each) => each.text)).toEqual(['Added visa ••••1234: calendar month.', EDITED])
+    // The card is there still: the table of /cards has its row.
     await handleUpdate(deps, privateMessage(telegramId, '/cards'))
-    expect(sent.at(-1)).toEqual({ chatId: telegramId, text: 'visa ••••1234: calendar month' })
+    expect(rich.map((each) => linesOf(each.message))).toEqual([[CARDS_HEADER, 'visa | ••••1234 | calendar month | -']])
   })
 
   it('is answered so whatever it says, and for somebody whom nothing is stored about', async () => {
@@ -666,6 +891,7 @@ describe('what the log has of an update', () => {
     'products',
     'product',
     'removecard',
+    'renamecard',
     'spend',
     'add',
     'remove',
@@ -683,8 +909,8 @@ describe('what the log has of an update', () => {
     const chat = openChat()
     const logged = catchConsole()
 
-    // With nothing after it. What a command does with that is its own affair: it replies.
-    const reply = await chat.say(`/${name}`)
+    // With nothing after it. What a command does with that is its own affair: it replies, in text or in a table.
+    const reply = await chat.reply(`/${name}`)
 
     expect(logged.events('update')).toEqual([
       { event: 'update', kind: 'command', command: name, outcome: 'replied', ms: 0 },
@@ -698,10 +924,10 @@ describe('what the log has of an update', () => {
     // The names at the start of the lines of the list, each of them once: /spend is there with and without a card.
     const lines = (await chat.say('/help')).split('\n')
     const listed = [...new Set(lines.flatMap((line) => /^\/([a-z]+)/.exec(line)?.[1] ?? []))]
-    expect(listed).toHaveLength(15)
+    expect(listed).toHaveLength(16)
     const logged = catchConsole()
 
-    for (const name of listed) await chat.say(`/${name}`)
+    for (const name of listed) await chat.reply(`/${name}`)
 
     expect(logged.events('update').map((event) => event.command)).toEqual(listed)
   })
@@ -848,13 +1074,16 @@ describe('an update whose handling fails', () => {
   it('is logged as one that nobody was told of, when the chat is one that Telegram will send nothing to', async () => {
     const telegramId = newTelegramId()
     const { sent, deps } = recorder()
+    // The reply to /products is a rich message, which Telegram takes for the chat no more than it takes text.
     const send = vi.spyOn(deps.messenger, 'send').mockRejectedValue(new ChatBlockedError())
+    const sendRich = vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new ChatBlockedError())
     const logged = catchConsole()
 
     await handleUpdate(deps, privateMessage(telegramId, '/products'))
 
-    // The reply was tried, and nothing after it.
-    expect(send).toHaveBeenCalledTimes(1)
+    // The reply was tried, and nothing after it: not the reply as text, and not that something went wrong.
+    expect(sendRich).toHaveBeenCalledTimes(1)
+    expect(send).not.toHaveBeenCalled()
     expect(sent).toEqual([])
     const line = failedLine({ kind: 'command', command: 'products' }, true, false)
     expect(logged.events()).toEqual([{ ...line, error: 'ChatBlockedError', reason: 'chat_blocked' }])
@@ -863,6 +1092,9 @@ describe('an update whose handling fails', () => {
   it('is logged as one that nobody was told of, when what the chat was to be told cannot be sent either', async () => {
     const telegramId = newTelegramId()
     const { deps } = recorder()
+    // Telegram takes nothing: not the rich message that the reply to /products is, not the reply as text, which is
+    // sent in the place of that, and not what the chat is then to be told.
+    vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 502))
     const send = vi.spyOn(deps.messenger, 'send').mockRejectedValue(new TelegramError('sendMessage', 502))
     const logged = catchConsole()
 
@@ -937,7 +1169,7 @@ describe('an /add whose purchase is stored, when something fails after that', ()
     expect(logged.events()).toEqual([{ ...STORED, error: 'Error' }])
     expect(logged.text()).not.toContain('Lunch')
     // The purchase is stored, once.
-    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 12.50 in 1 purchase')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 12.50 | 1 | 29 Sep to 29 Oct | 1 Nov')
   })
 
   it('is told the same when it is the reply that Telegram refuses: sent again, its words would store another', async () => {
@@ -950,11 +1182,11 @@ describe('an /add whose purchase is stored, when something fails after that', ()
 
     expect(sent).toEqual([{ chatId: chat.telegramId, text: STORED_NO_REPLY }])
     expect(logged.events()).toEqual([{ ...STORED, error: 'Error', reason: 'http_error', status: 502 }])
-    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 12.50 in 1 purchase')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 12.50 | 1 | 29 Sep to 29 Oct | 1 Nov')
 
     // Which is what the advice is for: the same words in a new message are a second purchase.
     await chat.say('/add visa 12.50 Lunch')
-    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 25.00 in 2 purchases')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 25.00 | 2 | 29 Sep to 29 Oct | 1 Nov')
   })
 
   it('is told the same when Telegram delivers its message again, and it is the reply to that which fails', async () => {
@@ -971,7 +1203,7 @@ describe('an /add whose purchase is stored, when something fails after that', ()
 
     expect(sent).toEqual([{ chatId: chat.telegramId, text: STORED_NO_REPLY }])
     expect(logged.events()).toEqual([{ ...STORED, error: 'Error', reason: 'http_error', status: 502 }])
-    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 12.50 in 1 purchase')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 12.50 | 1 | 29 Sep to 29 Oct | 1 Nov')
   })
 })
 

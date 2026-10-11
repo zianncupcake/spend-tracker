@@ -167,6 +167,18 @@ export function linesOf({ blocks }: RichMessage): string[] {
   })
 }
 
+// The rows that name the columns of two of the bot's tables, as `linesOf` has a row: the first line of the reply to
+// /cards, and of the reply to /spend with no card named. A test says what such a reply holds with these.
+
+export const CARDS_HEADER = 'Nickname | Card | Window | Product'
+export const SPEND_HEADER = 'Nickname | Spent | Purchases | Counted | Resets'
+
+/** What /spend with no card named says under its table: why some days are counted, and that totals are estimates. */
+export const COUNTED_BY_POSTING =
+  'A bank counts a purchase by the day it is posted, so one made in the last days of a cycle or a month is counted ' +
+  'in the next one.'
+export const ESTIMATED = 'Totals are estimated from bank alerts.'
+
 // The two counts below read the tables directly, so they also see rows that a
 // per-user store would never return.
 

@@ -336,6 +336,36 @@ describe('a card and its product', () => {
   })
 })
 
+describe('a card and its nickname', () => {
+  it('is given another, with nothing else of the card changed: but none that a card of its user’s has already', async () => {
+    const store = await newStore()
+    const other = await newStore()
+    const linked = { windowType: 'statement', statementDay: 15, product: 'uob-evol' } as const
+    const main: Card = { nickname: 'main', last4: '1234', ...linked }
+    const spare: Card = { nickname: 'spare', last4: '9999', windowType: 'calendar' }
+    await store.addCard(main)
+    await store.addCard(spare)
+    // Another user calls a card of theirs what the first user's card is called, and one what it is renamed to.
+    const theirs: Card[] = [
+      { nickname: 'main', last4: '1234', windowType: 'calendar' },
+      { nickname: 'travel', last4: '5678', windowType: 'calendar' },
+    ]
+    for (const card of theirs) await other.addCard(card)
+
+    // Another card's nickname, the card's own and a card that there is not: nothing is changed for any of them.
+    expect(await store.renameCard('main', 'spare')).toBe(false)
+    expect(await store.renameCard('main', 'main')).toBe(false)
+    expect(await store.renameCard('missing', 'travel')).toBe(false)
+    expect(await store.listCards()).toEqual([main, spare])
+
+    expect(await store.renameCard('main', 'travel')).toBe(true)
+
+    // The card is where it was among the cards, with its digits, its window and its product.
+    expect(await store.listCards()).toEqual([{ ...main, nickname: 'travel' }, spare])
+    expect(await other.listCards()).toEqual(theirs)
+  })
+})
+
 describe('the purchases of a store', () => {
   it('are summed per currency and category for one card, from start up to, but not including, end', async () => {
     const store = await newStore()

@@ -14,8 +14,9 @@ last two days of a window the card's current window is the next one. A product c
 its cards (`daysCountedInNext`), and one whose terms count a purchase by the day that it was made says 0: a window
 then counts the purchases of its own days, and nothing is said of it. The window is still shown as the bank has it,
 every total follows, and nothing that is stored changes. The user is told: the message about a purchase that is
-counted in the next window says so and why, `/spend` says under each card which days its total counts and why, and
-`get_spending_summary` gives the card `countedFrom`. The rule is from UOB's terms for the EVOL card, which count
+counted in the next window says so and why, `/spend` has beside each card which days its total counts, and under
+them why, and `get_spending_summary` gives the card `countedFrom`. The rule is from UOB's terms for the EVOL card,
+which count
 spend that is "successfully charged and posted to the Card account in each Statement Month". HSBC's terms for the
 Revolution card count by the day of posting too: "the total amount of Eligible Transactions posted into HSBC's
 credit card system within each qualifying calendar month". So do OCBC's for the Rewards Card: "Spend will be
@@ -101,6 +102,45 @@ to five sign-ins that were never finished and have expired, and asks Google to r
 held, with the exception described under Connecting Gmail. And it deletes the purchases that the bot asked about
 and that nobody answered for in a day: see Adding purchases from a photo.
 
+The reply to `/status` is a table of two columns with no row of headers: a row is what a value is, and the value.
+`Gmail` is the address that is connected, or `not connected`. `Status` is `connected` or `needs reconnecting`, and
+is there only when a Gmail is connected. `Alerts last fully checked` is the day and the time, or `not yet`. Then
+come `Purchases recorded, last 30 days` and `Alerts that could not be read, last 30 days`, each a number. Under the
+table is what there is to do, when there is anything: "Send /connect to connect it.", or "Send /connect to
+reconnect it." As text, which is sent when Telegram does not take the table, it is three lines: a sentence on the
+Gmail, "Alerts last fully checked: ...", and "Last 30 days: 2 purchases recorded, 1 alert could not be read". See
+Cards and what they come to for what is common to the replies that are tables.
+
+## Cards and what they come to
+
+Four replies set their values out in a table, so that each value is under a header, or beside a name, that says
+what it is: those to `/cards`, to `/spend` with no card named, to `/products` and to `/status`. Each is one rich
+message, sent with `skip_entity_detection`, with its table drawn with lines: see Purchases one by one for what a
+rich message is. And each is kept as text too, which is what the command replied with before it had a table. The
+text is sent in the place of the rich message when Telegram answers that with an error.
+
+`/cards` lists a user's cards in one table, in the order in which they were added, with nothing above it or below
+it. Its columns are `Nickname`, `Card`, `Window` and `Product`: what the card is called, its last four digits
+behind four dots, "calendar month" or "statement closes on the 5th of the month", and the name of the product
+that the card is linked to, or `-` for a card that is linked to none. As text, a card is a line, as in "evol
+••••1234: statement closes on the 5th of the month, UOB EVOL Card". A user with no cards is told how to add one,
+in text.
+
+`/renamecard <nickname> <new nickname>` gives a card another nickname, when no card of its user's has that one
+already. Nothing else of the card changes: not its last four digits, not its window and not the product that it is
+linked to. Its purchases stay with it, each in the category that it was in, as a purchase is known by the last four
+digits of its card and not by the card's nickname.
+
+`/spend` with no card named has a row for each card, in the same order, in one table of five columns. `Nickname`
+is the card. `Spent` is what its current window comes to, a currency at a time, as in "SGD 12.40 + USD 5.00", and
+for a card with no purchases it is nothing of the card's own currency: "SGD 0.00". `Purchases` is how many that
+is. `Counted` is the days of purchases that the total counts, as in "29 Sep to 29 Oct", which are the window's own
+days or some days earlier: see the top of this file. `Resets` is the day on which the total starts again, which is
+the first day of the card's next window. The amounts and the counts are set to the right. Under the table is why
+the days that are counted are not the window's own, when that is so of any card, and then "Totals are estimated
+from bank alerts." As text, a card is a line, as in "visa ••••1234: SGD 12.40 in 1 purchase, resets 1 Nov", and
+under it is the line that says which days its total counts.
+
 ## Purchases one by one
 
 `/spend <nickname>` lists the purchases of a card's current window in a table, from the earliest on: the id of each,
@@ -159,6 +199,11 @@ product, which also says where the bank publishes its terms and what date those 
 three: the UOB EVOL Card (`uob-evol`), the HSBC Revolution Credit Card (`hsbc-revolution`) and the OCBC Rewards
 Card (`ocbc-rewards`). `/products` lists them, `/product <nickname> <product key>` links a card to one (`none` in
 place of the key unlinks it), and `/addcard` takes the key as a last word.
+
+The reply to `/products` is a table of two columns, `Key` and `Product`, with a row for each product: its key, and
+its name. Above the table is "The card products whose reward rules are known:", and under it is how a card is
+linked to one. As text, which is sent when Telegram does not take the table, a product is a line, as in "uob-evol
+- UOB EVOL Card", between those two.
 
 A purchase on a linked card is in one of the product's categories. A product can name one of them as its default:
 the category that a purchase is in unless something says otherwise. Two things say otherwise with nobody choosing,
@@ -419,38 +464,57 @@ paragraphs, and what is cut ends with an ellipsis. So does an answer that the mo
 ## Asking the bot to do things
 
 A message for the assistant can ask for something to be done: "show me what I spent on evol", "add 5.20 lunch to
-evol as other spend", "mark 57 as other spend", "set my time zone to Tokyo". The model works out what the user
-asked for, and the bot's own code does it. Beside the one tool that reads, the model is offered four that act:
-`show_spending`, `add_purchases`, `set_category` and `run_command`. A call of one does nothing. It ends the
-conversation with the model, and comes back from `answerQuestion` as an action (`Action` in
-`src/ai/assistant.ts`), which `act` in `src/telegram/handler.ts` carries out with the code that the commands run.
-The reply is the bot's too: the model is not asked again, so nothing that a model wrote ever says that something
-was done.
+evol as other spend", "mark 57 as other spend", "rename my visa card to travel", "set my time zone to Tokyo". The
+model works out what the user asked for, and the bot's own code does it. Beside the one tool that reads, the model
+is offered four that act: `show_spending`, `add_purchases`, `set_category` and `run_command`. A call of one does
+nothing. It comes back from `answerQuestion` as an action (`Action` in `src/ai/assistant.ts`), which `act` in
+`src/telegram/handler.ts` carries out with the code that the commands run. The reply is the bot's too: nothing that
+a model wrote ever says that something was done.
+
+The model gives one call to a message, however many things its user asked for: a message that asked for two
+cards to be renamed came back as the first renaming alone every time that it was tried, also when the model was
+told to call several tools at once. So each of the four tools takes a flag, `more`, by which the model says that
+its user asked for something else too, and the model is told to call one tool at a time. When it says that there
+is more, the bot does the thing and asks the model again, with what came of the thing as the answer to its call.
+That is one of three texts, and nothing else: "Done.", "The user has been asked to confirm it." for what waits
+for a button, and "It was not done." for anything else. Nothing of the bot's reply goes back to the model, and
+nothing that is stored. The replies are all sent together, in their order, when the last thing is done.
+
+A question may make four requests to the provider, and the things of a message come one to a request. So a message
+has four things done at the most, and three when the model looked purchases up first. When the model says that
+there is more on the last request, the reply ends with "The bot does only so much for one message. What is not
+answered above was not done: ask for it again, a little at a time." When a later request fails, as when the
+provider has had as many as it takes, or the time of the answering runs out, what was done stays done and is
+answered, and the reply ends with "The rest of what you asked for was not done. Ask for it again." The model is
+asked nothing more once a thing has failed, or there was no room for one. And what it writes when it is asked
+again goes to nobody, as it was told to write nothing: a message that asks for something to be done and asks a
+question besides has the thing done, and the question is not answered.
 
 What changes nothing, or can be undone in one step, is done at once: showing what was spent, adding purchases,
-sorting a purchase into a category, adding a card, linking a card to a product, changing the time zone, and the
-commands that only show things. What was spent is shown as `/spend <nickname>` shows it, by `spendDetail`: in a
-message for the card that the model named, or in one for each card when it named none and the user has five cards
-at the most. A user with more cards is sent the one message that `/spend` sends. Purchases are
+sorting a purchase into a category, adding a card, renaming a card, linking a card to a product, changing the time
+zone, and the commands that only show things. What was spent is shown as `/spend <nickname>` shows it, by
+`spendDetail`: in a message for the card that the model named, or in one for each card when it named none and the
+user has five cards at the most. A user with more cards is sent the one message that `/spend` sends. Purchases are
 added as those of a photo are, by `addRead`, under the id of the message, with the same limit and the same buttons
 for what is not clear, and a message has them added once. A purchase is sorted as a press of "Mark as" sorts one,
 when it is the user's, its card has a product, and the category is one that can be chosen for that product. A
 command is run by `reply`, as if its user had sent the line. Several things in one message are done in their
-order, five at the most, each with a reply of its own. When one fails, those before it stay done, and the user is
-told that it is those that are answered. When the model asked for more than the assistant handed on, the reply ends
-with the line that says that something could not be done. Before the first thing is done, the placeholder is made
+order, four at the most as said above, each with a reply of its own. When one fails, those before it stay done, and
+the user is told that it is those that are answered. Should a model ask for several things in one of its messages,
+five of them are taken, and when it asked for more than the assistant handed on, the reply ends with the line that
+says that something could not be done. Before the first thing is done, the placeholder is made
 to say to check `/spend` before asking again, as that of a photo says: what is done for a message is done again for
 one that is sent again. And when the reply cannot be made in its time, or cannot be sent, once the doing has begun,
 the notice is "What you asked for may have been done, but the bot could not reply to it. Check /spend before you
 ask again."
 
 The commands that are run for the assistant are listed, in `RUN_AT_ONCE` in `src/telegram/handler.ts`: `/addcard`,
-`/product` and `/timezone`, and those that only show things, which are `/cards`, `/spend`, `/sort`, `/products`
-and `/status`. It is a list of what is run and not of what is not, so that a command which the bot is given later
-is run for no model until somebody puts it there. Every line that is of none of these, and is not one that is
-asked about first, is answered with that it could not be done: `/start`, `/add`, whose purchases the model gives
-with `add_purchases`, the 6-digit code of a sign-in, a command that there is not, and a line that is no command,
-which would go to the assistant as a question and be the assistant asking itself.
+`/renamecard`, `/product` and `/timezone`, and those that only show things, which are `/cards`, `/spend`, `/sort`,
+`/products` and `/status`. It is a list of what is run and not of what is not, so that a command which the bot is
+given later is run for no model until somebody puts it there. Every line that is of none of these, and is not one
+that is asked about first, is answered with that it could not be done: `/start`, `/add`, whose purchases the model
+gives with `add_purchases`, the 6-digit code of a sign-in, a command that there is not, and a line that is no
+command, which would go to the assistant as a question and be the assistant asking itself.
 
 What removes or revokes waits for one tap: `/remove`, `/removecard`, `/disconnect`, `/mcp`, which replaces the
 token that there is, `/mcp revoke`, and `/connect`, which cancels a sign-in that is waiting for its code. None of
@@ -465,8 +529,9 @@ those two undoes or hides anything by failing. "Cancel" does nothing, and the me
 What the model asks for after a tool has read for it is asked about first too, where it would change something. A
 merchant's name is text that somebody else wrote, it reaches the model inside what a tool returns, and a model can
 take such text for its user's wish. So purchases that it then gives to be added are held whole, each asked about
-with the buttons as one that it was not sure of is, and `/addcard`, `/product` and `/timezone` wait for "Do it" as
-the commands that remove do. Sorting is done as before, and so is whatever only shows things.
+with the buttons as one that it was not sure of is, and `/addcard`, `/renamecard`, `/product` and `/timezone` wait
+for "Do it" as the commands that remove do: "Rename visa ••••1234 to travel?", say. Sorting is done as before, and
+so is whatever only shows things.
 
 What deletes everything is never done for the assistant. A line of `/delete`, whatever follows the command, is
 answered with what `/delete` answers when it is sent alone, which says to send `/delete confirm`: that is for the
@@ -474,7 +539,7 @@ user to send themselves.
 
 The command rides under the two buttons as the line that its user would send, in the 64 bytes that Telegram gives
 a button. What a press brings back is what a client sent, which can be anything. So a line in a button's data is
-run only when it is again a line of a command that a message can ask about, which are those six and the three that
+run only when it is again a line of a command that a message can ask about, which are those six and the four that
 are asked about after a reading, for the user who pressed, in their own private chat. Any other is answered with
 "That button no longer works.": a press cannot delete everything, and cannot run what no button was made for.
 Nothing keeps a press from being made twice. The message has no buttons after the first, and a command that is run
@@ -842,9 +907,12 @@ The bot:
     still in flight when the 27 seconds ended is counted too, and as a rule has no `ai_call` line: that line is
     written when a request ends, and the Worker does not wait for this one. `tool_calls`: how many calls of tools
     were answered, each of which has an `assistant_tool` line.
-  - `actions`: how many things the assistant made out to do. It is missing from a question that was answered. A
+  - `actions`: how many things the assistant made out to do, over all the requests of the question: a message
+    that asks for several has them made out one to a request. It is missing from a question that was answered. A
     `failed` or a `timeout` that has it is of a message whose reply could not be sent or made in time once the
-    doing had begun: its user was told to check `/spend` before asking again.
+    doing had begun: its user was told to check `/spend` before asking again. An `acted` whose last `ai_call` line
+    is of a failure is of a message whose later things were not made out: its user was told that the rest was not
+    done.
   - `ms`: how long it took in all, from before the placeholder was sent.
   - A question that was not answered has the fields of a failure too, which say why. A `failed` with the `error`
     `TimeoutError` is an answer that Telegram did not answer in its 5 seconds, and has a `telegram_failed` line
@@ -873,11 +941,11 @@ The bot:
 - `confirm_press`: the press of "Do it" or "Cancel" under a message that asked before a command was run. It is
   written before the `update` line of the press. `user`: who pressed. `command`: which command the button's line
   is of, out of those that a message can ask about: `remove`, `removecard`, `disconnect`, `mcp`, `connect`,
-  `addcard`, `product` and `timezone`. `outcome`: `done` when the command was run, `cancelled`, or `refused` for a
-  press that brought a line of no such command, which has no `command` and is answered with that its button no
-  longer works. A press by somebody whom nothing is stored about has no such line. A `done` is written once the
-  command has run, before its reply is sent: a `telegram_failed` line after it is of the reply, of the answer to
-  the press or of the edit, and only the first of those fails the press.
+  `addcard`, `renamecard`, `product` and `timezone`. `outcome`: `done` when the command was run, `cancelled`, or
+  `refused` for a press that brought a line of no such command, which has no `command` and is answered with that
+  its button no longer works. A press by somebody whom nothing is stored about has no such line. A `done` is
+  written once the command has run, before its reply is sent: a `telegram_failed` line after it is of the reply, of
+  the answer to the press or of the edit, and only the first of those fails the press.
 - `photo`: a photo, as its reading ends. That is after the response, as with a question, so a Worker that is ended
   before it is done writes no such line.
   - `user`: whose photo it was, or null when the reading ended before their row was read.
@@ -1117,8 +1185,9 @@ its CPU limit ended `exceededCpu`: that is from the documentation, as no such ru
 - The rich message of `/spend <nickname>` has not been looked at in Telegram's apps: how its tables are drawn there,
   and what an app from before rich messages shows of one. The text is sent in its place only when Telegram answers
   the request with an error, and it has no reason to do that for an app that cannot show the message. The same goes
-  for the rich message that an answer of the assistant's is sent as, and for the one that tells of the purchases
-  that were added from a photo.
+  for the rich message that an answer of the assistant's is sent as, for the one that tells of the purchases that
+  were added from a photo, and for the tables of `/cards`, `/spend`, `/products` and `/status`. The table of
+  `/spend` has five columns, and how an app shows a table that is wider than its screen is not known.
 - A question is answered on its own. Nothing of an earlier question or of its answer is kept, so one that follows
   on another has to say all of what it asks.
 - An answer is a model's, and can be wrong. What a card's window comes to is added up by the service. Any other sum,
