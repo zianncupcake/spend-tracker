@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from '../src/index'
 import { findUser } from '../src/store'
 import { AI_URL, calling, refusing, saying } from './ai-helpers'
-import { newTelegramId, userCount } from './helpers'
+import { newTelegramId, userCount, withoutCarried } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const SECRET = env.TELEGRAM_WEBHOOK_SECRET
@@ -117,7 +117,9 @@ interface Sent {
 
 /**
  * What the Worker has asked of the Telegram API since the calls were last cleared: the method of each request, and
- * what it was sent.
+ * what it was sent. The Worker goes by the real clock, and on the last two days of a month a purchase that is made
+ * today is counted in the next month, which the bot's message about it says in a line of its own. That line is
+ * taken out here, so that the tests say the same on every day: see `withoutCarried`.
  */
 function asked(): [method: string, body: Record<string, unknown>][] {
   const api = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/`
@@ -125,7 +127,7 @@ function asked(): [method: string, body: Record<string, unknown>][] {
     expect(url.startsWith(api)).toBe(true)
     expect(init.method).toBe('POST')
     expect(new Headers(init.headers).get('content-type')).toBe('application/json')
-    return [url.slice(api.length), JSON.parse(init.body as string)]
+    return [url.slice(api.length), withoutCarried(JSON.parse(init.body as string))]
   })
 }
 
@@ -256,8 +258,8 @@ describe('POST /telegram', () => {
 })
 
 describe('POST /telegram, in the log', () => {
-  /** A photo as Telegram posts one: the picture in each of the sizes that it is kept in. */
-  const photo = [{ file_id: 'made-up-file-id', file_unique_id: 'made-up-id', width: 90, height: 51, file_size: 1234 }]
+  /** A file as Telegram posts one. The words under one are its caption, which the bot does not read. */
+  const document = { file_id: 'made-up-file-id', file_unique_id: 'made-up-id', file_name: 'made-up.pdf' }
 
   /** Posts the Worker an update, whole, as Telegram does. */
   function post(update: object) {
@@ -269,8 +271,8 @@ describe('POST /telegram, in the log', () => {
     const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId, is_bot: false, first_name: 'Jane' }]
     const logged = catchConsole()
 
-    // A photo with a question under it, a command, and a command that there is not.
-    await post({ message: { message_id: 9101, date: 1, chat, from, photo, caption: 'How much have I spent?' } })
+    // A file with a question under it, a command, and a command that there is not.
+    await post({ message: { message_id: 9101, date: 1, chat, from, document, caption: 'How much have I spent?' } })
     await post({ message: { message_id: 9102, date: 1, chat, from, text: '/addcard visa 1234 calendar' } })
     await post({ message: { message_id: 9103, date: 1, chat, from, text: '/nosuchcommand visa' } })
 
@@ -279,9 +281,9 @@ describe('POST /telegram, in the log', () => {
       { event: 'update', kind: 'command', command: 'addcard', outcome: 'replied', ms: took },
       { event: 'update', kind: 'command', command: 'unknown', outcome: 'replied', ms: took },
     ])
-    // As it is written, the line of the photo is this.
-    const [photoLine] = logged.text().split('\n')
-    expect(photoLine).toMatch(/^\{"event":"update","kind":"not_text","outcome":"replied","ms":\d+\}$/)
+    // As it is written, the line of the file is this.
+    const [fileLine] = logged.text().split('\n')
+    expect(fileLine).toMatch(/^\{"event":"update","kind":"not_text","outcome":"replied","ms":\d+\}$/)
     // Each is the line of no failure.
     expect(logged.failures()).toEqual([])
     // Nothing of what was sent is in a line, and nothing that Telegram knows the user, the chat or a message by.
@@ -639,6 +641,12 @@ describe('POST /telegram with /spend and a card', () => {
   /** A name with what Telegram would make a command, a link and a mention of, and with the markup of a tag. */
   const MERCHANT = 'Lunch /start https://attacker.test/x <b>@someone</b>'
 
+  /** The line under the total of the card: which days of purchases the total counts, whatever today is, and why. */
+  const COUNTS = new RegExp(
+    '^The total counts purchases made from \\d+ \\w+ to \\d+ \\w+\\. The bank counts a purchase by the day it is ' +
+      'posted, so one made in the last 2 days of a month is counted in the next month\\.$',
+  )
+
   /** A user with a card, and the id of the one purchase on it, which its user added by hand. */
   async function purchaseOnCard() {
     const telegramId = newTelegramId()
@@ -687,6 +695,7 @@ describe('POST /telegram with /spend and a card', () => {
               },
               { type: 'paragraph', text: '* = added by hand' },
               { type: 'paragraph', text: expect.stringMatching(/^Total: SGD 12\.50 in 1 purchase, resets 1 \w+$/) },
+              { type: 'paragraph', text: expect.stringMatching(COUNTS) },
             ],
           },
         },
@@ -712,7 +721,13 @@ describe('POST /telegram with /spend and a card', () => {
     const { text, entities = [], ...rest } = body as unknown as Sent
     expect(rest).toEqual({ chat_id: telegramId, link_preview_options: { is_disabled: true } })
     expect(text).toMatch(/^visa ••••1234: 1 \w+ to \d+ \w+\n\n/)
-    expect(text).toMatch(/\n\n\* = added by hand\n\nTotal: SGD 12\.50 in 1 purchase, resets 1 \w+$/)
+    // After the table comes what its mark means, and then the total with the days that it counts.
+    const [mark, below] = text.split('\n\n').slice(-2)
+    expect(mark).toBe('* = added by hand')
+    expect(below.split('\n')).toEqual([
+      expect.stringMatching(/^Total: SGD 12\.50 in 1 purchase, resets 1 \w+$/),
+      expect.stringMatching(COUNTS),
+    ])
     // The table is a block of letters of one width, with the name cut to what a row has room for.
     expect(entities.map((entity) => entity.type)).toEqual(['pre'])
     const rows = text.slice(entities[0].offset, entities[0].offset + entities[0].length).split('\n')
@@ -846,7 +861,14 @@ describe('POST /telegram with a question', () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       model: 'openai/gpt-oss-120b',
       messages: [{ role: 'system' }, { role: 'user', content: 'How much have I spent?' }],
-      tools: [{ function: { name: 'get_spending_summary' } }, { function: { name: 'list_transactions' } }],
+      // The two tools that read, and the three by which the model says what it was asked to have done.
+      tools: [
+        { function: { name: 'get_spending_summary' } },
+        { function: { name: 'list_transactions' } },
+        { function: { name: 'add_purchases' } },
+        { function: { name: 'set_category' } },
+        { function: { name: 'run_command' } },
+      ],
       tool_choice: 'auto',
     })
   })
@@ -1113,13 +1135,17 @@ describe('POST /telegram with a question', () => {
 })
 
 describe('POST /telegram with a message that the bot does not read', () => {
-  const NOT_TEXT =
-    'The bot only reads text messages. It cannot read an attachment, such as a photo, a file or a voice message, or ' +
-    'the caption under one. Please send your question or command as text.'
+  // The service of these tests reads photos, as one that is set up with a key and nothing else does. So what it
+  // does not read is every other attachment: test/photo-webhook.test.ts has what it does with a photo, and what a
+  // service that reads none does with one.
+  const NOT_READ =
+    'The bot reads text messages and photos. It cannot read any other attachment, such as a file or a voice message, ' +
+    'or the caption under one. Please send your question or command as text, and a picture of your card ' +
+    'transactions as a photo and not as a file.'
   const EDITED = 'The bot does not read a message again after it has been edited. Please send it as a new message.'
 
-  /** A photo as Telegram posts one: the picture in each of the sizes that it is kept in. */
-  const photo = [{ file_id: 'made-up-file-id', file_unique_id: 'made-up-id', width: 90, height: 51, file_size: 1234 }]
+  /** A file as Telegram posts one. */
+  const document = { file_id: 'made-up-file-id', file_unique_id: 'made-up-id', file_name: 'made-up.pdf' }
   const sticker = {
     file_id: 'made-up-file-id',
     file_unique_id: 'made-up-id',
@@ -1132,13 +1158,13 @@ describe('POST /telegram with a message that the bot does not read', () => {
   }
 
   /**
-   * What Telegram posts of each: a photo with a question under it, which is the caption of a message that has no
+   * What Telegram posts of each: a file with a question under it, which is the caption of a message that has no
    * text, a sticker, and a message of text as it stands after it was edited, which is no `message` of the update.
    * With each is what the bot replies to it, and what the log has it as.
    */
   const kinds: [what: string, kind: 'message' | 'edited_message', content: object, reply: string, as: string][] = [
-    ['a photo with words under it', 'message', { photo, caption: 'How much have I spent?' }, NOT_TEXT, 'not_text'],
-    ['a sticker', 'message', { sticker }, NOT_TEXT, 'not_text'],
+    ['a file with words under it', 'message', { document, caption: 'How much have I spent?' }, NOT_READ, 'not_text'],
+    ['a sticker', 'message', { sticker }, NOT_READ, 'not_text'],
     ['an edited message', 'edited_message', { edit_date: 2, text: 'How much have I spent?' }, EDITED, 'edited'],
   ]
 

@@ -17,9 +17,12 @@ export default {
         return telegramWebhook(request, env, ctx)
       case 'GET /':
         return homePage(operator)
-      case 'GET /privacy':
-        // The policy says what becomes of a question only when the bot has an assistant to answer one.
-        return privacyPage(operator, depsFor(env).ai !== undefined)
+      case 'GET /privacy': {
+        // The policy says what becomes of a question only when the bot has an assistant to answer one, and what
+        // becomes of a photo only when the bot has a model that reads one.
+        const { ai } = depsFor(env)
+        return privacyPage(operator, ai !== undefined, ai?.visionModel !== undefined)
+      }
       case 'GET /oauth/start':
         return oauthStart(depsFor(env), searchParams)
       case 'GET /oauth/callback':

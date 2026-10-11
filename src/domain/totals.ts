@@ -1,11 +1,11 @@
 import type { Card, Store } from '../store'
-import { currentWindow, type SpendWindow } from './window'
+import { countedIn, currentWindow, type SpendWindow } from './window'
 
 export interface CardTotals {
   card: Card
   window: SpendWindow
   totals: { currency: string; amountMinor: number }[]
-  /** Purchases in the window, across all currencies. */
+  /** The purchases that the window counts, across all currencies. */
   count: number
 }
 
@@ -14,7 +14,8 @@ export function cardTotals(store: Store, cards: Card[], now: Date, timeZone: str
   return Promise.all(
     cards.map(async (card) => {
       const window = currentWindow(card, now, timeZone)
-      const sums = await store.sumByCurrency(card.last4, window.start.getTime() / 1000, window.end.getTime() / 1000)
+      const { start, end } = countedIn(window)
+      const sums = await store.sumByCurrency(card.last4, start, end)
       return {
         card,
         window,

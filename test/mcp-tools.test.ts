@@ -52,7 +52,7 @@ async function shopper(): Promise<number> {
 }
 
 describe('get_spending_summary', () => {
-  it("gives each card's window, and what was spent in it per currency", async () => {
+  it("gives each card's window, from when its total counts, and what that comes to per currency", async () => {
     const chat = openChat()
     await chat.say('/addcard visa 1234 statement 15') // 16 September to 16 October
     await chat.say('/addcard amex 0005 calendar') // October
@@ -62,7 +62,8 @@ describe('get_spending_summary', () => {
       ['2026-09-20T10:00:00+08:00', 123456, 'SGD', '1234'],
       ['2026-10-05T10:00:00+08:00', 1240, 'SGD', '1234'],
       ['2026-10-06T10:00:00+08:00', 500, 'USD', '1234'],
-      ['2026-09-30T23:00:00+08:00', 5000, 'SGD', '0005'], // September
+      ['2026-09-28T23:00:00+08:00', 9900, 'SGD', '0005'], // September
+      ['2026-09-30T23:00:00+08:00', 5000, 'SGD', '0005'], // the last day of September, which October counts
       ['2026-10-02T10:00:00+08:00', 2000, 'SGD', '0005'],
     ])
 
@@ -75,9 +76,11 @@ describe('get_spending_summary', () => {
           nickname: 'visa',
           last4: '1234',
           windowType: 'statement',
-          // Midnight in Singapore is 16:00 of the day before in UTC.
+          // Midnight in Singapore is 16:00 of the day before in UTC. The window is the cycle as the bank has it, and
+          // its total counts from two days before that: the last two days of a window are counted in the next one.
           windowStart: '2026-09-15T16:00:00.000Z',
           windowEnd: '2026-10-15T16:00:00.000Z',
+          countedFrom: '2026-09-13T16:00:00.000Z',
           totals: [
             { currency: 'SGD', amount: '1246.96', amountMinor: 124696 },
             { currency: 'USD', amount: '5.00', amountMinor: 500 },
@@ -90,8 +93,9 @@ describe('get_spending_summary', () => {
           windowType: 'calendar',
           windowStart: '2026-09-30T16:00:00.000Z',
           windowEnd: '2026-10-31T16:00:00.000Z',
-          totals: [{ currency: 'SGD', amount: '20.00', amountMinor: 2000 }],
-          purchaseCount: 1,
+          countedFrom: '2026-09-28T16:00:00.000Z',
+          totals: [{ currency: 'SGD', amount: '70.00', amountMinor: 7000 }],
+          purchaseCount: 2,
         },
       ],
       note: 'Totals are estimated from bank alert emails.',

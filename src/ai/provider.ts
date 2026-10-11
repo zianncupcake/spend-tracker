@@ -11,6 +11,12 @@ export const DEFAULT_BASE_URL = 'https://api.groq.com/openai/v1'
 export const DEFAULT_MODEL = 'openai/gpt-oss-120b'
 
 /**
+ * The model that reads photos, when the service is set up with none and is left at the default address. Groq lists
+ * it as a preview model, which is one that it may withdraw at short notice.
+ */
+export const DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b'
+
+/**
  * The most tokens that the model may write in one message, with those of its reasoning counted among them. A
  * message is the call of a tool or a brief answer. An answer of more would not fit a message of Telegram's anyway.
  */
@@ -22,6 +28,8 @@ export interface AiProvider {
   /** Where its API is reached, with no trailing slash: what /chat/completions comes after. */
   baseUrl: string
   model: string
+  /** The model that reads photos. Undefined on a service that reads none. */
+  visionModel?: string
 }
 
 /**
@@ -41,11 +49,19 @@ export interface ToolCall {
 }
 
 /**
+ * A part of a user's message that holds more than text: its text, or an image by its address. An address can be a
+ * data URL, which holds the image itself.
+ */
+export type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
+
+/**
  * A message of a conversation, as the API has it. The model's own message is one that calls tools, as that is the
- * only kind that is ever sent back to it. What each tool answered follows it, under the id of its call.
+ * only kind that is ever sent back to it. What each tool answered follows it, under the id of its call. A user's
+ * message that holds an image is made of parts.
  */
 export type ChatMessage =
   | { role: 'system' | 'user'; content: string }
+  | { role: 'user'; content: ContentPart[] }
   | { role: 'assistant'; content?: string; tool_calls: ToolCall[] }
   | { role: 'tool'; tool_call_id: string; name: string; content: string }
 
@@ -98,12 +114,46 @@ export async function complete(
   tools: Tool[],
   timeout: number,
 ): Promise<ModelReply> {
+  return request(
+    provider,
+    { model: provider.model, messages, tools, tool_choice: 'auto', max_completion_tokens: MAX_COMPLETION_TOKENS },
+    timeout,
+  )
+}
+
+/**
+ * Asks `model` for one message that is JSON, and offers it no tools: the answer is the reply's `content`, which is
+ * still to be parsed. `maxTokens` is the most tokens that the model may write. The messages can hold an image, for a
+ * model that reads one. It throws what `complete` throws, and the request is logged as one of `complete`'s is.
+ *
+ * `temperature` is how freely the model is to choose among the words that it could write next: at 0, the same
+ * request is to be answered the same each time. The request says nothing of it unless it is given, and the
+ * provider's own setting then holds.
+ */
+export async function completeJson(
+  provider: AiProvider,
+  model: string,
+  messages: ChatMessage[],
+  maxTokens: number,
+  timeout: number,
+  temperature?: number,
+): Promise<ModelReply> {
+  return request(
+    provider,
+    // What is undefined is left out of the JSON that is posted.
+    { model, messages, response_format: { type: 'json_object' }, max_completion_tokens: maxTokens, temperature },
+    timeout,
+  )
+}
+
+/** Posts the provider a request with the body, and logs it, however it ends: see `complete`. */
+async function request(provider: AiProvider, body: Record<string, unknown>, timeout: number): Promise<ModelReply> {
   // By the Worker's own clock, which moves on while the provider is waited for.
   const began = Date.now()
   // Filled in as the request goes on, so that one that fails is logged with as much as was learnt before it did.
   const seen: Seen = {}
   try {
-    const reply = await ask(provider, messages, tools, timeout, seen)
+    const reply = await ask(provider, body, timeout, seen)
     log('ai_call', { ms: Date.now() - began, ...seen })
     return reply
   } catch (error) {
@@ -115,26 +165,19 @@ export async function complete(
 /** Posts the request and reads the model's message from the answer, noting in `seen` what the log is to have. */
 async function ask(
   provider: AiProvider,
-  messages: ChatMessage[],
-  tools: Tool[],
+  body: Record<string, unknown>,
   timeout: number,
   seen: Seen,
 ): Promise<ModelReply> {
   const response = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: provider.model,
-      messages,
-      tools,
-      tool_choice: 'auto',
-      max_completion_tokens: MAX_COMPLETION_TOKENS,
-    }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeout),
   })
   seen.status = response.status
-  // The request holds the key and a user's question, and the response can quote the question, so neither goes into
-  // an error: only the status of the response does, and how long it says to wait, which is a number.
+  // The request holds the key and a user's question or photo, and the response can quote what it was sent, so
+  // neither goes into an error: only the status of the response does, and how long it says to wait, which is a number.
   if (!response.ok) {
     seen.retry_after = retryAfterOf(response)
     throw new ProviderError(response.status, seen.retry_after)

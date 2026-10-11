@@ -7,6 +7,7 @@
 // and is kept by Cloudflare. So a line never holds:
 //
 //   - the text of a message, of a question or of an answer
+//   - a photo or any byte of one, the caption under one, or the id that Telegram knows a file by
 //   - the text or the subject of an email, the name of a merchant, or an email address
 //   - a Telegram user id or chat id, or the digits of a card
 //   - an access token, a refresh token, an API key, or the state or the code of a sign-in
@@ -38,9 +39,13 @@ export interface Events {
     notified: number
     checked: boolean
     swept: number
+    batches: number
     ms: number
   }
-  check_failed: { stage: 'sweep' | 'take' | 'token' | 'list' | 'read' | 'store' | 'notify'; user: number | null }
+  check_failed: {
+    stage: 'sweep' | 'take' | 'token' | 'list' | 'read' | 'store' | 'notify' | 'batches'
+    user: number | null
+  }
   access_lost: { user: number; told: boolean }
   alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | null }
   connect_link: { user: number }
@@ -82,7 +87,17 @@ export interface Events {
   mcp_refused: { why: 'wrong_origin' | 'no_token' | 'unknown_token' | 'wrong_method' }
   webhook_refused: { why: 'no_secret' | 'wrong_secret' }
   update: {
-    kind: 'command' | 'question' | 'code' | 'not_text' | 'edited' | 'press' | 'message' | 'other' | 'unreadable'
+    kind:
+      | 'command'
+      | 'question'
+      | 'code'
+      | 'photo'
+      | 'not_text'
+      | 'edited'
+      | 'press'
+      | 'message'
+      | 'other'
+      | 'unreadable'
     command?:
       | 'start'
       | 'addcard'
@@ -110,19 +125,53 @@ export interface Events {
   }
   question: {
     user: number | null
-    outcome: 'answered' | 'busy' | 'failed' | 'timeout' | 'blocked'
+    outcome: 'answered' | 'acted' | 'busy' | 'failed' | 'timeout' | 'blocked'
     sent: 'rich' | 'text' | 'edit' | 'message' | 'none'
     placeholder: boolean
     requests: number
     tool_calls: number
+    actions?: number
     ms: number
+  }
+  action: {
+    user: number
+    kind: 'add' | 'category' | 'command'
+    command?: Events['update']['command']
+    outcome: 'done' | 'asked' | 'refused' | 'failed' | 'skipped'
+    stored?: number
+    held?: number
+  }
+  confirm_press: {
+    user: number
+    command?: 'remove' | 'removecard' | 'disconnect' | 'mcp' | 'connect' | 'addcard' | 'product' | 'timezone'
+    outcome: 'done' | 'cancelled' | 'refused'
   }
   assistant_tool: {
     user: number
-    tool: 'get_spending_summary' | 'list_transactions' | 'unknown'
+    tool:
+      | 'get_spending_summary'
+      | 'list_transactions'
+      | 'add_purchases'
+      | 'set_category'
+      | 'run_command'
+      | 'unknown'
     outcome: 'ok' | 'invalid' | 'failed'
     ms: number
   }
+  photo: {
+    user: number | null
+    outcome: 'read' | 'nothing' | 'no_cards' | 'repeated' | 'too_large' | 'busy' | 'failed' | 'timeout' | 'blocked'
+    sent: 'rich' | 'text' | 'edit' | 'message' | 'none'
+    placeholder: boolean
+    bytes: number
+    requests: number
+    read: number
+    unreadable: number
+    stored: number
+    held: number
+    ms: number
+  }
+  held_press: { user: number; outcome: 'added' | 'skipped' | 'refused'; held: number; stored: number }
   telegram_failed: {
     method:
       | 'sendMessage'
@@ -131,6 +180,8 @@ export interface Events {
       | 'editMessageText'
       | 'deleteMessage'
       | 'sendChatAction'
+      | 'getFile'
+      | 'downloadFile'
     status?: number
   }
 }
@@ -156,6 +207,12 @@ export type Reason =
   | 'no_answer'
   | 'still_calling_tools'
   | 'took_too_long'
+  | 'file_too_large'
+  | 'not_json'
+  | 'bad_reading'
+  | 'no_file_path'
+  | 'no_vision_model'
+  | 'cut_short'
 
 /**
  * An error that this codebase throws of its own accord. It says what went wrong twice: in its message, for whoever

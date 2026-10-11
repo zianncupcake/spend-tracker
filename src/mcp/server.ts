@@ -33,8 +33,12 @@ export const SUMMARY =
   'cycle or the calendar month. For each card: its nickname, its last four digits, the type of its window, the ' +
   'instants at which the window starts and ends (the end is where the next window starts), the total per currency ' +
   'as a decimal string (`amount`) and in hundredths of the currency unit (`amountMinor`), and the number of ' +
-  "purchases. Instants are in UTC, and `timeZone` is the user's time zone, in which the windows are counted. The " +
-  "totals are estimated from the bank's alert emails."
+  "purchases. Instants are in UTC, and `timeZone` is the user's time zone, in which the windows are counted. A " +
+  'total counts the purchases made from `countedFrom`, which is some days before the window starts, to as long ' +
+  'before it ends: the last days of a window are counted in the next one, as a bank counts a purchase by the day ' +
+  'that it is posted, and on those days the current window is the one that is about to start. With no ' +
+  "`countedFrom`, a total counts the purchases of the window's own days. The totals are estimated from the bank's " +
+  'alert emails.'
 
 export const TRANSACTIONS =
   "The user's card purchases, newest first, as read from their bank's alert emails or added by the user by hand. " +

@@ -45,6 +45,11 @@ export const uobEvol: Product = {
     'https://www.uob.com.sg/web-resources/personal/pdf/personal/cards/credit-cards/rebates-cards/evol/uob-evol-faq.pdf',
   termsAsOf: '10 June 2026',
   minimumSpendMinor: 80000,
+  // UOB's terms count spend that is "successfully charged and posted to the Card account in each Statement Month",
+  // and a purchase is usually posted a day or two after it is made. So a purchase of the last days of a statement
+  // month is counted in the next one. That it is two days is the owner's choice: how long a posting takes was not
+  // measured.
+  daysCountedInNext: 2,
   groups: [
     {
       name: 'Online and Mobile Contactless Spend',

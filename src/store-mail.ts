@@ -1,6 +1,6 @@
 // SQL for the mail checker: whose mailbox is read next, and which alerts it
 // has already been through. As in store.ts, whatever concerns a known user goes
-// through a store bound to that user. The first two functions cannot: each
+// through a store bound to that user. The first three functions cannot: each
 // looks across all users for the work that is due.
 
 import { MANUAL } from './store'
@@ -52,6 +52,15 @@ export async function removeExpiredAttempts(
     .bind(now, limit)
     .all<{ email: string | null; refreshTokenEnc: string | null }>()
   return results.map((attempt) => (holdsMailbox(attempt) ? attempt : null))
+}
+
+/**
+ * Deletes the held purchases that nobody answered for: every batch whose time was up at `now`, in unix seconds,
+ * whoever it is held for. See store-held.ts for what a batch is. Returns how many batches it deleted.
+ */
+export async function removeExpiredBatches(db: D1Database, now: number): Promise<number> {
+  const result = await db.prepare('DELETE FROM held_batches WHERE expires_at <= ?').bind(now).run()
+  return result.meta.changes
 }
 
 /**

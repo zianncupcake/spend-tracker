@@ -5,10 +5,15 @@
 // https://core.telegram.org/bots/api#editmessagetext
 // https://core.telegram.org/bots/api#deletemessage
 // https://core.telegram.org/bots/api#sendchataction
+// And fetching a file that the bot was sent, such as a photo:
+// https://core.telegram.org/bots/api#getfile
 
 import { Failure, logFailure, type Events } from '../log'
 
-/** The methods of Telegram's API that the bot calls. A method is what the log knows a request that failed by. */
+/**
+ * The methods of Telegram's API that the bot calls. A method is what the log knows a request that failed by. The
+ * download of a file is no method of the API, and is known as one all the same: `downloadFile`.
+ */
 type Method = Events['telegram_failed']['method']
 
 /**
@@ -133,39 +138,52 @@ export interface Messenger {
    * message comes.
    */
   typing(chatId: number): Promise<void>
+  /**
+   * The bytes of a file that Telegram holds, by its file id. Throws a Failure with the reason `file_too_large` for a
+   * file of more than `maxBytes`, and what any other request throws when Telegram refuses or does not answer.
+   */
+  file(fileId: string, maxBytes: number): Promise<Uint8Array>
 }
 
 export function telegramMessenger(token: string): Messenger {
   /**
-   * Posts Telegram a request, and returns what `read` makes of its answer to it, which is no error. A request that
+   * Makes Telegram a request, and returns what `read` makes of its answer to it, which is no error. A request that
    * Telegram has not answered in REQUEST_TIMEOUT is given up on, and fails with what fetch throws then, which is a
    * TimeoutError. A request that fails is logged, whoever made it and whatever they then do about it: with its
    * method, and with the status of the answer when there was one. A request that Telegram takes is not logged: one
-   * question makes up to twelve.
+   * question makes up to twelve. `read` is given the signal that ends the request too, for an answer whose reading
+   * is to end with it.
    */
-  async function request<Read>(
+  async function exchange<Read>(
     method: Method,
-    body: Record<string, unknown>,
-    read: (answer: Response) => Read | Promise<Read>,
+    url: string,
+    init: RequestInit,
+    read: (answer: Response, signal: AbortSignal) => Read | Promise<Read>,
   ): Promise<Read> {
     let status: number | undefined
     try {
-      const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
-      })
+      const signal = AbortSignal.timeout(REQUEST_TIMEOUT)
+      const response = await fetch(url, { ...init, signal })
       status = response.status
       // The URL holds the bot token and the body holds the message, so neither goes into the error.
       if (response.status === 403) throw new ChatBlockedError()
       if (!response.ok) throw new TelegramError(method, response.status)
-      return await read(response)
+      return await read(response, signal)
     } catch (error) {
       // Nothing of the error's message is logged: what fetch throws could quote the URL, which holds the bot token.
       logFailure('telegram_failed', error, { method, status })
       throw error
     }
+  }
+
+  /** Posts Telegram a request for a method of its API, with what the method takes: see `exchange`. */
+  function request<Read>(
+    method: Method,
+    body: Record<string, unknown>,
+    read: (answer: Response) => Read | Promise<Read>,
+  ): Promise<Read> {
+    const posted = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+    return exchange(method, `https://api.telegram.org/bot${token}/${method}`, posted, read)
   }
 
   /** Posts Telegram a request whose answer holds nothing that the bot reads. */
@@ -219,5 +237,60 @@ export function telegramMessenger(token: string): Messenger {
     typing(chatId) {
       return call('sendChatAction', { chat_id: chatId, action: 'typing' })
     },
+    async file(fileId, maxBytes) {
+      const tooLarge = () => new Failure('file_too_large', `The file holds more than ${maxBytes} bytes`)
+      // Telegram answers with where the file is to be had, and with its size when it knows that.
+      const { path, size } = await request('getFile', { file_id: fileId }, async (answer) => {
+        const { result } = await answer.json<{ result?: { file_path?: unknown; file_size?: unknown } }>()
+        if (typeof result?.file_path !== 'string') {
+          throw new Failure('no_file_path', 'Telegram getFile returned no file path')
+        }
+        return { path: result.file_path, size: result.file_size }
+      })
+      // A file that is too large is no request that failed, so it has no line of one: it is the caller's to log.
+      if (typeof size === 'number' && size > maxBytes) throw tooLarge()
+      // The address holds the bot token, as that of every request does: see `exchange` for where it never goes.
+      const address = `https://api.telegram.org/file/bot${token}/${path}`
+      // Room for `maxBytes` is made whatever the file holds, so that is to be what a file may well hold, and no
+      // number that stands for no limit: see `bytesWithin`.
+      const within = (answer: Response, signal: AbortSignal) => bytesWithin(answer, maxBytes, signal)
+      const bytes = await exchange('downloadFile', address, {}, within)
+      if (!bytes) throw tooLarge()
+      return bytes
+    },
   }
+}
+
+/**
+ * The bytes of an answer's body, or null when it holds more than `most` of them.
+ *
+ * The body is read once, into room for one byte more than it may hold. The read ends when the room is full or the
+ * body is at its end, whichever comes first: so a body that fills the room is too long, and what is left of it is
+ * given up on, and one that does not is all there. The bytes are the part of the room that was filled.
+ *
+ * It is read so because a Worker has little time to compute in. Read the usual way, a body comes 4,096 bytes at a
+ * time, with a turn of a loop for each: the 400,000 bytes of a photo were measured at one to two milliseconds so,
+ * and at a tenth of one this way. The room is made before anything is read, so what it costs grows with `most`: half
+ * a millisecond more at 5 MB.
+ *
+ * `signal` is what ends the request that the answer is to. A body that stops coming is given up on when it ends,
+ * and this then throws what the signal ended with, which is what fetch throws for a request that got no answer.
+ */
+async function bytesWithin(answer: Response, most: number, signal: AbortSignal): Promise<Uint8Array | null> {
+  // An answer with nothing in it has no body to read.
+  if (!answer.body) return new Uint8Array(0)
+  // The body of an answer is a stream of bytes, which is the kind that can be read into room of the reader's own.
+  const reader = answer.body.getReader({ mode: 'byob' })
+  // The Fetch standard has a body end with the signal of its request. Whether the runtime ends one so could not be
+  // seen, as no test may make a request that a runtime answers: so the reading is ended here, which does no harm to
+  // one that the runtime ends too.
+  const giveUp = () => void reader.cancel(signal.reason).catch(() => {})
+  signal.addEventListener('abort', giveUp)
+  if (signal.aborted) giveUp()
+  const { value = new Uint8Array(0) } = await reader.readAtLeast(most + 1, new Uint8Array(most + 1))
+  // A read that was given up on can end with nothing, as that of a body with nothing in it does.
+  signal.throwIfAborted()
+  if (value.length <= most) return value
+  await reader.cancel()
+  return null
 }

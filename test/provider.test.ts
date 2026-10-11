@@ -1,5 +1,7 @@
+import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { complete, ProviderError, type AiProvider, type ChatMessage, type Tool } from '../src/ai/provider'
+import { complete, completeJson, ProviderError, type AiProvider, type ChatMessage, type Tool } from '../src/ai/provider'
+import { depsFor } from '../src/deps'
 import { Failure } from '../src/log'
 import { calling, refusing, saying } from './ai-helpers'
 import { catchConsole } from './log-helpers'
@@ -207,6 +209,177 @@ describe('a request that fails', () => {
     expect(await ask()).toEqual(thrown)
 
     expect(logged.events()).toEqual([{ event: 'ai_call', ms: 75, status: 200, ...seen, error: 'Error' }])
+  })
+})
+
+describe('what a question sends', () => {
+  // Written out as it was sent before a request could hold a photo, so that a change to it shows here.
+  const BODY =
+    '{"model":"made-up-model","messages":[{"role":"system","content":"Made-up instructions for the model."},' +
+    '{"role":"user","content":"How much did I spend at COFFEE PLACE?"},' +
+    '{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":' +
+    '{"name":"get_spending_summary","arguments":"{}"}}]},' +
+    '{"role":"tool","tool_call_id":"call_1","name":"get_spending_summary","content":"{\\"cards\\":[]}"}],' +
+    '"tools":[{"type":"function","function":{"name":"get_spending_summary","description":"Made up.",' +
+    '"parameters":{"type":"object","properties":{}}}}],"tool_choice":"auto","max_completion_tokens":1024}'
+
+  it('is byte for byte what it was, on a service that reads photos too', async () => {
+    const called = { name: 'get_spending_summary', arguments: '{}' }
+    const conversation: ChatMessage[] = [
+      ...messages,
+      // As the assistant sends back a message of the model's that had no text: with its content undefined.
+      { role: 'assistant', content: undefined, tool_calls: [{ id: 'call_1', type: 'function', function: called }] },
+      { role: 'tool', tool_call_id: 'call_1', name: 'get_spending_summary', content: '{"cards":[]}' },
+    ]
+    answering(saying(ANSWER))
+    catchConsole()
+
+    await complete({ ...provider, visionModel: 'made-up-vision-model' }, conversation, tools, 20_000)
+
+    expect(posted).toHaveBeenCalledTimes(1)
+    const [url, init] = posted.mock.calls[0]
+    expect(url).toBe('https://ai.example.test/v1/chat/completions')
+    expect(init?.body).toBe(BODY)
+    expect(init?.method).toBe('POST')
+    expect(init?.headers).toEqual({ authorization: 'Bearer made-up-ai-key', 'content-type': 'application/json' })
+    // The request is the address, and these four things: the last is what gives it up when its time is over.
+    expect(Object.keys(init ?? {}).sort()).toEqual(['body', 'headers', 'method', 'signal'])
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
+  })
+})
+
+describe('a request for JSON, which can hold an image', () => {
+  const CAPTION = 'add these to evol as bus/mrt'
+  /** The first ten bytes of a JPEG file, as the address of an image that holds them. */
+  const PHOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+  const READING = '{"card": "evol", "purchases": [{"amount": "12.40", "merchant": "COFFEE PLACE"}]}'
+
+  const reading: ChatMessage[] = [
+    { role: 'system', content: 'Made-up instructions for the model.' },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: CAPTION },
+        { type: 'image_url', image_url: { url: PHOTO } },
+      ],
+    },
+  ]
+
+  /** Asks the model that reads photos, and returns what came of it: its message, or what was thrown. */
+  function askForJson(timeout = 20_000) {
+    return completeJson(provider, 'made-up-vision-model', reading, 300, timeout).catch((error: unknown) => error)
+  }
+
+  it('is posted with the model that is named, the image beside its text, and the most that may be written', async () => {
+    const timeouts = vi.spyOn(AbortSignal, 'timeout')
+    answering(saying(READING))
+    catchConsole()
+
+    expect(await askForJson(1234)).toEqual({ content: READING, toolCalls: [], cutShort: false })
+
+    expect(posted).toHaveBeenCalledTimes(1)
+    const [url, init] = posted.mock.calls[0]
+    expect(url).toBe('https://ai.example.test/v1/chat/completions')
+    expect(init?.method).toBe('POST')
+    expect(init?.headers).toEqual({ authorization: 'Bearer made-up-ai-key', 'content-type': 'application/json' })
+    // All of it: the answer is to be JSON, and no tools are offered, so nothing says how to choose among any.
+    expect(init?.body).toBe(
+      '{"model":"made-up-vision-model","messages":[{"role":"system","content":"Made-up instructions for the model."},' +
+        '{"role":"user","content":[{"type":"text","text":"add these to evol as bus/mrt"},' +
+        '{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,/9j/4AAQSkZJRg=="}}]}],' +
+        '"response_format":{"type":"json_object"},"max_completion_tokens":300}',
+    )
+    expect(timeouts.mock.calls).toEqual([[1234]])
+    expect(init?.signal).toBe(timeouts.mock.results[0].value)
+  })
+
+  it('is logged as a request of the assistant is, however it ends, with nothing of the image or of the answer', async () => {
+    answering(saying(READING), 900)
+    // An answer that ran into the most that may be written, and so ends wherever that fell.
+    answering(saying(READING.slice(0, 40), 'length'), 2100)
+    posted.mockImplementationOnce(async () => {
+      clock += 300
+      return refusing(429, `Rate limit reached. Your request was: ${CAPTION} ${PHOTO}`, { 'retry-after': '7.66' })()
+    })
+    posted.mockImplementationOnce(refusing(413, `Request too large: ${PHOTO}`))
+    posted.mockImplementationOnce(async () => {
+      throw new TypeError(`A made-up failure of the network that quotes: ${CAPTION} ${PHOTO}`)
+    })
+    const logged = catchConsole()
+
+    expect(await askForJson()).toEqual({ content: READING, toolCalls: [], cutShort: false })
+    expect(await askForJson()).toEqual({ content: READING.slice(0, 40), toolCalls: [], cutShort: true })
+    expect(await askForJson()).toEqual(new ProviderError(429, 7.66))
+    expect(await askForJson()).toEqual(new ProviderError(413))
+    expect(await askForJson()).toBeInstanceOf(TypeError)
+
+    const counted = { tool_calls: 0, prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }
+    expect(logged.events()).toEqual([
+      { event: 'ai_call', ms: 900, status: 200, finish: 'stop', ...counted },
+      { event: 'ai_call', ms: 2100, status: 200, finish: 'length', ...counted },
+      { event: 'ai_call', ms: 300, status: 429, retry_after: 7.66, error: 'Error', reason: 'http_error' },
+      { event: 'ai_call', ms: 0, status: 413, error: 'Error', reason: 'http_error' },
+      { event: 'ai_call', ms: 0, error: 'TypeError' },
+    ])
+    const never = [CAPTION, 'bus/mrt', PHOTO, '/9j/', 'data:image', 'base64', READING, 'COFFEE', '12.40', 'evol']
+    for (const text of [...never, provider.apiKey, 'made-up-vision-model', 'Rate limit', 'too large', 'instructions']) {
+      expect(logged.text()).not.toContain(text)
+    }
+  })
+
+  it('is given up on when the provider takes longer than it is given', async () => {
+    // A provider that never answers. The request ends as it does for fetch: it fails with why it was ended.
+    posted.mockImplementationOnce((_, init) => {
+      const signal = init?.signal
+      return new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))
+    })
+    const logged = catchConsole()
+
+    expect(await askForJson(5)).toMatchObject({ name: 'TimeoutError' })
+
+    expect(logged.events()).toEqual([{ event: 'ai_call', ms: 0, error: 'TimeoutError' }])
+  })
+})
+
+describe('the model that reads photos, as the service is set up', () => {
+  // The tests are set up with a key and nothing else: see vitest.config.ts.
+  const GROQ = { apiKey: 'test-ai-key', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b' }
+  const OWN = { ...env, AI_BASE_URL: 'https://ai.example.test/v1', AI_MODEL: 'made-up-model' }
+
+  it('is the default one, at the default address, when neither is set', () => {
+    const reading = { ...GROQ, visionModel: 'qwen/qwen3.8-27b' }
+
+    expect(depsFor(env).ai).toEqual(reading)
+    // A setting that is left empty counts as one that is not set.
+    expect(depsFor({ ...env, AI_BASE_URL: '', AI_VISION_MODEL: '' }).ai).toEqual(reading)
+    // The model that answers questions is another setting, and changes nothing of this one.
+    expect(depsFor({ ...env, AI_MODEL: 'made-up-model' }).ai?.visionModel).toBe('qwen/qwen3.8-27b')
+  })
+
+  it('is none at an address that the service names, where the name of the default one means nothing', () => {
+    const { ai } = depsFor(OWN)
+
+    expect(ai).toEqual({ apiKey: 'test-ai-key', baseUrl: 'https://ai.example.test/v1', model: 'made-up-model' })
+    expect(ai?.visionModel).toBeUndefined()
+    expect(depsFor({ ...OWN, AI_VISION_MODEL: '' }).ai?.visionModel).toBeUndefined()
+    // The default address counts as one that the service names, when it is the service that names it.
+    expect(depsFor({ ...env, AI_BASE_URL: GROQ.baseUrl }).ai?.visionModel).toBeUndefined()
+  })
+
+  it('is the one that is named, at either address', () => {
+    const named = { AI_VISION_MODEL: 'made-up-vision-model' }
+
+    expect(depsFor({ ...OWN, ...named }).ai).toEqual({
+      apiKey: 'test-ai-key',
+      baseUrl: 'https://ai.example.test/v1',
+      model: 'made-up-model',
+      visionModel: 'made-up-vision-model',
+    })
+    expect(depsFor({ ...env, ...named }).ai).toEqual({ ...GROQ, visionModel: 'made-up-vision-model' })
+  })
+
+  it.each([undefined, ''])('is none, as the provider is, when the key is %j', (key) => {
+    expect(depsFor({ ...env, AI_API_KEY: key, AI_VISION_MODEL: 'made-up-vision-model' }).ai).toBeUndefined()
   })
 })
 

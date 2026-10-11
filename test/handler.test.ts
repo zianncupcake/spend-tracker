@@ -27,7 +27,8 @@ function recorder() {
       // No reply here is a rich message, which /spend with a card is, and an answer of the assistant's:
       // test/detail-rich.test.ts and test/assistant.test.ts have those. And no reply to a message answers a press
       // or edits a message. test/sort.test.ts has the presses. Nor is anything here sent for its id, or deleted,
-      // as the placeholder of a question is: test/working.test.ts has that.
+      // as the placeholder of a question is: test/working.test.ts has that. And no file is fetched, as a photo's
+      // is: test/photo.test.ts has that.
       async post() {
         return 0
       },
@@ -36,6 +37,9 @@ function recorder() {
       async edit() {},
       async delete() {},
       async typing() {},
+      async file() {
+        throw new Error('A test fetched a file that it should not have')
+      },
     },
   }
   return { sent, deps }
@@ -212,9 +216,13 @@ describe('/addcard and /cards', () => {
     )
     expect((await chat.say('/cards')).split('\n')).toHaveLength(20)
 
-    // /spend runs a query for each card, after one for the user and one for the cards. A request may run 50.
+    // /spend runs a query for each card, after one for the user and one for the cards. A request may run 50. Under
+    // each card is the line that says which days its total counts, which takes no query, and the whole is inside the
+    // 4,096 characters that a message of text may have.
     const queried = vi.spyOn(env.DB, 'prepare')
-    expect((await chat.say('/spend')).split('\n')).toHaveLength(20 + 2)
+    const reply = await chat.say('/spend')
+    expect(reply.split('\n')).toHaveLength(2 * 20 + 3)
+    expect(reply.length).toBeLessThan(4096)
     expect(queried).toHaveBeenCalledTimes(1 + 1 + 20)
     queried.mockRestore()
 
@@ -254,7 +262,7 @@ describe('/spend', () => {
       ['2026-09-20T10:00:00+08:00', alertText('SGD 1,234.56', '1234', 'BOOK SHOP')],
       ['2026-10-05T10:00:00+08:00', alertText('SGD 12.40', '1234')],
       ['2026-10-06T10:00:00+08:00', alertText('USD 5.00', '1234')],
-      ['2026-09-30T23:00:00+08:00', alertText('SGD 50.00', '0005')], // September
+      ['2026-09-28T23:00:00+08:00', alertText('SGD 50.00', '0005')], // September
       ['2026-10-02T10:00:00+08:00', alertText('SGD 20.00', '0005')],
     ]
     for (const [index, [receivedAt, text]] of alerts.entries()) {
@@ -262,12 +270,19 @@ describe('/spend', () => {
       expect((await ingestAlert(store, email)).status).toBe('stored')
     }
 
+    // Under each card is which days of purchases its total counts: the last two days of a window are counted in the
+    // next one. Why is said once, under them all.
     expect(await chat.say('/spend')).toBe(
       [
         'visa ••••1234: SGD 1,246.96 + USD 5.00 in 3 purchases, resets 16 Oct',
+        'The total counts purchases made from 14 Sep to 13 Oct.',
         'amex ••••0005: SGD 20.00 in 1 purchase, resets 1 Nov',
+        'The total counts purchases made from 29 Sep to 29 Oct.',
         'spare ••••9999: no purchases, resets 1 Nov',
+        'The total counts purchases made from 29 Sep to 29 Oct.',
         '',
+        'A bank counts a purchase by the day it is posted, so one made in the last days of a cycle or a month is ' +
+          'counted in the next one.',
         'Totals are estimated from bank alerts.',
       ].join('\n'),
     )
@@ -296,17 +311,19 @@ describe('/timezone', () => {
   it("sets the time zone that the windows of the user's cards are counted in, and nobody else's", async () => {
     const chat = openChat()
     const bystander = openChat()
-    for (const each of [chat, bystander]) await each.say('/addcard visa 1234 statement 8')
-    // It is noon on 9 October in Singapore, where the cycle that closed with the 8th is over.
-    expect(await chat.say('/spend')).toContain('visa ••••1234: no purchases, resets 9 Nov')
+    for (const each of [chat, bystander]) await each.say('/addcard visa 1234 statement 10')
+    // It is noon on 9 October in Singapore, the day before the statement closes: a purchase of today is counted in
+    // the cycle that begins on the 11th, which is the current one from today.
+    expect(await chat.say('/spend')).toContain('visa ••••1234: no purchases, resets 11 Nov')
 
     const reply = await chat.say('/timezone America/Los_Angeles')
 
     expect(reply).toBe("Your time zone is now America/Los_Angeles. Your cards' cycles and months begin and end by it.")
     expect((await chat.user()).timezone).toBe('America/Los_Angeles')
-    // In Los Angeles it is nine in the evening of the 8th, and that cycle has three hours to go.
-    expect(await chat.say('/spend')).toContain('visa ••••1234: no purchases, resets 9 Oct')
-    expect(await bystander.say('/spend')).toContain('visa ••••1234: no purchases, resets 9 Nov')
+    // In Los Angeles it is nine in the evening of the 8th, and the cycle that closes on the 10th has three hours to
+    // go as the current one.
+    expect(await chat.say('/spend')).toContain('visa ••••1234: no purchases, resets 11 Oct')
+    expect(await bystander.say('/spend')).toContain('visa ••••1234: no purchases, resets 11 Nov')
   })
 
   it('takes a name in any case, and keeps it as the IANA list spells it', async () => {

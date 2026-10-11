@@ -155,6 +155,10 @@ export const deps: Deps = {
     },
     // Nothing is kept of this. A test that is about it watches for it.
     async typing() {},
+    // No file is fetched but a photo's, and a test that sends one puts its own stand-in here: see ./photo-helpers.
+    async file() {
+      throw new Error('A test fetched a file that it should not have')
+    },
   },
 }
 
@@ -298,6 +302,16 @@ type Chat = ReturnType<typeof openChat>
 let lastMessage = 0
 let lastPress = 0
 
+/**
+ * A photo as Telegram posts one: the picture in each of the sizes that it is kept in, from the smallest up. Each has
+ * the id that its file is asked for by, and how many bytes the file has.
+ */
+export const PHOTO = [
+  { file_id: 'made-up-file-id-small', file_unique_id: 'made-up-id-1', width: 90, height: 75, file_size: 1_900 },
+  { file_id: 'made-up-file-id-medium', file_unique_id: 'made-up-id-2', width: 320, height: 267, file_size: 21_000 },
+  { file_id: 'made-up-file-id-large', file_unique_id: 'made-up-id-3', width: 720, height: 600, file_size: 96_000 },
+]
+
 /** A new user's private chat with the bot. */
 export function openChat() {
   const telegramId = newTelegramId()
@@ -311,6 +325,19 @@ export function openChat() {
     const later = await handleUpdate(deps, {
       message: { message_id: messageId, text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } },
     })
+    if (later) await later()
+  }
+
+  /**
+   * Sends the bot a photo, with the words under it when it has any, as `send` sends it a message of text: with an id
+   * of its own unless it is told one, and with what the bot leaves for later done at once. `photo` is the photo in
+   * its sizes, as Telegram posts it: an update comes to the bot as JSON that nothing has checked, so it can be
+   * anything.
+   */
+  const sendPhoto = async (caption?: string, messageId = ++lastMessage, photo: unknown = PHOTO) => {
+    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
+    const update: object = { message: { message_id: messageId, photo, caption, chat, from } }
+    const later = await handleUpdate(deps, update)
     if (later) await later()
   }
 
@@ -371,6 +398,23 @@ export function openChat() {
       const [reply] = sentRich.splice(beforeRich)
       expect(reply.chatId).toBe(telegramId)
       return reply.message
+    },
+    sendPhoto,
+    /**
+     * Sends the bot a photo, as `sendPhoto` does, and returns what the bot has left in the chat for it when it is
+     * done: the rich message, when it sent one, and its messages of text, whole. They are taken out of `sentRich`
+     * and `sent`. The placeholder is among the messages of text only when it is still there, which it is when
+     * something was said in its place: it then says that.
+     */
+    async photo(caption?: string, messageId?: number): Promise<{ rich: RichMessage | undefined; texts: Posted[] }> {
+      const [before, beforePosted, beforeRich] = [sent.length, posted.length, sentRich.length]
+      await sendPhoto(caption, messageId)
+      sent.splice(before)
+      const [rich, ...more] = sentRich.splice(beforeRich)
+      expect(more).toEqual([])
+      const texts = posted.slice(beforePosted)
+      for (const reply of [...texts, ...(rich ? [rich] : [])]) expect(reply.chatId).toBe(telegramId)
+      return { rich: rich?.message, texts }
     },
     pressWith,
     /** Presses the button with the label under a message. */

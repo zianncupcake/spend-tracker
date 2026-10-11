@@ -101,8 +101,8 @@ describe('/add', () => {
     ['03/10', '3 Oct', '2026-10-03T12:00:00+08:00'],
     ['3/10/26', '3 Oct', '2026-10-03T12:00:00+08:00'],
     ['3/10/2026', '3 Oct', '2026-10-03T12:00:00+08:00'],
-    // The first day of the card's current window, which is October.
-    ['1/10', '1 Oct', '2026-10-01T12:00:00+08:00'],
+    // The first day that the card's current window counts, which is October: two days before it begins.
+    ['29/9', '29 Sep', '2026-09-29T12:00:00+08:00'],
     // With its year first, a day of any window.
     ['2025-12-25', '25 Dec', '2025-12-25T12:00:00+08:00'],
     ['2024-02-29', '29 Feb', '2024-02-29T12:00:00+08:00'],
@@ -138,8 +138,8 @@ describe('/add', () => {
     // The start of a merchant's name, which no day of October is written like.
     '24/7 Fitness gym',
     '7/11 Slurpee',
-    // A day before the card's current window.
-    '30/9 Lunch',
+    // A day before those that the card's current window counts.
+    '28/9 Lunch',
     '25/12/25 Lunch',
     // A day that is still to come. The latest 10 October that is not is last year's.
     '10/10 Lunch',
@@ -183,17 +183,21 @@ describe('/add', () => {
 
   it('goes by the current window of the card that the purchase was made with', async () => {
     const chat = openChat()
-    await chat.say('/addcard visa 1234 statement 15') // 16 September to 15 October
-    await chat.say('/addcard amex 0005 calendar') // October
+    await chat.say('/addcard visa 1234 statement 15') // 16 September to 15 October, counted from 14 September
+    await chat.say('/addcard amex 0005 calendar') // October, counted from 29 September
 
-    await chat.ask('/add visa 5 16/9 Lunch')
-    await chat.ask('/add visa 5 15/9 Lunch')
-    await chat.ask('/add amex 5 16/9 Lunch')
+    await chat.ask('/add visa 5 14/9 Lunch')
+    await chat.ask('/add visa 5 13/9 Lunch')
+    await chat.ask('/add amex 5 14/9 Lunch')
+    // On the last two days of October the current window is November. A day of October is still taken for one.
+    clock.now = new Date('2026-10-31T12:00:00+08:00')
+    await chat.ask('/add amex 5 5/10 Lunch')
 
     expect(await rowsOf(await chat.userId())).toMatchObject([
-      { card_last4: '1234', merchant: 'Lunch', occurred_at: seconds('2026-09-16T12:00:00+08:00') },
-      { card_last4: '1234', merchant: '15/9 Lunch', occurred_at: NOW_SECONDS },
-      { card_last4: '0005', merchant: '16/9 Lunch', occurred_at: NOW_SECONDS },
+      { card_last4: '1234', merchant: 'Lunch', occurred_at: seconds('2026-09-14T12:00:00+08:00') },
+      { card_last4: '1234', merchant: '13/9 Lunch', occurred_at: NOW_SECONDS },
+      { card_last4: '0005', merchant: '14/9 Lunch', occurred_at: NOW_SECONDS },
+      { card_last4: '0005', merchant: 'Lunch', occurred_at: seconds('2026-10-05T12:00:00+08:00') },
     ])
   })
 
@@ -242,7 +246,8 @@ describe('/add', () => {
     const chat = await chatWithCards()
     await chat.ask('/add visa 10 today')
 
-    const reply = await ask(chat, '/add visa 99 2026-09-30 last month')
+    // The last day that October does not count: it counts the last two days of September.
+    const reply = await ask(chat, '/add visa 99 2026-09-28 last month')
 
     expect(reply.text.split('\n')[1]).toBe('visa ••••1234: SGD 10.00 in 1 purchase, resets 1 Nov')
     expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 10.00 in 1 purchase, resets 1 Nov')
@@ -448,6 +453,85 @@ describe('/add for a card that is linked to a product', () => {
     await chat.ask('/add evol 12.50 Lunch')
 
     expect(await rowsOf(await chat.userId())).toMatchObject([{ currency: 'SGD' }])
+  })
+})
+
+describe('/add of a purchase that was made in the last two days of a window', () => {
+  /** What a reply says after its first line, which is the purchase. */
+  const after = (reply: Posted) => reply.text.split('\n').slice(1)
+
+  it('says that it is counted in the statement month that begins after the statement closes', async () => {
+    const chat = openChat()
+    await chat.say('/addcard evol 5678 statement 5 uob-evol')
+    const counted = (closes: string, begins: string) =>
+      `This purchase was made in the last 2 days before the statement ${closes}, and so is counted in the statement ` +
+      `month that ${begins}. The bank counts a purchase by the day it is posted.`
+    /** The line that a reply ends with, which says where the purchase is sorted. */
+    const ONLINE = expect.stringMatching(/^ID \d+: Online \/ Mobile Contactless Spend$/)
+
+    // On the 4th, the day before the statement closes, the card's total is that of the statement month to come. A
+    // purchase of the day before counts for the cycle that closes, and one of today for the one that begins on the 6th.
+    clock.now = new Date('2026-10-04T12:00:00+08:00')
+    const before = await ask(chat, '/add evol 1 2026-10-03 Breakfast')
+    const today = await ask(chat, '/add evol 20 Lunch')
+    expect(after(before)).toEqual(['evol ••••5678: no purchases, resets 6 Nov', ONLINE])
+    expect(after(today)).toEqual([
+      'evol ••••5678: SGD 20.00 in 1 purchase, resets 6 Nov',
+      counted('closes on 5 Oct', 'begins on 6 Oct'),
+      ONLINE,
+    ])
+    // The note stays where it is when a press moves the purchase: only the last line says where the purchase is.
+    await chat.press(today, 'Mark as Other Spend')
+    expect(after(today)).toEqual([
+      'evol ••••5678: SGD 20.00 in 1 purchase, resets 6 Nov',
+      counted('closes on 5 Oct', 'begins on 6 Oct'),
+      expect.stringMatching(/^ID \d+: Other Spend$/),
+    ])
+
+    // Once the statement has closed, the same is said of a purchase of the 5th as of what has been. One of the 6th
+    // was made in the statement month that counts it.
+    clock.now = NOW
+    const closing = await ask(chat, '/add evol 50 2026-10-05 Dinner')
+    const first = await ask(chat, '/add evol 100 2026-10-06 Groceries')
+    expect(after(closing)).toEqual([
+      'evol ••••5678: SGD 70.00 in 2 purchases, resets 6 Nov',
+      counted('closed on 5 Oct', 'began on 6 Oct'),
+      ONLINE,
+    ])
+    expect(after(first)).toEqual(['evol ••••5678: SGD 170.00 in 3 purchases, resets 6 Nov', ONLINE])
+  })
+
+  it('says that it is counted in the next month, on a card whose window is the calendar month', async () => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+    const counted = (made: string, next: string) =>
+      `This purchase was made in the last 2 days of ${made}, and so is counted in ${next}. The bank counts a ` +
+      'purchase by the day it is posted.'
+
+    // September has 30 days. October counts its 29th and its 30th, and not its 28th.
+    const earlier = await ask(chat, '/add visa 1 2026-09-28 Breakfast')
+    const dayBefore = await ask(chat, '/add visa 20 2026-09-29 Lunch')
+    const lastDay = await ask(chat, '/add visa 50 2026-09-30 Dinner')
+    const first = await ask(chat, '/add visa 100 2026-10-01 Groceries')
+    expect(after(earlier)).toEqual(['visa ••••1234: no purchases, resets 1 Nov'])
+    expect(after(dayBefore)).toEqual([
+      'visa ••••1234: SGD 20.00 in 1 purchase, resets 1 Nov',
+      counted('September', 'October'),
+    ])
+    expect(after(lastDay)).toEqual([
+      'visa ••••1234: SGD 70.00 in 2 purchases, resets 1 Nov',
+      counted('September', 'October'),
+    ])
+    expect(after(first)).toEqual(['visa ••••1234: SGD 170.00 in 3 purchases, resets 1 Nov'])
+
+    // On the 31st of October a purchase of today is counted in November, which is the current month from the 30th.
+    clock.now = new Date('2026-10-31T12:00:00+08:00')
+    const today = await ask(chat, '/add visa 5 Coffee')
+    expect(after(today)).toEqual([
+      'visa ••••1234: SGD 5.00 in 1 purchase, resets 1 Dec',
+      counted('October', 'November'),
+    ])
+    expect(today.buttons).toBeUndefined()
   })
 })
 

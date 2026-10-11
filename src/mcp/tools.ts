@@ -39,6 +39,9 @@ export async function spendingSummary(store: Store, now: Date, timeZone: string)
       windowType: card.windowType,
       windowStart: window.start.toISOString(),
       windowEnd: window.end.toISOString(),
+      // From when the total counts purchases, where that is not from the start of the window: see SUMMARY in
+      // ./server. Only a card whose product has a window count the purchases of its own days is without it.
+      ...(window.counts && { countedFrom: window.counts.start.toISOString() }),
       totals: totals.map(({ currency, amountMinor }) => ({ currency, amount: decimal(amountMinor), amountMinor })),
       purchaseCount: count,
     })),

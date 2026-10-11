@@ -11,6 +11,7 @@ const hostileContactEscaped = '&quot;O&#39;Neil &amp; Co&quot; &lt;img src=x one
 const everyPage: [name: string, page: () => Response][] = [
   ['the homepage', () => homePage(operator)],
   ['the privacy policy', () => privacyPage(operator, true)],
+  ['the privacy policy of a service that reads photos', () => privacyPage(operator, true, true)],
   ['the code page', () => codePage('123456')],
   ['the expired-link page', () => problemPage('expired')],
   ['the failure page', () => problemPage('failed')],
@@ -38,22 +39,27 @@ describe('the homepage', () => {
 })
 
 describe('the privacy policy', () => {
-  /** The policy as a reader has it, to whom the line breaks in the page's source are only spaces. */
-  const policy = async (assistant: boolean) => (await privacyPage(operator, assistant).text()).replace(/\s+/g, ' ')
+  /**
+   * The policy as a reader has it, to whom the line breaks in the page's source are only spaces. `photos` is whether
+   * the bot reads photos, which it does with a model of the provider that answers its questions.
+   */
+  const policy = async (assistant: boolean, photos = false) =>
+    (await privacyPage(operator, assistant, photos).text()).replace(/\s+/g, ' ')
 
   // What the policy says of the bot's assistant, which a service has when it is set up with an AI provider.
   const ASSISTANT = [
     '<h2>Questions that you ask the bot</h2>',
     'A text message that you send the bot is read as a question when it is not a command, and is not the 6-digit ' +
       'code of a sign-in.',
-    'To answer it, your question and the card and purchase details needed to answer it are sent to an AI provider ' +
-      'chosen by Example Operator, which produces the answer.',
-    'The details are those that the answering calls for, out of these: your time zone, the nickname, last four ' +
-      'digits, window, totals and number of purchases of each of your cards and, of your purchases, the id, the ' +
-      'time, the last four digits of the card, the amount, the currency, the merchant and the reward category.',
+    'To answer it, your question is sent to an AI provider chosen by Example Operator, which produces the answer.',
+    'Other details of your cards and purchases are sent only as the answering calls for them, out of these: the ' +
+      'last four digits, window, totals and number of purchases of each of your cards and, of your purchases, the ' +
+      'id, the time, the last four digits of the card, the amount, the currency, the merchant and the reward ' +
+      'category.',
     'Nothing is sent to the AI provider unless you ask a question.',
     'An AI provider chosen by Example Operator answers the questions that you ask the bot. It is sent each ' +
-      'question and the card and purchase details needed to answer it, and nothing unless you ask a question.',
+      'question and the card and purchase details needed to answer it, with your time zone and with the nicknames ' +
+      'and category names of your cards, and nothing unless you ask a question.',
   ]
 
   it('names the operator and how to reach them, and when it was last updated', async () => {
@@ -92,6 +98,41 @@ describe('the privacy policy', () => {
     ])
   })
 
+  it('says that the AI provider works out what the bot is asked to do, and that what removes or revokes waits for a confirmation', async () => {
+    const said =
+      'The AI provider also works out what you ask the bot to do in such a message, such as adding a purchase or ' +
+      'changing your time zone, and the bot then does it. What removes or revokes something, such as taking a ' +
+      'purchase out or disconnecting your Gmail, is done only after you confirm it.'
+
+    for (const text of [await policy(true), await policy(true, true)]) {
+      // It is said once, in a paragraph of its own: the one that follows what a question is sent with.
+      expect(text.split(`<p>${said}</p>`)).toHaveLength(2)
+      expect(text).toMatch(/Nothing is sent to the AI provider unless you ask a question[^.]*\.<\/p> <p>The AI provider also/)
+      expect(text).toContain('Last updated: 11 October 2026')
+    }
+    // A service with no assistant has nobody to work anything out, and says none of it.
+    expect(await policy(false)).not.toMatch(/what you ask the bot to do|only after you confirm/)
+  })
+
+  it('says what goes to the AI provider with every question, whether or not the question needs it', async () => {
+    const said =
+      'With every question go your time zone, the day and the time that it is there, the nicknames of your cards ' +
+      'and the names of the reward categories that their purchases can be sorted into, whether or not the ' +
+      'question needs them.'
+
+    for (const text of [await policy(true), await policy(true, true)]) {
+      // It is said once, between what a question is sent to and what else is sent only when it is called for.
+      expect(text.split(said)).toHaveLength(2)
+      expect(text).toContain(`which produces the answer. ${said} Other details of your cards and purchases are sent`)
+      // Nothing that is sent with every question is still said to be sent only when it is called for.
+      const [, asNeeded = ''] = /out of these: ([^.]*)\./.exec(text) ?? []
+      expect(asNeeded).toMatch(/^the last four digits, window, totals/)
+      expect(asNeeded).not.toMatch(/time zone|nickname/)
+      expect(text).toContain('Last updated: 11 October 2026')
+    }
+    expect(await policy(false)).not.toContain('With every question')
+  })
+
   it('says nothing of questions that are asked, or of an AI provider, where the bot has no assistant', async () => {
     const text = await policy(false)
 
@@ -103,11 +144,73 @@ describe('the privacy policy', () => {
     expect(text).toContain('An AI assistant that you connect with your assistant access token')
   })
 
+  // What the policy says of photos, on a service that reads them. The first eight are said of nothing else.
+  const PHOTOS = [
+    '<h2>Photos that you send the bot</h2>',
+    'A photo that you send the bot is sent to the same AI provider to be read, with its caption, with your time ' +
+      'zone and with the nicknames and category names of your cards.',
+    'The provider reads the purchases out of it, and the bot adds them.',
+    'The photo is not stored.',
+    'When the bot cannot tell which card the purchases were made with, or is not sure of an amount or a date, it ' +
+      'asks you before it adds them.',
+    '<li>The purchases read from a photo that you send the bot, which are stored as the purchases that you add by ' +
+      'hand are. The photo itself is not stored.</li>',
+    '<li>The purchases from a photo that the bot asks you about before it adds them. They wait for your answer for ' +
+      'a day at the most, and are then deleted.</li>',
+    'An AI provider chosen by Example Operator answers the questions that you ask the bot, and reads the photos that ' +
+      'you send it. It is sent each question and the card and purchase details needed to answer it, and each photo ' +
+      'with its caption, each of them with your time zone and with the nicknames and category names of your cards, ' +
+      'and nothing unless you ask a question or send a photo.',
+    'Nothing is sent to the AI provider unless you ask a question or send a photo.',
+  ]
+
+  it('says what becomes of a photo, where the bot reads photos: what is sent, to whom, and what is stored of it', async () => {
+    const text = await policy(true, true)
+
+    for (const words of PHOTOS) expect(text).toContain(words)
+    // Each is said where it belongs: with what is stored, on its own after what is said of questions, and with who
+    // else handles the data.
+    const places = [
+      '<h2>What is stored</h2>',
+      '<li>The purchases that you add by hand:',
+      PHOTOS[5],
+      PHOTOS[6],
+      '<li>The reward category that each purchase is sorted into.</li>',
+      '<h2>Questions that you ask the bot</h2>',
+      '<h2>Photos that you send the bot</h2>',
+      '<h2>Who else handles your data</h2>',
+      PHOTOS[7],
+      '<h2>Data from Google</h2>',
+    ].map((words) => text.indexOf(words))
+    expect(places[0]).toBeGreaterThan(-1)
+    expect(places).toEqual(places.toSorted((before, after) => before - after))
+    // What a question is sent with is still said, and what is said of when nothing is sent is said of both.
+    expect(text).toContain('To answer it, your question is sent to an AI provider chosen by Example Operator')
+    expect(text).not.toContain('unless you ask a question.')
+    // The page is dated as it was.
+    expect(text).toContain('Last updated: 11 October 2026')
+  })
+
   it.each([
-    ['with an assistant', true],
-    ['with none', false],
-  ])('says that a log is kept, what a line of it holds and what one never does, %s', async (_, assistant) => {
-    const text = await policy(assistant)
+    ['an assistant and no model that reads photos', true, false],
+    ['no assistant', false, false],
+    // A service reads photos with the model of the provider that answers its questions, so it reads none without one.
+    ['no assistant, whatever is said of photos', false, true],
+  ])('says nothing of photos where the bot reads none: with %s', async (_, assistant, photos) => {
+    const text = await policy(assistant, photos)
+
+    for (const words of [...PHOTOS.slice(0, 8), 'photo', 'Photo', 'caption']) expect(text).not.toContain(words)
+    // What it says with an assistant is what it said before the bot read photos.
+    if (assistant) expect(text).toContain('Nothing is sent to the AI provider unless you ask a question.</p>')
+    expect(text).toContain('Last updated: 11 October 2026')
+  })
+
+  it.each([
+    ['with an assistant', true, false],
+    ['with an assistant that reads photos', true, true],
+    ['with none', false, false],
+  ])('says that a log is kept, what a line of it holds and what one never does, %s', async (_, assistant, photos) => {
+    const text = await policy(assistant, photos)
 
     const said =
       'The service also keeps a log of what it did, for finding faults. ' +
@@ -127,10 +230,11 @@ describe('the privacy policy', () => {
   })
 
   it.each([
-    ['with an assistant', true],
-    ['with none', false],
-  ])('says what Cloudflare keeps of each request besides, after what it says of the log, %s', async (_, assistant) => {
-    const text = await policy(assistant)
+    ['with an assistant', true, false],
+    ['with an assistant that reads photos', true, true],
+    ['with none', false, false],
+  ])('says what Cloudflare keeps of each request besides, after what it says of the log, %s', async (_, assistant, photos) => {
+    const text = await policy(assistant, photos)
 
     const said =
       'Cloudflare also keeps, for the same few days, its own record of each request to the service. ' +
@@ -146,10 +250,11 @@ describe('the privacy policy', () => {
   })
 
   it.each([
-    ['with an assistant', true],
-    ['with none', false],
-  ])('says what is accessed, what is stored, who else handles it and how to remove it, %s', async (_, assistant) => {
-    const text = await policy(assistant)
+    ['with an assistant', true, false],
+    ['with an assistant that reads photos', true, true],
+    ['with none', false, false],
+  ])('says what is accessed, what is stored, who else handles it and how to remove it, %s', async (_, assistant, photos) => {
+    const text = await policy(assistant, photos)
 
     for (const words of [
       'read-only access',
@@ -198,6 +303,17 @@ describe('the privacy policy', () => {
     // The name is in what is said of the assistant too, in two places.
     expect(html).toContain(`an AI provider chosen by ${hostileNameEscaped}, which produces the answer`)
     expect(html).toContain(`An AI provider chosen by ${hostileNameEscaped} answers the questions`)
+    expect(html).not.toContain('<script')
+    expect(html).not.toContain('<img')
+  })
+
+  it("escapes the operator's details in what it says of photos too", async () => {
+    const html = (await privacyPage(hostile, true, true).text()).replace(/\s+/g, ' ')
+
+    expect(html).toContain(
+      `An AI provider chosen by ${hostileNameEscaped} answers the questions that you ask the bot, and reads the photos`,
+    )
+    expect(html).toContain(hostileContactEscaped)
     expect(html).not.toContain('<script')
     expect(html).not.toContain('<img')
   })

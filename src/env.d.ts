@@ -15,6 +15,9 @@ declare namespace Cloudflare {
     AI_API_KEY?: string
     AI_BASE_URL?: string
     AI_MODEL?: string
+    // The model that reads photos, which is asked with the same key at the same address. It has a default only
+    // when AI_BASE_URL is left out.
+    AI_VISION_MODEL?: string
   }
   interface GlobalProps {
     mainModule: typeof import('./index')

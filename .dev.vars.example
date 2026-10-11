@@ -23,3 +23,7 @@ AI_API_KEY=
 # they are https://api.groq.com/openai/v1 and openai/gpt-oss-120b.
 AI_BASE_URL=
 AI_MODEL=
+# Optional. The model that reads the purchases out of a photo, which has to be one that takes images. It is asked
+# at the same address, with the same key. Left empty, it is qwen/qwen3.8-27b when AI_BASE_URL is left empty too.
+# With an AI_BASE_URL of your own and no model named here, the bot reads no photos.
+AI_VISION_MODEL=

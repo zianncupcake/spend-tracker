@@ -1,8 +1,9 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
+import { spendingSummary } from '../src/mcp/tools'
 import { storeFor } from '../src/store'
-import { openChat } from './connect-helpers'
-import { userCount } from './helpers'
+import { clock, NOW, openChat } from './connect-helpers'
+import { BY_PURCHASE_DAY, inCatalogue, linesOf, userCount } from './helpers'
 import { record } from './mcp-helpers'
 
 // Linking a card to a product of the catalogue. The clock stands at 12:00 on 9 October 2026 in Singapore.
@@ -101,11 +102,13 @@ describe('/product', () => {
 
   it("sorts the purchases of the card's current window that the product's rules settle, and no others", async () => {
     const [chat, bystander] = [openChat(), openChat()]
-    for (const each of [chat, bystander]) await each.say('/addcard evol 1234 calendar') // October
+    // October, which counts the purchases made from 29 September on.
+    for (const each of [chat, bystander]) await each.say('/addcard evol 1234 calendar')
     await chat.say('/addcard amex 0005 calendar')
     const userId = await chat.userId()
     await record(userId, [
-      ['2026-09-30T23:00:00+08:00', 1598, 'SGD', '1234', 'NETFLIX.COM LAST MONTH'],
+      ['2026-09-28T23:00:00+08:00', 1598, 'SGD', '1234', 'NETFLIX.COM LAST MONTH'],
+      ['2026-09-30T23:00:00+08:00', 1598, 'SGD', '1234', 'NETFLIX.COM ON THE LAST DAY'],
       ['2026-10-02T10:00:00+08:00', 1598, 'SGD', '1234', 'NETFLIX.COM'],
       ['2026-10-03T10:00:00+08:00', 500, 'USD', '1234', 'AIRLINE'],
       ['2026-10-04T10:00:00+08:00', 1240, 'SGD', '1234', 'COFFEE PLACE'],
@@ -130,6 +133,7 @@ describe('/product', () => {
     // Nothing is stored for the purchase that no rule settles. It is online, as the product takes a purchase to be.
     expect(await categoriesOf(userId)).toEqual({
       'NETFLIX.COM LAST MONTH': null,
+      'NETFLIX.COM ON THE LAST DAY': 'selected',
       'NETFLIX.COM': 'selected',
       AIRLINE: 'fx',
       'COFFEE PLACE': null,
@@ -180,5 +184,57 @@ describe('/addcard with the key of a product', () => {
     await chat.say('/addcard evol 1234 calendar uob-evol')
 
     expect(await categoriesOf(userId)).toEqual({ SPOTIFY: 'selected', RAMEN: 'fx', 'COFFEE PLACE': null })
+  })
+})
+
+describe('a card of a product whose terms count a purchase by the day that it was made', () => {
+  // The catalogue has no such product, so a made-up one is put there.
+  inCatalogue(BY_PURCHASE_DAY)
+
+  it('has a window that counts the purchases of its own days, and nothing said of which days those are', async () => {
+    const chat = openChat()
+    expect(await chat.say(`/addcard plain 1234 statement 5 ${BY_PURCHASE_DAY.key}`)).toBe(
+      'Added plain ••••1234: statement closes on the 5th of the month, Made-up Card.',
+    )
+    const userId = await chat.userId()
+    // The cycle is that of 6 October to 5 November. The 4th and the 5th are of the one before it.
+    await record(userId, [
+      ['2026-10-04T10:00:00+08:00', 2000, 'SGD', '1234'],
+      ['2026-10-05T10:00:00+08:00', 5000, 'SGD', '1234'],
+      ['2026-10-06T10:00:00+08:00', 10000, 'SGD', '1234'],
+    ])
+
+    // No line under the card says which days its total counts, and none under the others says why.
+    expect(await chat.say('/spend')).toBe(
+      'plain ••••1234: SGD 100.00 in 1 purchase, resets 6 Nov\n\nTotals are estimated from bank alerts.',
+    )
+    const detail = linesOf(await chat.rich('/spend plain'))
+    expect(detail[0]).toBe('plain ••••1234: 6 Oct to 5 Nov')
+    expect(detail.slice(-3)).toEqual([
+      'Total: SGD 100.00 in 1 purchase, resets 6 Nov',
+      'Minimum spend: SGD 100.00 of SGD 800.00',
+      "Limits are from the bank's terms for the Made-up Card, as of 10 June 2026.",
+    ])
+    // An assistant is given the window, and nothing of a total that counts from before it.
+    expect((await spendingSummary(storeFor(env.DB, userId), NOW, 'Asia/Singapore')).cards).toEqual([
+      {
+        nickname: 'plain',
+        last4: '1234',
+        windowType: 'statement',
+        windowStart: '2026-10-05T16:00:00.000Z',
+        windowEnd: '2026-11-05T16:00:00.000Z',
+        totals: [{ currency: 'SGD', amount: '100.00', amountMinor: 10000 }],
+        purchaseCount: 1,
+      },
+    ])
+
+    // On the day that the statement closes the window is still that one, and a purchase of the day is in it, with
+    // nothing said of where it is counted.
+    clock.now = new Date('2026-11-05T12:00:00+08:00')
+    const [reply] = await chat.ask('/add plain 7 Lunch')
+    expect(reply.text.split('\n').slice(1)).toEqual([
+      'plain ••••1234: SGD 107.00 in 2 purchases, resets 6 Nov',
+      expect.stringMatching(/^ID \d+: Online \/ Mobile Contactless Spend$/),
+    ])
   })
 })

@@ -65,26 +65,56 @@ amount, currency, merchant, last four card digits and time from each one. The te
 
 /**
  * Keep this in step with what the code does: it is a promise to the people who connect their mail. `assistant` is
- * whether the bot has one, which it has when the service is set up with an AI provider. What becomes of a question
- * is said only where a question is answered.
+ * whether the bot has one, which it has when the service is set up with an AI provider, and `photos` is whether the
+ * bot reads photos, which it does when that provider has a model that reads them. What becomes of a question is
+ * said only where a question is answered, and what becomes of a photo only where a photo is read.
  */
-export function privacyPage(operator: Operator, assistant: boolean): Response {
+export function privacyPage(operator: Operator, assistant: boolean, photos = false): Response {
   const name = escapeHtml(operator.name)
   const contact = escapeHtml(operator.contact)
-  // What the policy says of the assistant, each where it belongs: what is sent to the AI provider and when, and that
-  // provider among those who handle a user's data.
+  // A service reads photos with the model of the provider that answers its questions, so it reads none without one.
+  const reads = assistant && photos
+  // What the policy says of the assistant, each where it belongs: what is sent to the AI provider and when, what the
+  // provider makes of a message that asks for something to be done, and that provider among those who handle a
+  // user's data. Where the bot reads photos, a photo is sent to the provider too.
+  const unless = reads ? 'unless you ask a question or send a photo' : 'unless you ask a question'
   const questions = `
 <h2>Questions that you ask the bot</h2>
 <p>A text message that you send the bot is read as a question when it is not a command, and is not the 6-digit
-code of a sign-in. To answer it, your question and the card and purchase details needed to answer it are sent to an
-AI provider chosen by ${name}, which produces the answer. The details are those that the answering calls for, out
-of these: your time zone, the nickname, last four digits, window, totals and number of purchases of each of your
-cards and, of your purchases, the id, the time, the last four digits of the card, the amount, the currency, the
-merchant and the reward category. Nothing is sent to the AI provider unless you ask a question.</p>
+code of a sign-in. To answer it, your question is sent to an AI provider chosen by ${name}, which produces the
+answer. With every question go your time zone, the day and the time that it is there, the nicknames of your cards
+and the names of the reward categories that their purchases can be sorted into, whether or not the question needs
+them. Other details of your cards and purchases are sent only as the answering calls for them, out of these: the
+last four digits, window, totals and number of purchases of each of your cards and, of your purchases, the id, the
+time, the last four digits of the card, the amount, the currency, the merchant and the reward category. Nothing is
+sent to the AI provider ${unless}.</p>
+<p>The AI provider also works out what you ask the bot to do in such a message, such as adding a purchase or
+changing your time zone, and the bot then does it. What removes or revokes something, such as taking a purchase
+out or disconnecting your Gmail, is done only after you confirm it.</p>
 `
-  const provider = `
+  // What the policy says of photos, where the bot reads them: what is sent, and what is stored of it and for how long.
+  const reading = `
+<h2>Photos that you send the bot</h2>
+<p>A photo that you send the bot is sent to the same AI provider to be read, with its caption, with your time zone
+and with the nicknames and category names of your cards. The provider reads the purchases out of it, and the bot
+adds them. The photo is not stored. When the bot cannot tell which card the purchases were made with, or is not
+sure of an amount or a date, it asks you before it adds them.</p>
+`
+  const fromPhotos = `
+<li>The purchases read from a photo that you send the bot, which are stored as the purchases that you add by hand
+are. The photo itself is not stored.</li>
+<li>The purchases from a photo that the bot asks you about before it adds them. They wait for your answer for a day
+at the most, and are then deleted.</li>`
+  const provider = reads
+    ? `
+<li>An AI provider chosen by ${name} answers the questions that you ask the bot, and reads the photos that you send
+it. It is sent each question and the card and purchase details needed to answer it, and each photo with its
+caption, each of them with your time zone and with the nicknames and category names of your cards, and nothing
+unless you ask a question or send a photo.</li>`
+    : `
 <li>An AI provider chosen by ${name} answers the questions that you ask the bot. It is sent each question and the
-card and purchase details needed to answer it, and nothing unless you ask a question.</li>`
+card and purchase details needed to answer it, with your time zone and with the nicknames and category names of your
+cards, and nothing unless you ask a question.</li>`
   return page(
     'Privacy policy - Spend Tracker',
     `<h1>Privacy policy</h1>
@@ -107,7 +137,7 @@ digits of the card and the time.</p>
 <li>The details taken from each alert: amount, currency, merchant, last four card digits and time, with the bank
 that sent the alert and an id of the alert, so that it is not counted twice.</li>
 <li>The purchases that you add by hand: the amount, currency, merchant and date that you give each one, with the
-id of the Telegram message that added it, so that it is not counted twice.</li>
+id of the Telegram message that added it, so that it is not counted twice.</li>${reads ? fromPhotos : ''}
 <li>The reward category that each purchase is sorted into.</li>
 <li>A purchase that you take out, which stays stored and marked as taken out, so that its alert is not counted
 again. It is left out of every total and list, and is deleted with everything else.</li>
@@ -126,7 +156,7 @@ few days.</p>
 comes from you, which is a page that you open in a browser, such as the sign-in link, or a request from an AI
 assistant that you connect, that record holds the address that was asked for, your IP address, the rough location
 and the network that Cloudflare works out from it, and what your browser or assistant sends about itself.</p>
-${assistant ? questions : ''}
+${assistant ? questions : ''}${reads ? reading : ''}
 <h2>Who else handles your data</h2>
 <ul>
 <li>Cloudflare hosts the service and its database.</li>

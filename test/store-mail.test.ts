@@ -1,8 +1,9 @@
 import { env } from 'cloudflare:workers'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { deleteUser, findOrCreateUser, storeFor } from '../src/store'
 import { claimAttempt, connectStoreFor } from '../src/store-connect'
-import { mailStoreFor, removeExpiredAttempts, takeNextMailbox } from '../src/store-mail'
+import { heldStoreFor } from '../src/store-held'
+import { mailStoreFor, removeExpiredAttempts, removeExpiredBatches, takeNextMailbox } from '../src/store-mail'
 import { newTelegramId } from './helpers'
 
 const db = env.DB
@@ -10,7 +11,8 @@ const NOW = 1_800_000_000
 /** When the connections in these tests are made, unless a test says otherwise. */
 const CONNECTED = NOW - 3600
 
-// Whose turn it is, and which sign-ins have expired, are looked up across all users. So every test starts with none.
+// Whose turn it is, which sign-ins have expired, and which held purchases nobody answered for, are looked up across
+// all users. So every test starts with none.
 beforeEach(async () => {
   await db.prepare('DELETE FROM users').run()
 })
@@ -49,7 +51,7 @@ function purchase(sourceId: string) {
 
 // The functions below read and write the tables directly, as the counts in helpers.ts do.
 
-async function ownersOf(table: 'connect_attempts' | 'seen_alerts'): Promise<number[]> {
+async function ownersOf(table: 'connect_attempts' | 'seen_alerts' | 'held_batches'): Promise<number[]> {
   const { results } = await db.prepare(`SELECT owner_id FROM ${table} ORDER BY owner_id`).all<{ owner_id: number }>()
   return results.map((row) => row.owner_id)
 }
@@ -98,6 +100,62 @@ describe('sign-ins that have expired', () => {
     expect(second).toHaveLength(1)
     expect(new Set([...first, ...second].map((held) => held?.refreshTokenEnc)).size).toBe(4)
     expect(await ownersOf('connect_attempts')).toEqual([])
+  })
+})
+
+describe('held purchases that nobody answered for', () => {
+  const DAY = 24 * 3600
+
+  /** Holds a batch of one purchase for a user, for the message with the id, from a time on. */
+  function hold(userId: number, messageId: number, from: number) {
+    const read = { occurredAt: NOW, amountMinor: 1000, currency: 'SGD', merchant: 'COFFEE PLACE' }
+    const batch = { messageId, cardLast4: '1234', category: null, purchases: [{ place: 0, ...read, unsure: true }] }
+    return heldStoreFor(db, userId).hold(batch, from)
+  }
+
+  it('are deleted once the day that they are held is up, whoever they are held for, and are counted', async () => {
+    const [first, second, third] = [await newUser(), await newUser(), await newUser()]
+    await hold(first.id, 71, NOW - DAY - 60)
+    await hold(first.id, 72, NOW - DAY)
+    await hold(second.id, 71, NOW - 2 * DAY)
+    // A second short of a day, and held just now.
+    await hold(second.id, 73, NOW - DAY + 1)
+    await hold(third.id, 71, NOW)
+
+    expect(await removeExpiredBatches(db, NOW)).toBe(3)
+
+    expect(await ownersOf('held_batches')).toEqual([second.id, third.id])
+    expect(await heldStoreFor(db, second.id).find(73, NOW)).toMatchObject({ messageId: 73 })
+    // There is nothing left for the next run to delete.
+    expect(await removeExpiredBatches(db, NOW)).toBe(0)
+  })
+
+  it('are deleted in one statement, however many there are', async () => {
+    const user = await newUser()
+    for (let messageId = 1; messageId <= 30; messageId++) await hold(user.id, messageId, NOW - DAY)
+    const queried = vi.spyOn(db, 'prepare')
+
+    expect(await removeExpiredBatches(db, NOW)).toBe(30)
+
+    expect(queried).toHaveBeenCalledTimes(1)
+    queried.mockRestore()
+    expect(await ownersOf('held_batches')).toEqual([])
+  })
+
+  it('are looked for by when their time is up, so that a run does not read through all that is still held', async () => {
+    const user = await newUser()
+    for (let messageId = 1; messageId <= 30; messageId++) await hold(user.id, messageId, NOW)
+
+    // The statement of the sweep, as the database plans it and as it then counts the rows that it read.
+    const sweep = 'DELETE FROM held_batches WHERE expires_at <= ?'
+    const plan = await db.prepare(`EXPLAIN QUERY PLAN ${sweep}`).bind(NOW).all<{ detail: string }>()
+    const swept = await db.prepare(sweep).bind(NOW).run()
+
+    expect(plan.results.map((step) => step.detail).join('\n')).toContain('USING COVERING INDEX held_batches_expires_at')
+    // One row at the most, where the index ends for it, and not the 30.
+    expect(swept.meta.changes).toBe(0)
+    expect(swept.meta.rows_read).toBeLessThanOrEqual(1)
+    expect(await ownersOf('held_batches')).toHaveLength(30)
   })
 })
 

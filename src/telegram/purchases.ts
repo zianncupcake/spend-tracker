@@ -1,17 +1,20 @@
 // What the bot says of purchases one by one: the line that a purchase is shown on, the buttons that move it to
-// another category of its card's product, and the tables that the purchases of a card's window are listed in. A
-// table is set out in two ways: in the cells of a rich message, which is how it is sent, and as text, which is sent
-// in its place when Telegram does not take the rich message.
+// another category of its card's product, the buttons under purchases that the bot asks about before it adds them,
+// and the tables that the purchases of a card's window are listed in. A table is set out in two ways: in the cells
+// of a rich message, which is how it is sent, and as text, which is sent in its place when Telegram does not take
+// the rich message. The buttons under a message that asks before a command is run are here too, with the bot's
+// other buttons: what each of them sends back is told from what the others send by how it begins.
 //
-// A merchant's name is text from an email, or text that a user typed. Telegram makes a command or a link of
-// whatever looks like one. So wherever a name is shown as text it is marked as code, or is in the block of a table,
-// and Telegram makes nothing of what is in either: see MessageEntity. In a rich message it is told to make nothing
-// of any text: see RichMessage.
+// A merchant's name is text from an email, text that a user typed, or text that a model read from a photo. Telegram
+// makes a command or a link of whatever looks like one. So wherever a name is shown as text it is marked as code,
+// or is in the block of a table, and Telegram makes nothing of what is in either: see MessageEntity. In a rich
+// message it is told to make nothing of any text: see RichMessage.
 
 import { categoryName, categoryOf, choicesOf } from '../catalogue'
 import type { Product } from '../catalogue/types'
 import type { Amount, Breakdown } from '../domain/breakdown'
-import { MANUAL, type Transaction } from '../store'
+import { MANUAL, type Card, type Transaction } from '../store'
+import type { HeldPurchase } from '../store-held'
 import type { Button, MessageEntity, Outgoing, RichBlock, TableCell } from './api'
 import { formatAmount, formatMoney } from './format'
 
@@ -45,6 +48,29 @@ export const BY_HAND_NOTE = `${BY_HAND} = added by hand`
 
 /** What a button sends back: the id of a purchase and the key of a category. */
 const PRESS = /^(\d{1,15}):([a-z0-9-]{1,40})$/
+
+/**
+ * What a button under purchases that are held sends back: Telegram's id of the message that they were read from,
+ * and what the press chooses. That is to add them, to skip them, or the last four digits of the card to add them
+ * to. No button that moves a purchase holds the like: what such a one sends back begins with a digit.
+ */
+const HELD_PRESS = /^held:(\d{1,15}):(add|skip|\d{4})$/
+
+/**
+ * What a button under a message that asks before a command is run sends back: whether to run it, and the line of
+ * the command, as its user would send it. No other button of the bot's holds the like: none sends back what begins
+ * so.
+ */
+const CONFIRM_PRESS = /^(do|no):(.+)$/s
+
+/** The most bytes that Telegram takes of what a button sends back. */
+const MAX_DATA_BYTES = 64
+
+/** What comes after a purchase that is held, on its line, when the model was not sure of its amount or its date. */
+const UNSURE = 'not sure'
+
+/** What a message says of that note, under its purchases, when a line of them has it. */
+export const UNSURE_NOTE = `Check the amount and the date of each one that is marked "${UNSURE}".`
 
 /** A line of a message, with the stretch of it that is to be marked as code. */
 export interface Line {
@@ -87,12 +113,27 @@ export interface Section {
  */
 export function purchaseLine(purchase: Transaction, date: string): Line {
   const { id, amountMinor, currency, merchant, parser } = purchase
-  const start = [`ID ${id}`, date, formatMoney(amountMinor, currency)].join(SEPARATOR)
-  const notes = parser === MANUAL ? ['by hand'] : []
-  if (!merchant) return { text: [start, ...notes].join(SEPARATOR) }
+  const start = [`ID ${id}`, date, formatMoney(amountMinor, currency)]
+  return lineOf(start, merchant, parser === MANUAL ? ['by hand'] : [])
+}
+
+/**
+ * A purchase that is held, on one line, such as "5 Oct · SGD 12.40 · COFFEE PLACE · not sure": as `purchaseLine`
+ * has a purchase, but for the id, which a purchase has once it is stored. `flagged` is whether the line is to say
+ * that the model was not sure of the purchase, where it was not.
+ */
+export function heldLine(purchase: HeldPurchase, date: string, flagged: boolean): Line {
+  const { amountMinor, currency, merchant, unsure } = purchase
+  return lineOf([date, formatMoney(amountMinor, currency)], merchant, flagged && unsure ? [UNSURE] : [])
+}
+
+/** A line of what it starts with, the merchant's name when there is one, and the notes after that. */
+function lineOf(start: string[], merchant: string | null, notes: string[]): Line {
+  const before = start.join(SEPARATOR)
+  if (!merchant) return { text: [before, ...notes].join(SEPARATOR) }
   return {
-    text: [start, merchant, ...notes].join(SEPARATOR),
-    marked: { offset: start.length + SEPARATOR.length, length: merchant.length },
+    text: [before, merchant, ...notes].join(SEPARATOR),
+    marked: { offset: before.length + SEPARATOR.length, length: merchant.length },
   }
 }
 
@@ -198,6 +239,51 @@ export function sortEnd(
 export function readPress(data: string): { purchaseId: number; category: string } | null {
   const [, purchaseId, category] = PRESS.exec(data) ?? []
   return purchaseId === undefined ? null : { purchaseId: Number(purchaseId), category }
+}
+
+/**
+ * The buttons under purchases that are held, which are those of the message with the id: one that adds them and
+ * one that skips them. Where the bot could not tell which card they were made with, `cards` are the user's cards,
+ * and there is a button for each in the place of the one that adds: it adds them to that card. `count` is how many
+ * purchases are held.
+ */
+export function heldButtons(messageId: number, count: number, cards?: Card[]): Button[][] {
+  const button = (text: string, choice: string): Button[] => [{ text, data: `held:${messageId}:${choice}` }]
+  const adding = cards
+    ? cards.map(({ nickname, last4 }) => button(`Add to ${nickname}`, last4))
+    : [button(count === 1 ? 'Add this one' : `Add these ${count}`, 'add')]
+  // A row to each button, as under a purchase.
+  return [...adding, button('Skip', 'skip')]
+}
+
+/**
+ * What a button of `heldButtons` sent back, read again: the id of the message, and `choice`, which is "add", "skip"
+ * or the last four digits of a card. Null for anything else.
+ */
+export function readHeldPress(data: string): { messageId: number; choice: string } | null {
+  const [, messageId, choice] = HELD_PRESS.exec(data) ?? []
+  return messageId === undefined ? null : { messageId: Number(messageId), choice }
+}
+
+/**
+ * The buttons under a message that asks before a command is run: one that runs it, and one that does not. `line` is
+ * the command as its user would send it, and it rides in what each button sends back. Null when it does not fit
+ * there: Telegram takes 64 bytes, and counts them as UTF-8.
+ */
+export function confirmButtons(line: string): Button[][] | null {
+  const [run, leave] = [`do:${line}`, `no:${line}`]
+  if (new TextEncoder().encode(run).byteLength > MAX_DATA_BYTES) return null
+  // A row to each button, as under a purchase.
+  return [[{ text: 'Do it', data: run }], [{ text: 'Cancel', data: leave }]]
+}
+
+/**
+ * What a button of `confirmButtons` sent back, read again: whether it was the one that runs the command, and the
+ * line. Null for anything else. The line is as a client sent it, which can be any text: whoever runs it checks it.
+ */
+export function readConfirmPress(data: string): { run: boolean; line: string } | null {
+  const [, choice, line] = CONFIRM_PRESS.exec(data) ?? []
+  return choice === undefined ? null : { run: choice === 'do', line }
 }
 
 /**

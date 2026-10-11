@@ -1,4 +1,4 @@
-// SQL is run only here and in store-connect.ts, store-mail.ts and store-mcp.ts.
+// SQL is run only here and in store-connect.ts, store-held.ts, store-mail.ts and store-mcp.ts.
 
 import type { WindowRule } from './domain/window'
 import { Failure } from './log'
@@ -25,6 +25,9 @@ export interface Transaction extends ParsedTransaction {
    */
   category: string | null
 }
+
+/** A transaction with the source id that it is stored under, and with when its user took it out: null while not. */
+export type Sourced = Transaction & { sourceId: string; removedAt: number | null }
 
 export interface CurrencyTotal {
   currency: string
@@ -171,6 +174,40 @@ export function storeFor(db: D1Database, ownerId: number) {
         .first<number>('id')
     },
 
+    /**
+     * Stores several purchases that the user added by hand, as `insertTransaction` stores one: none under a source
+     * id that the user has a transaction under already, and none past the most that a user may add by hand in 24
+     * hours. They are taken in the order given, so the ones that the limit leaves out are the last of them. Returns
+     * the id of the row of each one that was stored, with the source id that it is stored under.
+     */
+    async insertByHand(purchases: Omit<NewTransaction, 'parser'>[]): Promise<{ id: number; sourceId: string }[]> {
+      // The purchases go in as one JSON array, and in one statement, however many there are: a request may run 50
+      // queries, and has little CPU time. The count is part of the statement here too. It is held against what is
+      // new: a purchase that is stored already takes up none of the room that is left.
+      const { results } = await db
+        .prepare(
+          `INSERT INTO transactions
+             (owner_id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category)
+           SELECT ?1, given.value ->> 'sourceId', given.value ->> 'cardLast4', given.value ->> 'amountMinor',
+             given.value ->> 'currency', given.value ->> 'merchant', given.value ->> 'occurredAt', ?3,
+             given.value ->> 'category'
+           FROM json_each(?2) AS given
+           WHERE NOT EXISTS (
+             SELECT 1 FROM transactions WHERE owner_id = ?1 AND source_id = given.value ->> 'sourceId'
+           )
+           ORDER BY given.key
+           LIMIT max(0, ?4 - (
+             SELECT COUNT(*) FROM transactions
+             WHERE owner_id = ?1 AND parser = ?3 AND created_at > unixepoch() - ?5
+           ))
+           ON CONFLICT (owner_id, source_id) DO NOTHING
+           RETURNING id, source_id AS sourceId`,
+        )
+        .bind(ownerId, JSON.stringify(purchases), MANUAL, MAX_BY_HAND_PER_DAY, DAY)
+        .all<{ id: number; sourceId: string }>()
+      return results
+    },
+
     /** Total and purchase count per currency for one card, over `start <= occurred_at < end` in unix seconds. */
     async sumByCurrency(cardLast4: string, start: number, end: number): Promise<CurrencyTotal[]> {
       const { results } = await db
@@ -248,6 +285,22 @@ export function storeFor(db: D1Database, ownerId: number) {
         )
         .bind(ownerId, sourceId)
         .first<Transaction & { removedAt: number | null }>()
+    },
+
+    /**
+     * Those of the user's purchases that are stored under the source ids, each with its source id and with when
+     * its user took it out: null while they have not.
+     */
+    async findBySourceIds(sourceIds: string[]): Promise<Sourced[]> {
+      // The ids go in as one JSON array, as a statement takes 100 bound values at most.
+      const { results } = await db
+        .prepare(
+          `SELECT ${TRANSACTION}, source_id AS sourceId, removed_at AS removedAt FROM transactions
+           WHERE owner_id = ?1 AND source_id IN (SELECT value FROM json_each(?2))`,
+        )
+        .bind(ownerId, JSON.stringify(sourceIds))
+        .all<Sourced>()
+      return results
     },
 
     /**

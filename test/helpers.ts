@@ -1,11 +1,69 @@
 import { env } from 'cloudflare:workers'
+import { afterAll, beforeAll } from 'vitest'
+import { products } from '../src/catalogue'
+import type { Product } from '../src/catalogue/types'
+import { uobEvol } from '../src/catalogue/uob-evol'
 import type { AlertEmail } from '../src/parsers/types'
 import { storeFor, type NewTransaction } from '../src/store'
 import type { RichBlock, RichMessage, TableCell } from '../src/telegram/api'
 
 // Every person, card, merchant and message in the tests is made up.
 
-let lastTelegramId = 1000
+/**
+ * A made-up product whose terms count a purchase by the day that it was made: a window of its cards counts the
+ * purchases of its own days, and no others. In all else it is the UOB EVOL Card. The catalogue has no product like
+ * it, so a test file that needs one puts it there: see `inCatalogue`.
+ */
+export const BY_PURCHASE_DAY: Product = {
+  ...uobEvol,
+  key: 'made-up-card',
+  name: 'Made-up Card',
+  daysCountedInNext: 0,
+}
+
+/** Has the catalogue hold a made-up product while the tests of a file run. */
+export function inCatalogue(product: Product): void {
+  beforeAll(() => {
+    products.push(product)
+  })
+  afterAll(() => {
+    products.splice(products.indexOf(product), 1)
+  })
+}
+
+/** The line that the bot's message about purchases has when any of them is counted in the window after its own. */
+const CARRIED = new RegExp(
+  '^(This purchase was|These purchases were|\\d+ of these purchases (was|were)) made in the last .* ' +
+    'The bank counts a purchase by the day it is posted\\.$',
+)
+
+/**
+ * What the Worker posted to Telegram, without the line that says of a purchase that it is counted in the next
+ * window. A purchase of the last two days of a window has that line. So a test that goes by the real clock, and
+ * whose purchases are made today, has it on two days of a month and on no others: with the line taken out, such a
+ * test says the same on every day. test/add.test.ts and test/checker.test.ts are about the line, by a clock of their
+ * own.
+ */
+export function withoutCarried<Body extends Record<string, unknown>>(body: Body): Body {
+  const { text, rich_message: rich } = body as { text?: unknown; rich_message?: { blocks?: RichBlock[] } }
+  if (typeof text === 'string') {
+    const lines = text.split('\n').filter((line) => !CARRIED.test(line))
+    // In a reply that is sent as text in the place of a rich one, the line is a part of its own, under an empty
+    // line that goes with it.
+    while (lines.at(-1) === '') lines.pop()
+    return { ...body, text: lines.join('\n') }
+  }
+  if (!Array.isArray(rich?.blocks)) return body
+  const carried = ({ type, text }: RichBlock & { text?: unknown }) =>
+    type === 'paragraph' && typeof text === 'string' && CARRIED.test(text)
+  return { ...body, rich_message: { ...rich, blocks: rich.blocks.filter((block) => !carried(block)) } }
+}
+
+/**
+ * The ids go up from a number that nothing else in a line of the log could be. Many tests say that no line holds the
+ * Telegram id of their user, and some of them go by the real clock: a count or a duration can be any small number.
+ */
+let lastTelegramId = 7_200_000_000
 
 /** Rows written by earlier tests in a file are still in the database, so every test uses its own users. */
 export function newTelegramId(): number {

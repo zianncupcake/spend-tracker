@@ -10,6 +10,14 @@ import { bareRow, bold, buy, headerRow, linesOf, plain, purchaseRow, sumRow, tab
 
 const TERMS = "Limits are from the bank's terms for the UOB EVOL Card, as of 10 June 2026."
 
+/**
+ * What is said under the total of a card for the calendar month, which is October: the last two days of a window
+ * are counted in the next one.
+ */
+const OCTOBER_COUNTS =
+  'The total counts purchases made from 29 Sep to 29 Oct. The bank counts a purchase by the day it is posted, so ' +
+  'one made in the last 2 days of a month is counted in the next month.'
+
 // What a message about the card of `chatWithCard` begins with, and the names over its tables.
 const HEADING = bold('evol ••••1234: 1 Oct to 31 Oct')
 const ONLINE = bold('Online and Mobile Contactless Spend')
@@ -118,6 +126,7 @@ describe('/spend with a card that is linked to a product', () => {
         { type: 'paragraph', text: { type: 'bold', text: 'Overseas Foreign Currency Spend' } },
         { type: 'table', is_bordered: true, cells: [[{ text: 'Total' }, { text: '0.00', align: 'right' }]] },
         { type: 'paragraph', text: 'Total: SGD 87.80 in 4 purchases, resets 1 Nov' },
+        { type: 'paragraph', text: OCTOBER_COUNTS },
         { type: 'paragraph', text: 'Minimum spend: SGD 87.80 of SGD 800.00' },
         { type: 'paragraph', text: TERMS },
       ],
@@ -151,6 +160,7 @@ describe('/spend with a card that is linked to a product', () => {
         // What the mark stands for comes after the tables, when a row has it.
         plain('* = added by hand'),
         plain('Total: SGD 11.00 in 2 purchases, resets 1 Nov'),
+        plain(OCTOBER_COUNTS),
         plain('Minimum spend: SGD 11.00 of SGD 800.00'),
         plain(TERMS),
       ],
@@ -173,6 +183,7 @@ describe('/spend with a card that is linked to a product', () => {
         FOREIGN,
         nothing(),
         plain('Total: no purchases, resets 1 Nov'),
+        plain(OCTOBER_COUNTS),
         plain('Minimum spend: SGD 0.00 of SGD 800.00'),
         plain(TERMS),
       ],
@@ -212,6 +223,7 @@ describe('/spend with a card that is linked to a product', () => {
         FOREIGN,
         nothing(),
         plain('Total: SGD 562.40 in 2 purchases, resets 1 Nov'),
+        plain(OCTOBER_COUNTS),
         plain('Minimum spend: SGD 562.40 of SGD 800.00'),
         plain(TERMS),
       ],
@@ -252,6 +264,7 @@ describe('/spend with a card that is linked to a product', () => {
         // A group of one currency names it in its header, and has plain numbers under it.
         tableOf(headerRow('JPY'), purchaseRow(ramen, '7 Oct', '1,500.00', 'RAMEN'), sumRow('Total', '1,500.00')),
         plain('Total: JPY 1,500.00 + SGD 12.40 + USD 5.00 in 3 purchases, resets 1 Nov'),
+        plain(OCTOBER_COUNTS),
         plain('Minimum spend: SGD 12.40 of SGD 800.00, not counting purchases in other currencies'),
         plain(TERMS),
       ],
@@ -286,6 +299,7 @@ describe('/spend with a card that is linked to a product', () => {
         FOREIGN,
         nothing(),
         plain('Total: SGD 12.40 in 1 purchase, resets 1 Nov'),
+        plain(OCTOBER_COUNTS),
         plain('Minimum spend: SGD 12.40 of SGD 800.00'),
         plain(TERMS),
       ],
@@ -318,6 +332,7 @@ describe('/spend with a card that is linked to no product', () => {
           sumRow('Total', '89.40'),
         ),
         plain('Total: SGD 89.40 in 2 purchases, resets 1 Nov'),
+        plain(OCTOBER_COUNTS),
       ],
     })
   })
@@ -328,7 +343,15 @@ describe('/spend with a card that is linked to no product', () => {
 
     expect(await chat.rich('/spend amex')).toEqual({
       skip_entity_detection: true,
-      blocks: [bold('amex ••••0005: 9 Oct to 8 Nov'), plain('Total: no purchases, resets 9 Nov')],
+      blocks: [
+        bold('amex ••••0005: 9 Oct to 8 Nov'),
+        plain('Total: no purchases, resets 9 Nov'),
+        // The same of a statement cycle, in the words for one.
+        plain(
+          'The total counts purchases made from 7 Oct to 6 Nov. The bank counts a purchase by the day it is posted, ' +
+            'so one made in the last 2 days before a statement closes is counted in the next statement month.',
+        ),
+      ],
     })
   })
 })

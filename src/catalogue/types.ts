@@ -10,6 +10,14 @@ export interface Product {
   termsAsOf: string
   /** What has to be spent in a statement month before the groups with a limit earn their rate. */
   minimumSpendMinor: number
+  /**
+   * How many days at the end of a window a card of the product counts in the next one: the day that the window
+   * closes on, and as many before it as make up the number. A bank counts a purchase by the day that it is posted,
+   * which is after the day that it was made. A product whose terms count a purchase by the day that it was made
+   * says 0, and a product without this has what a card with no product has: DAYS_COUNTED_IN_NEXT in
+   * ../domain/window, where `currentWindow` says what becomes of the number.
+   */
+  daysCountedInNext?: number
   groups: Group[]
   /**
    * The key of the category that a purchase is in when no rule and no stored choice says otherwise. A product

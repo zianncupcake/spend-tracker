@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   deleteUser,
   findOrCreateUser,
@@ -471,6 +471,153 @@ describe('the purchases of a store', () => {
     const rows = await db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE id = ?').bind(removed).first('n')
     expect(rows).toBe(1)
     expect(await other.findTransaction(theirs)).not.toBeNull()
+  })
+})
+
+describe('purchases that are added by hand several at once', () => {
+  /** A purchase that is added by hand, as the store is given one of several: with no parser, which they all share. */
+  function byHand(sourceId: string, overrides: Partial<NewTransaction> = {}): Omit<NewTransaction, 'parser'> {
+    const { parser, ...given } = purchase({ sourceId, ...overrides })
+    return given
+  }
+
+  it('are stored in one statement, in the order given, and come back with the id that each is stored under', async () => {
+    const store = await newStore()
+    const abroad = { amountMinor: 990, currency: 'USD', merchant: null, cardLast4: '5678', occurredAt: 1_700_000_000 }
+    const queried = vi.spyOn(db, 'prepare')
+
+    const stored = await store.insertByHand([
+      byHand('manual:7:0', { amountMinor: 210, merchant: 'BUS FARE', category: 'other' }),
+      byHand('manual:7:1', abroad),
+      byHand('manual:7:2', { amountMinor: 1240 }),
+    ])
+
+    expect(queried).toHaveBeenCalledTimes(1)
+    queried.mockRestore()
+    expect(stored.map((each) => each.sourceId).sort()).toEqual(['manual:7:0', 'manual:7:1', 'manual:7:2'])
+    const ids = Object.fromEntries(stored.map(({ sourceId, id }) => [sourceId, id]))
+    expect(ids['manual:7:0']).toBeLessThan(ids['manual:7:1'])
+    expect(ids['manual:7:1']).toBeLessThan(ids['manual:7:2'])
+    // Each is stored as one that was added by hand, with what it was given and with nothing that it was not.
+    const found = await store.findBySourceIds(['manual:7:0', 'manual:7:1', 'manual:7:2'])
+    const asStored = { parser: 'manual', category: null, removedAt: null }
+    expect(found.sort((a, b) => a.id - b.id)).toEqual([
+      {
+        ...STORED,
+        ...asStored,
+        id: ids['manual:7:0'],
+        sourceId: 'manual:7:0',
+        amountMinor: 210,
+        merchant: 'BUS FARE',
+        category: 'other',
+      },
+      { ...asStored, ...abroad, id: ids['manual:7:1'], sourceId: 'manual:7:1' },
+      { ...STORED, ...asStored, id: ids['manual:7:2'], sourceId: 'manual:7:2', amountMinor: 1240 },
+    ])
+    expect(await store.sumByCurrency('1234', ...ANY_TIME)).toEqual([{ currency: 'SGD', amountMinor: 1450, count: 2 }])
+  })
+
+  it('are stored once: none under a source id that the user has a purchase under already, taken out or not', async () => {
+    const store = await newStore()
+    const other = await newStore()
+    const [first] = await store.insertByHand([byHand('manual:7:0'), byHand('manual:7:1')])
+    await store.removeTransaction(first.id)
+    await other.insertByHand([byHand('manual:7:2')])
+
+    // The same again, as when a message is delivered again, with one more that is new.
+    const again = await store.insertByHand([
+      byHand('manual:7:0', { amountMinor: 9999 }),
+      byHand('manual:7:1', { amountMinor: 9999 }),
+      byHand('manual:7:2', { amountMinor: 300 }),
+    ])
+
+    // Another user's purchase under the same source id keeps nobody else's out.
+    expect(again.map((each) => each.sourceId)).toEqual(['manual:7:2'])
+    const mine = await store.findBySourceIds(['manual:7:0', 'manual:7:1', 'manual:7:2'])
+    expect(mine.map((each) => [each.sourceId, each.amountMinor]).sort()).toEqual([
+      ['manual:7:0', 1000],
+      ['manual:7:1', 1000],
+      ['manual:7:2', 300],
+    ])
+    // And none is stored twice when it is given twice at once.
+    const twice = await store.insertByHand([byHand('manual:8:0'), byHand('manual:8:0')])
+    expect(twice).toHaveLength(1)
+  })
+
+  it('are stored up to the most that a user may add by hand in 24 hours: the first of them, and no more', async () => {
+    const store = await newStore()
+    const other = await newStore()
+    const many = (from: number, count: number) =>
+      Array.from({ length: count }, (_, index) => byHand(`manual:${from + index}`))
+    // 97 that were added one at a time, which count as these do.
+    for (let number = 1; number <= 97; number++) {
+      await store.insertTransaction({ ...byHand(`manual:one:${number}`), parser: 'manual' })
+    }
+
+    const stored = await store.insertByHand(many(1, 5))
+
+    // There was room for three: the first three of the five.
+    expect(stored.map((each) => each.sourceId).sort()).toEqual(['manual:1', 'manual:2', 'manual:3'])
+    expect(await store.insertByHand(many(10, 2))).toEqual([])
+    // The limit is each user's own, and a purchase from an alert is stored anyway.
+    expect(await other.insertByHand(many(1, 5))).toHaveLength(5)
+    expect(await store.insertTransaction(purchase({ sourceId: 'msg-1' }))).not.toBeNull()
+    // Two that come together get no further past it than one does.
+    const [{ id: earliest }] = await store.findBySourceIds(['manual:one:1'])
+    await db.prepare('UPDATE transactions SET created_at = unixepoch() - 86400 WHERE id = ?').bind(earliest).run()
+    const together = await Promise.all([store.insertByHand(many(20, 2)), store.insertByHand(many(30, 2))])
+    expect(together.flat()).toHaveLength(1)
+  })
+
+  it('take up none of the room that is left when they are stored already', async () => {
+    const store = await newStore()
+    for (let number = 1; number <= 96; number++) {
+      await store.insertTransaction({ ...byHand(`manual:one:${number}`), parser: 'manual' })
+    }
+    // Two of a message are stored, which leaves room for two more.
+    await store.insertByHand([byHand('manual:7:0'), byHand('manual:7:1')])
+
+    // The message comes again, with four purchases this time: the two that are new are stored.
+    const again = await store.insertByHand([
+      byHand('manual:7:0'),
+      byHand('manual:7:1'),
+      byHand('manual:7:2'),
+      byHand('manual:7:3'),
+    ])
+
+    expect(again.map((each) => each.sourceId).sort()).toEqual(['manual:7:2', 'manual:7:3'])
+  })
+
+  it('store nothing when none are given, and find nothing under no source id', async () => {
+    const store = await newStore()
+
+    expect(await store.insertByHand([])).toEqual([])
+    expect(await store.findBySourceIds([])).toEqual([])
+    expect(await store.listTransactions(null, ...ANY_TIME, 10)).toEqual([])
+  })
+
+  it('are found by the source ids they are stored under, taken out or not, each by its own user only', async () => {
+    const store = await newStore()
+    const other = await newStore()
+    const [first, second] = await store.insertByHand([byHand('manual:7:0'), byHand('manual:7:1')])
+    await other.insertByHand([byHand('manual:7:2')])
+    await store.removeTransaction(second.id)
+
+    const found = await store.findBySourceIds(['manual:7:1', 'manual:7:0', 'manual:7:2', 'manual:7:9'])
+
+    // In no order that is promised: each has the source id that it is known by.
+    expect(found.map((each) => [each.sourceId, each.id, each.removedAt]).sort()).toEqual([
+      ['manual:7:0', first.id, null],
+      ['manual:7:1', second.id, expect.any(Number)],
+    ])
+  })
+
+  it('are found however many more of them are asked for than a statement takes bound values', async () => {
+    const store = await newStore()
+    const sourceIds = Array.from({ length: 150 }, (_, index) => `manual:7:${index}`)
+    await store.insertByHand(sourceIds.slice(0, 50).map((sourceId) => byHand(sourceId)))
+
+    expect(await store.findBySourceIds(sourceIds)).toHaveLength(50)
   })
 })
 

@@ -1,13 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import { currentWindow, dayOf, startOfDay, type WindowRule } from '../src/domain/window'
+import { BY_PURCHASE_DAY, inCatalogue } from './helpers'
 
 const SINGAPORE = 'Asia/Singapore' // UTC+8 all year
 
-const calendar: WindowRule = { windowType: 'calendar' }
-const closingOn = (statementDay: number): WindowRule => ({ windowType: 'statement', statementDay })
+/** A card as far as its window goes: its rule, and the product that it is linked to, when it is to one. */
+type Card = WindowRule & { product?: string }
+
+// The cards of the first tests are linked to a made-up product whose terms count a purchase by the day that it was
+// made. A window of theirs counts the purchases of its own days, so it is the month or the cycle itself, and is the
+// current one for as long as it lasts. What a window counts on any other card is in the tests after those.
+inCatalogue(BY_PURCHASE_DAY)
+
+const calendar: Card = { windowType: 'calendar', product: BY_PURCHASE_DAY.key }
+const closingOn = (statementDay: number): Card => ({
+  windowType: 'statement',
+  statementDay,
+  product: BY_PURCHASE_DAY.key,
+})
 
 /** The current window in Singapore at a local date and time such as "2026-10-09 12:00". */
-const singaporeWindow = (card: WindowRule, local: string) =>
+const singaporeWindow = (card: Card, local: string) =>
   currentWindow(card, new Date(`${local.replace(' ', 'T')}:00+08:00`), SINGAPORE)
 
 /** A window from one Singapore midnight to another, each given as a date such as "2026-10-01". */
@@ -80,6 +93,45 @@ describe('statement window', () => {
 
     expect(window.start.toISOString()).toBe('2026-02-08T05:00:00.000Z')
     expect(window.end.toISOString()).toBe('2026-03-08T05:00:00.000Z')
+  })
+})
+
+describe('the window of a card with no product, which counts its last two days in the next window', () => {
+  // The two days are the day that a window closes on, and the day before it.
+  const statementOn = (statementDay: number): Card => ({ windowType: 'statement', statementDay })
+  /** A window, and the days whose purchases it counts: each from one Singapore midnight to another. */
+  const counting = (window: [start: string, end: string], counted: [start: string, end: string]) => ({
+    ...singaporeDays(...window),
+    counts: { ...singaporeDays(...counted), days: 2 },
+  })
+
+  it('counts the 29th and the 30th of a month of 30 days in the next cycle, when the statement day is 31', () => {
+    // September closes on the 30th, and October on the 31st.
+    expect(singaporeWindow(statementOn(31), '2026-09-28 23:59')).toEqual(
+      counting(['2026-09-01', '2026-10-01'], ['2026-08-30', '2026-09-29']),
+    )
+    expect(singaporeWindow(statementOn(31), '2026-09-29 00:00')).toEqual(
+      counting(['2026-10-01', '2026-11-01'], ['2026-09-29', '2026-10-30']),
+    )
+    expect(singaporeWindow(statementOn(31), '2026-10-29 23:59')).toEqual(
+      counting(['2026-10-01', '2026-11-01'], ['2026-09-29', '2026-10-30']),
+    )
+    expect(singaporeWindow(statementOn(31), '2026-10-30 00:00')).toEqual(
+      counting(['2026-11-01', '2026-12-01'], ['2026-10-30', '2026-11-29']),
+    )
+  })
+
+  it('counts the last day of a month and the 1st in the next cycle, when the statement day is 1', () => {
+    expect(singaporeWindow(statementOn(1), '2026-09-29 23:59')).toEqual(
+      counting(['2026-09-02', '2026-10-02'], ['2026-08-31', '2026-09-30']),
+    )
+    expect(singaporeWindow(statementOn(1), '2026-09-30 00:00')).toEqual(
+      counting(['2026-10-02', '2026-11-02'], ['2026-09-30', '2026-10-31']),
+    )
+    // Across the end of the year too.
+    expect(singaporeWindow(statementOn(1), '2026-12-31 12:00')).toEqual(
+      counting(['2027-01-02', '2027-02-02'], ['2026-12-31', '2027-01-31']),
+    )
   })
 })
 

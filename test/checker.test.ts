@@ -5,6 +5,7 @@ import { HEADER_CHECKS_PER_RUN, MESSAGES_PER_RUN, runCheck } from '../src/checke
 import { depsFor, type Deps } from '../src/deps'
 import worker from '../src/index'
 import { storeFor } from '../src/store'
+import { heldStoreFor } from '../src/store-held'
 import { mailStoreFor } from '../src/store-mail'
 import {
   attemptOf,
@@ -57,6 +58,7 @@ const NOTHING_DONE = {
   notified: 0,
   checked: false,
   swept: 0,
+  batches: 0,
   ms: 0,
 }
 
@@ -451,6 +453,32 @@ describe('a new alert for a card that is linked to a product', () => {
     const [, later] = posted
     expect(later.text.split('\n')[2]).toBe(`ID ${stored['msg-2'].id}: Online / Mobile Contactless Spend`)
     expect(later.buttons).toEqual([[{ text: 'Mark as Other Spend', data: `${stored['msg-2'].id}:other` }]])
+  })
+
+  it('is told of with the statement month that counts it, when it was made in the last two days', async () => {
+    // The 4th of November, the day before the statement of a card that closes on the 5th does.
+    clock.now = new Date('2026-11-04T12:00:00+08:00')
+    const chat = await connectedChat(JANE)
+    await chat.say('/addcard evol 1234 statement 5 uob-evol')
+    posted.length = 0
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+
+    await runCheck(deps)
+
+    const { id } = (await sortedOf(await chat.userId()))['msg-1']
+    const [message, ...more] = posted
+    expect(more).toEqual([])
+    const told = [
+      'evol ••••1234: SGD 12.40 at COFFEE PLACE',
+      // The card's total is that of the statement month to come, which is the one that counts the purchase.
+      'Running total: SGD 12.40 in 1 purchase, resets 6 Dec',
+      'This purchase was made in the last 2 days before the statement closes on 5 Nov, and so is counted in the ' +
+        'statement month that begins on 6 Nov. The bank counts a purchase by the day it is posted.',
+    ]
+    expect(message.text.split('\n')).toEqual([...told, `ID ${id}: Online / Mobile Contactless Spend`])
+    // A press changes the last line, which says where the purchase is, and leaves the note as it is.
+    await chat.press(message, 'Mark as Other Spend')
+    expect(message.text.split('\n')).toEqual([...told, `ID ${id}: Other Spend`])
   })
 
   it('is sorted by the rules even when it is too old to be told of', async () => {
@@ -1049,7 +1077,7 @@ describe('taking turns', () => {
     // The line as it is written: the fields of a run are always all there, and in this order.
     expect(logged.text()).toBe(
       '{"event":"check","mailbox":false,"user":null,"listed":0,"unknown":0,"headers":0,"read":0,"stored":0,' +
-        '"unparsed":0,"rejected":0,"notified":0,"checked":false,"swept":0,"ms":0}',
+        '"unparsed":0,"rejected":0,"notified":0,"checked":false,"swept":0,"batches":0,"ms":0}',
     )
   })
 })
@@ -1124,6 +1152,112 @@ describe('sign-ins that nobody came back to', () => {
     expect(logged.events('check_failed')).toEqual([])
     expect(logged.events('check')).toMatchObject([{ swept: 1, stored: 1, notified: 1 }])
     expect(sent.map((message) => message.chatId)).toEqual([chat.telegramId])
+  })
+})
+
+describe('held purchases that nobody answered for', () => {
+  const DAY_OF_MINUTES = 24 * 60
+
+  /** Holds a purchase for a user, for the message with the id, from the time that it is now. */
+  async function hold(userId: number, messageId: number): Promise<void> {
+    const read = { occurredAt: now(), amountMinor: 300, currency: 'SGD', merchant: 'TEA HOUSE' }
+    const batch = { messageId, cardLast4: '1234', category: null, purchases: [{ place: 0, ...read, unsure: true }] }
+    await heldStoreFor(env.DB, userId).hold(batch, now())
+  }
+
+  /** Whose purchases are held, a user to each batch. It reads the table directly. */
+  async function heldOwners(): Promise<number[]> {
+    const { results } = await env.DB.prepare('SELECT owner_id FROM held_batches ORDER BY owner_id').all<{
+      owner_id: number
+    }>()
+    return results.map((batch) => batch.owner_id)
+  }
+
+  it('are deleted by the run that comes once they have been held for a day, and by none before it', async () => {
+    const [first, second] = [await openChat().userId(), await openChat().userId()]
+    await hold(first, 71)
+    clock.now = later(60)
+    await hold(second, 72)
+
+    // A second short of a day after the first was held.
+    clock.now = new Date(NOW.getTime() + DAY_OF_MINUTES * MINUTE - 1000)
+    await runCheck(deps)
+    expect(await heldOwners()).toEqual([first, second])
+
+    clock.now = new Date(NOW.getTime() + DAY_OF_MINUTES * MINUTE)
+    const logged = catchConsole()
+    await runCheck(deps)
+
+    // The first is gone, and the second has an hour left. No mailbox is connected: the sweep is of every run.
+    expect(await heldOwners()).toEqual([second])
+    expect(await heldStoreFor(env.DB, second).find(72, now())).toMatchObject({ messageId: 72 })
+    expect(logged.events()).toEqual([{ event: 'check', ...NOTHING_DONE, batches: 1 }])
+  })
+
+  it('are deleted for every user in the one statement, in a run that goes on to check a mailbox', async () => {
+    const chat = await connectedChat(JANE)
+    const [userId, other] = [await chat.userId(), await openChat().userId()]
+    for (let messageId = 1; messageId <= 3; messageId++) await hold(userId, messageId)
+    await hold(other, 71)
+    clock.now = later(DAY_OF_MINUTES)
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+    const queried = vi.spyOn(env.DB, 'prepare')
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    expect(queried.mock.calls.filter(([query]) => query.includes('held_batches'))).toHaveLength(1)
+    queried.mockRestore()
+    expect(await heldOwners()).toEqual([])
+    expect(logged.events('check')).toMatchObject([{ batches: 4, stored: 1, notified: 1, checked: true }])
+  })
+
+  it('are deleted by a run that fails before it gets to them, which is logged with what it had done by then', async () => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    await hold(userId, 71)
+    clock.now = later(DAY_OF_MINUTES)
+    outside.failing.add(TOKEN_URL)
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    expect(await heldOwners()).toEqual([])
+    expect(logged.events()).toMatchObject([
+      { event: 'check_failed', stage: 'token', user: userId },
+      { event: 'check', batches: 1, mailbox: true, user: userId },
+    ])
+  })
+
+  it('keep no mailbox from being checked when they cannot be deleted, as in a service with no table for them yet', async () => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+    // What the database says of a table that there is not, which quotes the statement.
+    const prepare = env.DB.prepare.bind(env.DB)
+    const queried = vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes('held_batches')) throw new Error(`D1_ERROR: no such table: held_batches: ${query}`)
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    // The mailbox had its turn first, and its purchase is stored and told of.
+    expect(queried.mock.calls.map(([query]) => query).findLast((query) => query.includes('held_batches'))).toBe(
+      queried.mock.calls.at(-1)?.[0],
+    )
+    queried.mockRestore()
+    expect(sent.map((message) => message.chatId)).toEqual([chat.telegramId])
+    // The failure has a stage of its own and names no user: it is of no one user's purchases. The run ends as any
+    // other does, with its own line, which says what it did.
+    const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
+    expect(logged.events()).toEqual([
+      { event: 'alert', outcome: 'stored', parser: 'example-bank' },
+      { event: 'check_failed', stage: 'batches', user: null, error: 'Error' },
+      { event: 'check', ...NOTHING_DONE, ...found, stored: 1, notified: 1, checked: true },
+    ])
+    expect(logged.text()).not.toContain('held_batches')
   })
 })
 
@@ -1225,10 +1359,11 @@ describe('the cost of a run', () => {
     // 5 revocations, 1 token, 5 pages, the headers of 10 messages, and a message and a Telegram post for each purchase.
     expect(requests).toBe(5 + 1 + 5 + HEADER_CHECKS_PER_RUN + 2 * MESSAGES_PER_RUN)
     expect(requests).toBe(23)
-    // The sweep and a look for each of its 5 mailboxes, the turn, 5 pages, the page token, a note of each message
-    // turned away, 3 for each purchase (find its card, store it, total the card), and the mark.
-    expect(queries).toBe(1 + 5 + 1 + 5 + 1 + turnedAway + 3 * MESSAGES_PER_RUN + 1)
-    expect(queries).toBe(26)
+    // The sweep and a look for each of its 5 mailboxes, the sweep of the held purchases, the turn, 5 pages, the page
+    // token, a note of each message turned away, 3 for each purchase (find its card, store it, total the card), and
+    // the mark.
+    expect(queries).toBe(1 + 5 + 1 + 1 + 5 + 1 + turnedAway + 3 * MESSAGES_PER_RUN + 1)
+    expect(queries).toBe(27)
     expect(Math.max(requests, queries)).toBeLessThan(50)
   })
 })
@@ -1507,5 +1642,24 @@ describe('through the Worker', () => {
       { event: 'alert', outcome: 'stored', parser: 'example-bank' },
       { event: 'check', ...NOTHING_DONE, ...found, stored: 1, notified: 1, checked: true, ms: expect.any(Number) },
     ])
+  })
+
+  it('deletes the held purchases that nobody answered for when the cron trigger fires, and no others', async () => {
+    const userId = await openChat().userId()
+    const purchase = { place: 0, occurredAt: 1, amountMinor: 300, currency: 'SGD', merchant: 'TEA HOUSE', unsure: true }
+    const batch = (messageId: number) => ({ messageId, cardLast4: '1234', category: null, purchases: [purchase] })
+    // The Worker goes by the real clock: one that was held a day and a minute ago, and one that was held just now.
+    const justNow = Math.floor(Date.now() / 1000)
+    await heldStoreFor(env.DB, userId).hold(batch(71), justNow - DAY - 60)
+    await heldStoreFor(env.DB, userId).hold(batch(72), justNow)
+    const logged = catchConsole()
+
+    const context = createExecutionContext()
+    await worker.scheduled(createScheduledController({ cron: '* * * * *' }), env, context)
+    await waitOnExecutionContext(context)
+
+    const held = await env.DB.prepare('SELECT message_id FROM held_batches WHERE owner_id = ?').bind(userId).all()
+    expect(held.results).toEqual([{ message_id: 72 }])
+    expect(logged.events()).toEqual([{ event: 'check', ...NOTHING_DONE, batches: 1, ms: expect.any(Number) }])
   })
 })

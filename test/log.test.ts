@@ -258,6 +258,22 @@ describe('what the compiler takes for a line', () => {
       log('telegram_failed', { method: merchant })
       // @ts-expect-error: and a tool by one of the names that the bot has for its tools, whatever a model calls it
       log('assistant_tool', { user: 7, tool: merchant, outcome: 'invalid', ms: 1 })
+      // What the line of a photo has: whose it was, what came of it, and counts.
+      const photo = { user: 7, sent: 'rich', placeholder: true, bytes: 9, requests: 1 } as const
+      const counts = { read: 2, unreadable: 0, stored: 1, held: 1, ms: 1 }
+      log('photo', { ...photo, outcome: 'read', ...counts })
+      // @ts-expect-error: what came of a photo is one of the words for that, and never what the photo or a model said
+      log('photo', { ...photo, outcome: merchant, ...counts })
+      // @ts-expect-error: a photo has no field for its caption
+      log('photo', { ...photo, outcome: 'read', ...counts, caption: merchant })
+      // @ts-expect-error: nor for the id that Telegram knows its file by
+      log('photo', { ...photo, outcome: 'read', ...counts, file: merchant })
+      // @ts-expect-error: nor do the fields of a purchase that was read from it come in with its own
+      log('photo', { ...photo, outcome: 'read', ...counts, ...purchase })
+      // @ts-expect-error: a press under purchases that are held has no field for the card that it chose
+      log('held_press', { user: 7, outcome: 'added', held: 1, stored: 1, card: merchant })
+      // @ts-expect-error: and the method that a file is asked for by is one of those that the bot calls
+      log('telegram_failed', { method: 'getFile', path: merchant })
     }
 
     expect(refused).toBeTypeOf('function')

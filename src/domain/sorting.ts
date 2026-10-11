@@ -1,7 +1,7 @@
 import { productOf, startingCategory } from '../catalogue'
 import type { Product } from '../catalogue/types'
 import type { Card, Store } from '../store'
-import { currentWindow } from './window'
+import { countedIn, currentWindow } from './window'
 
 /**
  * How many of the purchases in a card's window are read at once: the latest of them. A request has little CPU time
@@ -34,8 +34,10 @@ export async function sortByRules(
   now: Date,
   timeZone: string,
 ): Promise<void> {
-  const { start, end } = currentWindow(card, now, timeZone)
-  const purchases = await store.listTransactions(card.last4, start.getTime() / 1000, end.getTime() / 1000, WINDOW_LIMIT)
+  // The window is the one that the card has as it is linked now: a product can say which days a cycle counts, and the
+  // card may be given as it was before it was linked.
+  const { start, end } = countedIn(currentWindow({ ...card, product: product.key }, now, timeZone))
+  const purchases = await store.listTransactions(card.last4, start, end, WINDOW_LIMIT)
   const sorted = new Map<string, number[]>()
   for (const purchase of purchases) {
     const category = purchase.category === null ? startingCategory(product, purchase) : null

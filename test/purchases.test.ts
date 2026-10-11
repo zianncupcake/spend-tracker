@@ -2,16 +2,21 @@ import { describe, expect, it } from 'vitest'
 import type { Product } from '../src/catalogue/types'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { breakDown } from '../src/domain/breakdown'
-import type { CategoryTotal, Transaction } from '../src/store'
+import type { Card, CategoryTotal, Transaction } from '../src/store'
+import type { HeldPurchase } from '../src/store-held'
 import type { Outgoing } from '../src/telegram/api'
 import {
+  heldButtons,
+  heldLine,
   inMessages,
   purchaseBlocks,
   purchaseLine,
   purchaseTables,
+  readHeldPress,
   readPress,
   sectionsOf,
   sortEnd,
+  UNSURE_NOTE,
   whereSorted,
   type Dated,
   type Line,
@@ -805,5 +810,118 @@ describe('what a button sends back', () => {
     '57:online; DROP TABLE transactions',
   ])('is not read when it is %j, which no button holds', (data) => {
     expect(readPress(data)).toBeNull()
+  })
+})
+
+describe('the line of a purchase that is held', () => {
+  /** A purchase that is held: one that the model was not sure of, unless said otherwise. */
+  function waiting(overrides: Partial<HeldPurchase> = {}): HeldPurchase {
+    const read = { occurredAt: 1_800_000_000, amountMinor: 1240, currency: 'SGD', merchant: 'COFFEE PLACE' }
+    return { place: 0, ...read, unsure: true, ...overrides }
+  }
+
+  it('has its day, its amount and its merchant, with the merchant to be marked as code, and no id', () => {
+    const line = heldLine(waiting(), '5 Oct', false)
+
+    expect(line.text).toBe('5 Oct · SGD 12.40 · COFFEE PLACE')
+    expect(markedIn(line)).toBe('COFFEE PLACE')
+  })
+
+  it('says that the model was not sure of it, after the merchant, when it is to say so and the model was not', () => {
+    const line = heldLine(waiting({ currency: 'USD' }), '5 Oct', true)
+
+    expect(line.text).toBe('5 Oct · USD 12.40 · COFFEE PLACE · not sure')
+    expect(markedIn(line)).toBe('COFFEE PLACE')
+    // One that the model was sure of has no such note, whether or not the lines of its message are to have it.
+    expect(heldLine(waiting({ unsure: false }), '5 Oct', true).text).toBe('5 Oct · SGD 12.40 · COFFEE PLACE')
+  })
+
+  it('has nothing where the merchant would be, and nothing to mark, for a purchase with no merchant', () => {
+    expect(heldLine(waiting({ merchant: null }), '5 Oct', false)).toEqual({ text: '5 Oct · SGD 12.40' })
+    expect(heldLine(waiting({ merchant: null }), '5 Oct', true)).toEqual({ text: '5 Oct · SGD 12.40 · not sure' })
+  })
+
+  it('marks all of a name that Telegram would make something to tap of, and no more than the name', () => {
+    const merchant = '𝒳 /disconnect https://attacker.test/x @someone #tag'
+    const line = heldLine(waiting({ amountMinor: 123456789, merchant }), '31 Oct', true)
+
+    expect(line.text).toBe(`31 Oct · SGD 1,234,567.89 · ${merchant} · not sure`)
+    expect(markedIn(line)).toBe(merchant)
+    expect(line.marked?.length).toBe(merchant.length)
+  })
+
+  it('is what a message says to look for, in the words of its note', () => {
+    expect(UNSURE_NOTE).toBe('Check the amount and the date of each one that is marked "not sure".')
+  })
+})
+
+describe('the buttons under purchases that are held', () => {
+  const cards: Card[] = [
+    { nickname: 'visa', last4: '1234', windowType: 'calendar' },
+    { nickname: 'my_evol-2', last4: '0005', windowType: 'statement', statementDay: 15, product: 'uob-evol' },
+  ]
+
+  it('are one that adds them and one that skips them, a row to each, when the card is known', () => {
+    expect(heldButtons(7001, 3)).toEqual([
+      [{ text: 'Add these 3', data: 'held:7001:add' }],
+      [{ text: 'Skip', data: 'held:7001:skip' }],
+    ])
+    // In the words for one, of one.
+    expect(heldButtons(7001, 1)[0]).toEqual([{ text: 'Add this one', data: 'held:7001:add' }])
+  })
+
+  it('are one for each card and one that skips, when the bot could not tell which card', () => {
+    expect(heldButtons(7001, 3, cards)).toEqual([
+      // What a button holds of a card is its last four digits.
+      [{ text: 'Add to visa', data: 'held:7001:1234' }],
+      [{ text: 'Add to my_evol-2', data: 'held:7001:0005' }],
+      [{ text: 'Skip', data: 'held:7001:skip' }],
+    ])
+  })
+
+  it('hold no more than the 64 bytes that Telegram takes, for the longest id that a message can have', () => {
+    const buttons = heldButtons(999_999_999_999_999, 20, cards).flat()
+
+    for (const { data } of buttons) expect(new TextEncoder().encode(data).length).toBeLessThanOrEqual(64)
+  })
+
+  it('send back what is read as the message and the choice', () => {
+    for (const { data } of heldButtons(7001, 3, cards).flat()) expect(readHeldPress(data)).not.toBeNull()
+
+    expect(readHeldPress('held:7001:add')).toEqual({ messageId: 7001, choice: 'add' })
+    expect(readHeldPress('held:7001:skip')).toEqual({ messageId: 7001, choice: 'skip' })
+    expect(readHeldPress('held:7001:0005')).toEqual({ messageId: 7001, choice: '0005' })
+    expect(readHeldPress('held:999999999999999:add')).toMatchObject({ messageId: 999_999_999_999_999 })
+  })
+
+  it.each([
+    '',
+    'held',
+    'held:7001',
+    'held:7001:',
+    'held::add',
+    'held:7001:add:',
+    'held:7001:add:1234',
+    'held:7001:remove',
+    'held:7001:123',
+    'held:7001:12345',
+    'held:7001:Add',
+    'held:-7001:add',
+    'held:70.01:add',
+    'held:1234567890123456:add',
+    ' held:7001:add',
+    'held:7001:add\nheld:7002:add',
+    'Held:7001:add',
+    // What a button that moves a purchase holds.
+    '57:online',
+    '7001:add',
+  ])('send back nothing that is read when it is %j, which none of them holds', (data) => {
+    expect(readHeldPress(data)).toBeNull()
+  })
+
+  it('hold nothing that is read as what a button that moves a purchase holds, and the other way about', () => {
+    for (const { data } of heldButtons(57, 3, cards).flat()) expect(readPress(data)).toBeNull()
+
+    expect(readHeldPress('57:other')).toBeNull()
   })
 })

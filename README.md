@@ -5,6 +5,21 @@ transaction-alert emails, extracts each purchase, and keeps a running total per 
 window: its statement cycle or the calendar month. Windows are counted in the user's time zone, which is Singapore's
 until they set another with `/timezone`.
 
+The bot knows a purchase by the day that it was made, which is what an alert, a photo or its user gives it. A bank
+counts one by the day that it is posted, usually a day or two later. So on every card a purchase made on the last
+two days of a window is counted in the next window (`DAYS_COUNTED_IN_NEXT` in `src/domain/window.ts`). For a
+statement that closes on the 5th, the statement month of 6 October to 5 November counts the purchases made from 4
+October to 3 November. For a calendar month, November counts those made from 30 October to 28 November. And on the
+last two days of a window the card's current window is the next one. A product can say another number of days for
+its cards (`daysCountedInNext`), and one whose terms count a purchase by the day that it was made says 0: a window
+then counts the purchases of its own days, and nothing is said of it. The window is still shown as the bank has it,
+every total follows, and nothing that is stored changes. The user is told: the message about a purchase that is
+counted in the next window says so and why, `/spend` says under each card which days its total counts and why, and
+`get_spending_summary` gives the card `countedFrom`. The rule is from UOB's terms for the EVOL card, which count
+spend that is "successfully charged and posted to the Card account in each Statement Month". It is taken to hold
+for other cards, and has not been checked for them. The two days are the owner's choice: how long a posting really
+takes was not measured.
+
 It runs on Cloudflare Workers with a D1 database.
 
 ## Status
@@ -12,8 +27,9 @@ It runs on Cloudflare Workers with a D1 database.
 Early work. What exists so far: the database schema, the window maths, the Telegram commands, the parsers of bank
 alerts, connecting a user's Gmail through Google sign-in, the scheduled check that reads the connected mailboxes,
 purchases added and taken out by hand, a catalogue of card products whose reward categories purchases are sorted
-into, an endpoint through which a user's AI assistant can read their totals and purchases, and an assistant of the
-bot's own that answers questions asked in plain language.
+into, an endpoint through which a user's AI assistant can read their totals and purchases, an assistant of the
+bot's own that answers questions asked in plain language and does what it is asked to do in the same way, and the
+adding of the purchases in a photo that a user sends the bot.
 
 Two banks are supported so far: OCBC and UOB, both of Singapore, each for its card transaction alerts. A third
 parser is for an invented example bank, which the tests use.
@@ -71,7 +87,8 @@ When Google no longer honours a connection's token, the user is told and the con
 reconnected. It is marked only once the message has been sent, so one that fails is sent again on the mailbox's
 next turn, unless the user has blocked the bot. `/status` shows how the checking is going. Each run also deletes up
 to five sign-ins that were never finished and have expired, and asks Google to revoke any token that one of them
-held, with the exception described under Connecting Gmail.
+held, with the exception described under Connecting Gmail. And it deletes the purchases that the bot asked about
+and that nobody answered for in a day: see Adding purchases from a photo.
 
 ## Purchases one by one
 
@@ -118,7 +135,8 @@ Telegram can deliver a message twice. A purchase added by hand is stored under t
 so the second delivery stores nothing, and is answered with the purchase as it stands. A user can add 100 purchases
 by hand in 24 hours, those taken out since among them: each is a row written, and the database takes only so many
 writes in a day. The count is part of the statement that stores a purchase, so no two that come together get past
-it.
+it. The purchases that the bot reads from a photo are added by hand in all of this: see Adding purchases from a
+photo.
 
 `/remove <purchase id>` takes a purchase out. Its row is kept and marked, so that the alert it was read from still
 counts as known and is never stored again. Whatever totals, lists or counts purchases leaves a marked row out.
@@ -223,12 +241,17 @@ inside the service, by the functions that the MCP endpoint runs and not through 
 through the store of the user who asked.
 
 There is no switch. The assistant is on for every user when the service is set up with an AI provider, and a
-service with none answers a question by saying that it has no assistant. Three settings make the setup:
+service with none answers a question by saying that it has no assistant. Four settings make the setup, of which the
+last is for photos:
 
 - `AI_API_KEY`: the provider's key, which is a secret. With no key there is no assistant.
 - `AI_BASE_URL`: where the provider's API is reached, with no trailing slash. Left out, it is
   `https://api.groq.com/openai/v1`.
 - `AI_MODEL`: the model that is asked there. Left out, it is `openai/gpt-oss-120b`.
+- `AI_VISION_MODEL`: the model that reads photos, which is asked at the same address with the same key. Left out,
+  it is `qwen/qwen3.8-27b` when `AI_BASE_URL` is left out too, and nothing otherwise: the default is a model of the
+  default provider's, and its name means nothing to another. With nothing, the bot reads no photos: see Adding
+  purchases from a photo.
 
 Any provider with a chat completions API of the kind that OpenAI has will do, and it is reached with `fetch`: a
 `POST` to `<AI_BASE_URL>/chat/completions` with the key as a bearer token, and with `model`, `messages`, `tools`,
@@ -236,9 +259,11 @@ Any provider with a chat completions API of the kind that OpenAI has will do, an
 
 Nobody is asked before a question of theirs is sent to the provider, so a service that has an assistant says what
 is sent: in the welcome that answers `/start`, under the list of commands that answers a command that there is not,
-and in the privacy policy, which names the details. The provider is sent the question and what the model's calls of
-the tools return, and nothing unless a question is asked. The policy also says that what is taken from Gmail is not
-used to train AI models, so the provider has to be one that does not train its models on what it is sent.
+and in the privacy policy, which names the details. The provider is sent the question, what the user's cards are
+called and can be sorted into, and what the model's calls of the tools return, and nothing unless a question is
+asked or, where the bot reads photos, a photo is sent. The policy
+also says that what is taken from Gmail is not used to train AI models, so the provider has to be one that does not
+train its models on what it is sent.
 
 A model takes seconds over an answer, and Telegram posts an update again when it has waited too long to hear that
 the update was taken. So the Worker answers Telegram at once, and the answering goes on in `ctx.waitUntil`. A Worker
@@ -269,9 +294,10 @@ an answer or to a notice, and when it is the placeholder that it refuses so, the
 the "typing" action stops nothing. An answer that Telegram does not answer at all in its 5 seconds is not sent again
 as text, as one that it refuses is: the notice then says that the question could not be answered.
 
-A question costs the model four messages at the most: its calls of tools, and then its answer. Six calls of tools
-are answered, however many the model makes in one message, and the summary is read once. That keeps a question to
-32 database queries and 4 requests to the provider at the most. It makes 12 requests to Telegram at the most: the
+A question costs the model four messages at the most: its calls of tools, and then its answer. Six calls of the
+tools that read are answered, however many the model makes in one message, and the summary is read once. With the
+user's row and their cards, which the model is told of before the question, that keeps a question to 33 database
+queries, and 4 requests to the provider at the most. It makes 12 requests to Telegram at the most: the
 placeholder, the "typing" action 7 times in the 27 seconds, the answer, the answer again as text and, when Telegram
 took it neither way, the notice in the place of the placeholder and again as a message of its own. An answer that
 Telegram took is followed by one request, which deletes the placeholder. `list_transactions` gives the model 50
@@ -308,6 +334,219 @@ text that is all one `code` entity. Either way it is cut to the 4,096 characters
 paragraphs, and what is cut ends with an ellipsis. So does an answer that the model wrote up to its own limit, of
 1,024 tokens to a message with those of its reasoning, and no further.
 
+## Asking the bot to do things
+
+A message for the assistant can ask for something to be done: "add 5.20 lunch to evol as other spend", "mark 57 as
+other spend", "set my time zone to Tokyo". The model works out what the user asked for, and the bot's own code does
+it. Beside the two tools that read, the model is offered three that act: `add_purchases`, `set_category` and
+`run_command`. A call of one does nothing. It ends the conversation with the model, and comes back from
+`answerQuestion` as an action (`Action` in `src/ai/assistant.ts`), which `act` in `src/telegram/handler.ts` carries
+out with the code that the commands run. The reply is the bot's too: the model is not asked again, so nothing that
+a model wrote ever says that something was done.
+
+What can be undone in one step is done at once: adding purchases, sorting a purchase into a category, adding a
+card, linking a card to a product, changing the time zone, and the commands that only show things. Purchases are
+added as those of a photo are, by `addRead`, under the id of the message, with the same limit and the same buttons
+for what is not clear, and a message has them added once. A purchase is sorted as a press of "Mark as" sorts one,
+when it is the user's, its card has a product, and the category is one that can be chosen for that product. A
+command is run by `reply`, as if its user had sent the line. Several things in one message are done in their
+order, five at the most, each with a reply of its own. When one fails, those before it stay done, and the user is
+told that it is those that are answered. When the model asked for more than the assistant handed on, the reply ends
+with the line that says that something could not be done. Before the first thing is done, the placeholder is made
+to say to check `/spend` before asking again, as that of a photo says: what is done for a message is done again for
+one that is sent again. And when the reply cannot be made in its time, or cannot be sent, once the doing has begun,
+the notice is "What you asked for may have been done, but the bot could not reply to it. Check /spend before you
+ask again."
+
+The commands that are run for the assistant are listed, in `RUN_AT_ONCE` in `src/telegram/handler.ts`: `/addcard`,
+`/product` and `/timezone`, and those that only show things, which are `/cards`, `/spend`, `/sort`, `/products`
+and `/status`. It is a list of what is run and not of what is not, so that a command which the bot is given later
+is run for no model until somebody puts it there. Every line that is of none of these, and is not one that is
+asked about first, is answered with that it could not be done: `/start`, `/add`, whose purchases the model gives
+with `add_purchases`, the 6-digit code of a sign-in, a command that there is not, and a line that is no command,
+which would go to the assistant as a question and be the assistant asking itself.
+
+What removes or revokes waits for one tap: `/remove`, `/removecard`, `/disconnect`, `/mcp`, which replaces the
+token that there is, `/mcp revoke`, and `/connect`, which cancels a sign-in that is waiting for its code. None of
+these is undone in one step, and a model can make out what nobody asked for: a user who has just approved at Google
+and asks whether their Gmail is connected yet is not to have their six digits made useless. So the bot sends a
+message that says what would be done and to what, as in "Take this purchase out of ••••5678?" with the purchase
+under it, and two buttons, "Do it" and "Cancel". Nothing is done until "Do it" is pressed. The command's own reply
+is then sent first, as it can be all that there is of what was done: the token that `/mcp` makes is nowhere else.
+After it the press is answered, and the message says "Done." under what it asked and has no buttons. Neither of
+those two undoes or hides anything by failing. "Cancel" does nothing, and the message says so.
+
+What the model asks for after a tool has read for it is asked about first too, where it would change something. A
+merchant's name is text that somebody else wrote, it reaches the model inside what a tool returns, and a model can
+take such text for its user's wish. So purchases that it then gives to be added are held whole, each asked about
+with the buttons as one that it was not sure of is, and `/addcard`, `/product` and `/timezone` wait for "Do it" as
+the commands that remove do. Sorting is done as before, and so is whatever only shows things.
+
+What deletes everything is never done for the assistant. A line of `/delete`, whatever follows the command, is
+answered with what `/delete` answers when it is sent alone, which says to send `/delete confirm`: that is for the
+user to send themselves.
+
+The command rides under the two buttons as the line that its user would send, in the 64 bytes that Telegram gives
+a button. What a press brings back is what a client sent, which can be anything. So a line in a button's data is
+run only when it is again a line of a command that a message can ask about, which are those six and the three that
+are asked about after a reading, for the user who pressed, in their own private chat. Any other is answered with
+"That button no longer works.": a press cannot delete everything, and cannot run what no button was made for.
+Nothing keeps a press from being made twice. The message has no buttons after the first, and a command that is run
+again says so itself, as when it is sent twice.
+
+The things of one message may run 30 database queries between them, each counted at the most that it can run: 8
+for an adding, 1 for the cards and 2 for each purchase that is sorted, 1 for a message that asks, 22 for `/spend`
+with no card named, and 6 for any other command. What there is no room left for is not begun, and its user is told
+to ask for it again. The answering has run 2 queries by then, for the user and their cards, when no tool had read
+anything for the model, and 12 more at the most for calls that were told what was wrong with them: 44 in all. When
+tools had read for it, which can have run 31, the things may run 17, so that a request stays inside the 50 that it
+may run whatever the model does.
+
+## Adding purchases from a photo
+
+A photo that a user sends the bot is read for the purchases in it, and they are added: a screenshot of the
+transactions in their bank's app, say. The words under the photo, which are its caption, can say which card the
+purchases were made with and how they are to be sorted: "add these to evol as bus/mrt physical card".
+
+The reading is a model's, of the provider that answers questions, and there is no switch for it either. A service
+reads photos when it is set up with a model that takes images: see `AI_VISION_MODEL` under Asking the bot a
+question. A service that has none answers a photo as it answers any attachment, with that the bot only reads text.
+One that reads photos answers every other attachment with that it reads text and photos, and that a picture is
+read only when it is sent as a photo and not as a file.
+
+The model is sent the photo, its caption, the user's time zone with the day that it is there, and of each of the
+user's cards the nickname, the categories that a purchase on it can be put in by hand, and what the card's product
+says of the sorting (`sortingNote`). It is asked once, for JSON, and is offered no tools: `src/ai/photo.ts` has the
+asking, and the checking of what it answers. Nobody is asked before a photo of theirs is sent to the provider, so a
+service that reads photos says what is sent where it says what becomes of a question: in the welcome that answers
+`/start`, under the list of commands, and in the privacy policy.
+
+A photo is answered after the response, as a question is, and by the same code: the Worker answers Telegram at
+once, the chat gets a placeholder and is shown that the bot is writing, and the reply is waited for 27 seconds. The
+placeholder of a photo is its own: "Reading your photo… If this message is still here in half a minute, something
+went wrong. Check /spend before you send the photo again." Then come, in this order, the user's row, their cards,
+the look whether the message was read before, the photo's file and the reading. A user with no cards is answered
+with what `/cards` says of none, and nothing is fetched for them.
+
+Telegram keeps a photo in several sizes. The one that is fetched is the largest that has no more than 400 KB
+(`MAX_PHOTO_BYTES` in `src/telegram/handler.ts`): a photo goes to the model as base64 in JSON, and the encoding of
+it costs CPU time, of which an invocation has about 10 ms on the free plan. A size that Telegram gives no number of
+bytes for is fetched to find out, and no more of it than the 400 KB.
+
+What the bot then does with the purchases that were read:
+
+- The card is the one that the reading took from the caption or, for a user with one card, that card. Otherwise it
+  is not known. Neither is it when the caption named a card that the user has not got, whatever cards they have:
+  what was said to be on another card is not put on their one card without a word.
+- The category of a purchase is the one that the reading took from the caption, when it is one that a user can
+  choose on that card. Otherwise the purchase starts where `/add` would start it: where a rule of the card's product
+  puts it, or in the product's default.
+- What is clear is added at once, with nothing to confirm: with the card known, every purchase that the model was
+  sure of.
+- What is not clear is asked about first: every purchase whose amount or date the model was not sure of and, with
+  the card not known, all of them. They are held as one batch, and shown in a message of their own with buttons.
+- A purchase that looks like one that is stored already is added all the same. Nothing is compared, and a user who
+  has a purchase twice takes one out with `/remove`.
+
+The purchases are stored as purchases that are added by hand are: under the same parser (`manual`), counted among
+the 100 that a user may add by hand in 24 hours, each with an id, and each removable with `/remove`. So each has the
+`*` of a purchase added by hand wherever it is listed. A purchase has a day and no time, and is dated as `/add`
+dates one that is given with its day: at noon of that day in the user's time zone, or at the time that it is now,
+on a day that has not got to its noon yet. It is stored under the id of its message and its place in the reading
+(`manual:<message id>:<place>`), so nothing of a message is stored twice.
+One statement stores all the purchases of a photo, with the count of the limit as part of it: a photo holds 20
+purchases at the most (`MAX_PURCHASES_PER_PHOTO`), and a request may run 50 queries. When the limit leaves some of
+them out, they are the last of the photo, and the user is told how many.
+
+A message is read once. Telegram delivers a message again when it has not heard that the message was taken, and a
+second reading of a photo can differ from the first, while purchases are stored under their places in the reading.
+So before a photo is fetched, the bot looks whether a purchase of its message is stored, at any of the 20 places,
+or purchases of it are held. If so, the model is not asked, and the message is answered with one line: "That
+message was read already. Look at /spend, and at the bot's earlier messages, for what came of it." A message of
+text whose purchases the assistant gave is added from once in the same way: see Asking the bot to do things.
+
+The reply is what was added, in a table like those of `/spend <nickname>`, under a line that names the card and the
+category: "Added to evol ••••5678 as Other Spend:". Purchases that are in more than one category have a table to
+each. The card that is named is the one that the purchases are stored on. After the tables comes the line that the
+reply to `/add` has for where the card then stands. That is one rich message, and is sent as text when Telegram
+answers it with an error, as `/spend <nickname>` is. Then, in a message of its own, come the purchases that are
+held, each on a line with its merchant marked as code, and under them the buttons. With the card known they are
+"Add these 3" and "Skip". With the card not known there is a button for each of the user's cards, as in "Add to
+visa", and "Skip", and the purchases that the model was not sure of are marked "not sure". Last, in one message,
+comes what else there is to know: how many purchases were not added for the limit, how many could not be read at
+all, which `/add` adds by hand, and that only the first 20 of a photo are read.
+
+A purchase is shown with its day and its month, and with its year too when that is not the year that it is now in
+the user's time zone, as in "5 Oct 2025": in those tables, and on the lines of the purchases that are held. A photo
+mostly shows no year, so the year is the model's to choose, and a purchase that is stored a year too early is in no
+window that its card is shown for. The reading doubts a purchase that is dated more than 60 days back, so such a
+purchase is asked about first, and its line shows why.
+
+A press of a button under purchases that are held is acted on for the user that they are held for, in their own
+private chat, and for nobody else. "Add" stores them, on the card of the button when they were held for none, by
+the rules above: the limit, the categories, and the ids that keep a purchase from being stored twice. The message
+is then edited to say what was added, with the ids, and has no buttons. "Skip" stores nothing, and the message says
+so. Either way the purchases are held no longer. They are let go of last, once the message says what was done: so a
+press whose answer or edit Telegram did not take can be made again. The press that is made again can be of another
+button, so a press says what is true of the store, whichever button it was. Before it adds or skips, it looks
+whether the purchases are stored already. If they are, it stores nothing and skips nothing, and brings the message
+up to date with what is stored: "Skip" after an "Add" whose edit failed says that the purchases were added, and
+"Add to visa" after "Add to evol" names evol. A press on purchases that are no longer held is answered
+with "That button no longer works.": they were answered for, or they were held for more than 24 hours. The
+scheduled run deletes those that nobody answered for in that time, with one statement a run, and `/delete confirm`
+deletes a user's with everything else. They are in the table `held_batches`, a batch to each message.
+
+Whatever else comes of a photo is said in the place of its placeholder: that no purchases to add were found in it,
+that the assistant has reached its limit for now, as a question is told when the provider answers 429, that the
+photo took too long to read, that it could not be read, with a clearer photo or `/add` as what to do, and that it
+is too large, with to crop it to the purchases.
+
+A photo that is sent again is a new message. It stores its purchases a second time, and those that are held are
+then asked about twice, under two messages whose buttons both add them. So from the moment that a purchase of a
+photo is stored, or is held, nothing that the bot says of the photo says to send it again. When something fails
+after that, or the 27 seconds run out, the user is told: "The purchases in your photo were read, but the bot could
+not finish its reply. Check /spend and the bot's other messages before you send the photo again." It says "other"
+and not where, as the message that asks about what is held is under the placeholder, which is what says this. It
+is what the reply to an `/add` whose purchase is stored does: see When a message gets no reply. The placeholder
+says the same, as it is all that is left in the chat when a Worker is ended early. And a reading that comes after
+the 27 seconds is stored for nobody: its user has been told by then that the photo took too long, and may have sent
+it again.
+
+A photo takes 8 database queries at the most: the user, the cards, the two that look whether the message was read
+before, the storing, the look for which purchases the limit left out, the holding, and the card's total. It takes
+one request to the provider, and 16 to Telegram at the most: the placeholder, the "typing" action 7 times in the 27
+seconds, two for the file, which are where it is and its bytes, the table, the table again as text, the message
+that asks, the message of what else there is to know and, when Telegram did not take the last of those, the notice
+in the place of the placeholder and again as a message of its own. A press takes 7 queries and 2 requests at the
+most.
+
+The table of held purchases is made by `migrations/0009_photos.sql`, which is to be applied before the code is
+deployed: a service whose code is ahead of its database fails at whatever reads or writes that table, which every
+photo does. The checking of mail does not fail with it. A run deletes the batches that nobody answered for once
+the mailbox has had its turn, in a `try` of its own, so a failure there is logged at a stage of its own, `batches`,
+and keeps nobody's mail from being checked.
+
+What is done with a reading knows nothing of photos: `addRead` in `src/telegram/handler.ts` takes the user, their
+cards, the reading and the id of the message. So purchases that are read from anything else can be added by the same
+code, with the same limit, the same ids and the same buttons.
+
+What was measured, on 11 October 2026, against Groq's `qwen/qwen3.8-27b` with a synthetic screenshot of 720 by 600
+pixels that showed five purchases:
+
+- A reading took about one second, and about 1,800 tokens. Every amount, date and merchant was read exactly.
+- With a caption that named the card and "bus/mrt physical card", the model took the card and Other Spend from it,
+  once the prompt held the product's note on sorting. Without that note it did not.
+- The provider's headers gave the model 8,000 tokens a minute and 1,000 requests a day, and its limiter counted
+  about 2,500 tokens for one reading. So the service reads about three photos a minute, for all of its users
+  together.
+- With the prompt as it is now, a synthetic photo of 25 purchases gave the first 20, with `more` set. Every amount
+  and date was exact, and two merchant names had a letter wrong. That reading took 2.6 seconds and 2,682 tokens.
+
+Not measured: a real screenshot, a photo of a paper receipt, and the CPU time that a reading costs in production.
+And from Groq's documentation, not from anything seen here: the model is a "preview" model, which may be withdrawn
+at short notice. A service whose model is withdrawn answers a photo with that it could not be read, until
+`AI_VISION_MODEL` names another.
+
 ## Reading the logs
 
 The service writes a line to its log for most of what it does, and for whatever goes wrong. A line is JSON: the name
@@ -315,7 +554,7 @@ of an event, and then the fields of that event. These are two lines of the mail 
 stored a purchase and told its user. The second is of a run that failed when Gmail answered a listing with a 503:
 
 ```json
-{"event":"check","mailbox":true,"user":12,"listed":3,"unknown":1,"headers":1,"read":1,"stored":1,"unparsed":0,"rejected":0,"notified":1,"checked":true,"swept":0,"ms":412}
+{"event":"check","mailbox":true,"user":12,"listed":3,"unknown":1,"headers":1,"read":1,"stored":1,"unparsed":0,"rejected":0,"notified":1,"checked":true,"swept":0,"batches":0,"ms":412}
 {"event":"check_failed","stage":"list","user":12,"error":"Error","reason":"http_error","status":503}
 ```
 
@@ -331,7 +570,9 @@ places to read it:
 When this was written, the free plan kept 200,000 log events a day, each for three days. The mail checker writes
 one line for a run, which is 1,440 a day, and one more for each alert that it reads. The bot writes one line for an
 update. For a question it writes one more when the answering ends, and one for each request to the provider and for
-each call of a tool on the way.
+each call of a tool on the way, and one for each thing that the assistant made out to do. For a photo it writes one
+more when the reading ends, and one for the request to the provider. And for a press of a button under purchases
+that it asked about, or under a message that asked before a command was run, it writes one more.
 
 The line of a failure is written with `console.error`, and every other line with `console.log`, so that Cloudflare
 has a failure at the level of an error and can count it as one. What its dashboard shows of that has not been seen
@@ -343,14 +584,15 @@ The service reads people's mail and keeps their purchases, and its log is read b
 holds:
 
 - the text of a message, of a question or of an answer
+- a photo or any byte of one, the caption under one, or the id that Telegram knows a file by
 - the text or the subject of an email, the name of a merchant, or an email address
 - a Telegram user id or chat id, or the digits of a card
 - an access token, a refresh token, an API key, or the state or the code of a sign-in
 - the message of an error that anything outside the service threw, which can quote what it was given
 
 What a line may hold is the service's own id of a user, names that the code spells out, counts, durations in
-milliseconds, HTTP statuses, booleans, and the class name of an error. `user` is that id: the id of the user's row
-in the database, which nobody outside the service knows them by.
+milliseconds, HTTP statuses, booleans, and the class name of an error. How many bytes a photo has is a count.
+`user` is that id: the id of the user's row in the database, which nobody outside the service knows them by.
 
 `src/log.ts` lists every event with its fields, and its types hold the line: a field is a number, a boolean, null
 or one of the words that are spelt out for it there, and text that came from outside is none of those. So an event
@@ -389,18 +631,21 @@ The mail checker:
     messages it did not believe to be from a bank.
   - `notified`: how many purchases it told the user of.
   - `checked`: whether the mailbox became fully checked. `swept`: how many expired sign-ins the run cleared away.
-    `ms`: how long the run took, in milliseconds.
+    `batches`: how many batches of held purchases it deleted, which nobody had answered for in the 24 hours that
+    one is held: see Adding purchases from a photo. `ms`: how long the run took, in milliseconds.
 - `check_failed`: a run that failed. It is written before the `check` line of the same run, and has the fields of a
   failure, which are listed below.
-  - `stage`: what the run was doing. `sweep` is clearing away the expired sign-ins, `take` is giving a mailbox its
-    turn, and `token` is getting an access token for it. `list` is listing its mail, looking up which of that is
-    new, and keeping the token of the page that the next run goes on from. `read` is fetching a message, or its
-    headers. `store` is reading the purchase out of an alert and storing it, or noting something else in the
-    database: a message that was not stored, that the mailbox is fully checked, or that its connection needs to be
-    reconnected. `notify` is telling the user of a purchase, or that the access is lost. To tell of a purchase on
-    a card that the user has added, the card's totals are read from the database before Telegram is asked
-    anything. So a failure at `notify` that has no `status`, and no `telegram_failed` line before it, is the
-    database's and not Telegram's.
+  - `stage`: what the run was doing. `sweep` is clearing away the expired sign-ins. `batches` is deleting the held
+    purchases that nobody answered for, which is done once the mailbox has had its turn: a failure there ends
+    nothing else, so a run can have a line of it after the line of a failure at another stage, and it names no
+    user. `take` is giving a mailbox its turn, and `token` is getting an access token for it.
+    `list` is listing its mail, looking up which of that is new, and keeping the token of the page that the next
+    run goes on from. `read` is fetching a message, or its headers. `store` is reading the purchase out of an
+    alert and storing it, or noting something else in the database: a message that was not stored, that the
+    mailbox is fully checked, or that its connection needs to be reconnected. `notify` is telling the user of a
+    purchase, or that the access is lost. To tell of a purchase on a card that the user has added, the card's
+    totals are read from the database before Telegram is asked anything. So a failure at `notify` that has no
+    `status`, and no `telegram_failed` line before it, is the database's and not Telegram's.
   - `user`: whose mailbox it was, or null when none had been given its turn yet.
 - `access_lost`: a run found that Google no longer honours the token of a mailbox. `user`: whose it is. `told`:
   whether they were told. A user who has blocked the bot is not, and the connection is marked as needing to be
@@ -453,24 +698,26 @@ The bot:
   brought none, or `wrong_secret`. When the webhook was set with another secret than the Worker has, every update
   is a `wrong_secret`, and the bot answers nobody.
 - `update`: an update that the webhook took, as the handling of it ends. That is before the answering of a
-  question begins, which has a line of its own.
+  question begins, and before the reading of a photo, each of which has a line of its own.
   - `kind`: what the update was. A message of text in its sender's own private chat with the bot is a `command`, a
-    `question`, or the `code` of a sign-in, sent as six digits. `not_text` is a message there that is not text,
-    such as a photo, and `edited` is a message as it stands after an edit. `press` is the press of a button.
+    `question`, or the `code` of a sign-in, sent as six digits. `photo` is a photo there, on a service that reads
+    photos. `not_text` is any other message there that is not text, such as a voice message, and a photo on a
+    service that reads none. `edited` is a message as it stands after an edit. `press` is the press of a button.
     `message` is a message that was ignored before it was read, `other` is an update that holds none of these,
     and `unreadable` is a body that is not JSON.
   - `command`: which command it was, by its name without the slash, as in `spend`. `unknown` is a slash command
     that is none of the bot's, or a message with nothing in it. It is a name from the bot's own list, and never
     what was sent.
   - `outcome`: `replied` when the bot answered: a message with a reply, and a press with what a press is answered
-    with. `deferred` for a question that was left to be answered after the response. `ignored`, with `why`.
-    `failed` when the handling failed, with `handled`, `told` and the fields of a failure.
+    with. `deferred` for a question that was left to be answered after the response, and for a photo that was left
+    to be read then. `ignored`, with `why`. `failed` when the handling failed, with `handled`, `told` and the
+    fields of a failure.
   - `why`: why an update was ignored. `not_private`: it was not in a private chat. `not_own_chat`: the private
-    chat was not its sender's own, or it did not say who sent it. `no_id`: it was a message or a press without the
-    id that Telegram gives one. `not_text`: it was the edit of a message that is not text, as every move of a live
-    location is. `service_message`: it was what Telegram writes in a chat itself when a message is pinned there,
-    or when the timer that deletes the chat's messages is set. `nothing_read`: it held no message, no edited
-    message and no press.
+    chat was not its sender's own, or it did not say who sent it. `no_id`: it was a message of text, a photo or a
+    press without the id that Telegram gives one. `not_text`: it was the edit of a message that is not text, as
+    every move of a live location is, and as a photo is whose caption was changed. `service_message`: it was what
+    Telegram writes in a chat itself when a message is pinned there, or when the timer that deletes the chat's
+    messages is set. `nothing_read`: it held no message, no edited message and no press.
   - `handled`: whether what an update that failed asked for had been done by the time it failed. A message is
     handled once its reply has been made, so that only the sending of the reply was left. `/add` is the exception:
     it is handled once a purchase for its message is stored, by this delivery of the message or by an earlier one,
@@ -491,12 +738,13 @@ The bot:
 - `question`: a question, as its answering ends. That is after the response, so a Worker that is ended before it
   is done writes no such line: see When a message gets no reply.
   - `user`: who asked, or null when the answering ended before their row was read.
-  - `outcome`: `answered`. `busy` when the provider had had as many requests as it takes. `failed` when the
-    question could not be answered, or its answer could not be sent. `timeout` when time ran out, in one of
-    three ways that the fields of the failure tell apart: the `error` `TimeoutError` is a request that the provider
-    did not answer in the time that it had, the `reason` `out_of_time` is the 25 seconds of the answering used up,
-    and the `reason` `took_too_long` is a reply that was not made in its 27 seconds. `blocked` when Telegram will
-    send the chat nothing.
+  - `outcome`: `answered`. `acted` when the assistant made out things to do, and the replies to them were sent:
+    each of them has an `action` line, which says what came of it. `busy` when the provider had had as many
+    requests as it takes. `failed` when the question could not be answered, or its answer could not be sent.
+    `timeout` when time ran out, in one of three ways that the fields of the failure tell apart: the `error`
+    `TimeoutError` is a request that the provider did not answer in the time that it had, the `reason`
+    `out_of_time` is the 25 seconds of the answering used up, and the `reason` `took_too_long` is a reply that was
+    not made in its 27 seconds. `blocked` when Telegram will send the chat nothing.
   - `sent`: how the reply reached the chat. `rich` and `text` are an answer, as a rich message or as text. `edit`
     is a notice that was said in the place of the placeholder, and `message` one that was sent as a message of its
     own. `none` is that nothing was said.
@@ -507,21 +755,85 @@ The bot:
     still in flight when the 27 seconds ended is counted too, and as a rule has no `ai_call` line: that line is
     written when a request ends, and the Worker does not wait for this one. `tool_calls`: how many calls of tools
     were answered, each of which has an `assistant_tool` line.
+  - `actions`: how many things the assistant made out to do. It is missing from a question that was answered. A
+    `failed` or a `timeout` that has it is of a message whose reply could not be sent or made in time once the
+    doing had begun: its user was told to check `/spend` before asking again.
   - `ms`: how long it took in all, from before the placeholder was sent.
   - A question that was not answered has the fields of a failure too, which say why. A `failed` with the `error`
     `TimeoutError` is an answer that Telegram did not answer in its 5 seconds, and has a `telegram_failed` line
     before it. A request that the provider did not answer in time is a `timeout`.
 - `assistant_tool`: a call of a tool by the model, over a question. These calls are made inside the service and
   not through the MCP endpoint, so they have no `mcp_tool` line. `user`: who asked. `tool`: `get_spending_summary`
-  or `list_transactions`, or `unknown` for a tool that there is not, whatever the model called it. `outcome`: `ok`,
+  or `list_transactions`, one of the three that act, which are `add_purchases`, `set_category` and `run_command`,
+  or `unknown` for a tool that there is not, whatever the model called it. `outcome`: `ok`,
   `invalid` when the model was told what was wrong with the call, which a call beyond the six that are answered
   is too, or `failed`, with the fields of a failure. The question then fails with it. `ms`: how long the call took.
+- `action`: one thing that the assistant made out to do, as the bot is done with it: see Asking the bot to do
+  things. It is written before the `question` line of its message. `user`: who asked.
+  - `kind`: `add` for purchases to add, `category` for purchases to sort, `command` for a command to run.
+  - `command`: which command, for a `command`, by its name in the bot's own list, and never what the model wrote.
+    `unknown` is a line of no command of the bot's.
+  - `outcome`: `done`. `asked` when nothing is done until its user presses a button: a command that removes or
+    revokes, an adding of which every purchase is held and, after a tool had read for the model, a command that
+    changes something. `refused` when the bot did nothing of it: `/delete`, a line of no command that is run for
+    the assistant, a command that is asked about and has nothing to act on, purchases of which none could be
+    sorted, and purchases to add that there were none of, or that their message had added already. `failed`, with
+    the fields of a failure, which ends the doing: every action after it is `skipped`, as every action is that
+    there was no room left for.
+  - `stored`, `held`: how many purchases an `add` stored at once, and how many it holds.
+- `confirm_press`: the press of "Do it" or "Cancel" under a message that asked before a command was run. It is
+  written before the `update` line of the press. `user`: who pressed. `command`: which command the button's line
+  is of, out of those that a message can ask about: `remove`, `removecard`, `disconnect`, `mcp`, `connect`,
+  `addcard`, `product` and `timezone`. `outcome`: `done` when the command was run, `cancelled`, or `refused` for a
+  press that brought a line of no such command, which has no `command` and is answered with that its button no
+  longer works. A press by somebody whom nothing is stored about has no such line. A `done` is written once the
+  command has run, before its reply is sent: a `telegram_failed` line after it is of the reply, of the answer to
+  the press or of the edit, and only the first of those fails the press.
+- `photo`: a photo, as its reading ends. That is after the response, as with a question, so a Worker that is ended
+  before it is done writes no such line.
+  - `user`: whose photo it was, or null when the reading ended before their row was read.
+  - `outcome`: `read` when purchases were read from it, and their user was told what came of them: the counts say
+    what that was. `nothing` when no purchases to add were found in it, and `no_cards` when its user has no cards.
+    `repeated` when its message was read before, so that it was not fetched or read again: Telegram delivered it a
+    second time. `too_large` when it has more than 400 KB in every size, or its file turned out to have. `busy`
+    when the provider had had as many requests as it takes. `timeout` when time ran out: the `error` `TimeoutError`
+    is a request that the provider did not answer in the time that it had, and the `reason` `took_too_long` is a
+    reply that was not made in its 27 seconds. `failed` when the photo could not be read, or what came of it could
+    not be stored or sent. `blocked` when Telegram will send the chat nothing.
+  - `sent`: how the reply reached the chat. `rich` is a reply whose table went as a rich message. `text` is one
+    that went as text and nothing else: its table did, or it had none, as when every purchase is asked about.
+    `edit` is a notice that was said in the place of the placeholder, and `message` one that was sent as a message
+    of its own. `none` is that nothing was said.
+  - `placeholder`: whether the placeholder was sent, and Telegram said which message it is: as for a question.
+  - `bytes`: how many bytes the file that was fetched has, or 0 when none was fetched.
+  - `requests`: how many requests to the provider the reading took, which is one, or none. It has an `ai_call`
+    line.
+  - `read`: how many purchases the reading gave that passed its checks, 20 at the most. `unreadable`: how many it
+    gave that failed them, and were left out.
+  - `stored`: how many purchases were stored at once. `held`: how many are held, for their user to answer for.
+    What `read` has beyond the two was left out for the limit on purchases by hand, or was stored by an earlier
+    delivery of the same message, which a `stored` of 0 beside a `read` of more is the mark of.
+  - `ms`: how long it took in all, from before the placeholder was sent.
+  - A photo that nothing was added from for a reason of the service's or the provider's has the fields of a
+    failure too: a `busy`, a `timeout`, a `failed` and a `blocked`. A `failed` or a `timeout` whose `stored` or
+    `held` is above 0 is of a photo whose purchases were stored or held before it failed: its user was told that
+    they were read, and was not told to send it again.
+- `held_press`: the press of a button under purchases that are held. It is written before the `update` line of
+  the press. `user`: who pressed. `outcome`: `added`, `skipped`, or `refused` for a press that was answered with
+  that its button no longer works: the purchases are held no longer, or are held for somebody else, or the press
+  brought what no button under them holds. `held`: how many purchases were held for the press to add or to skip,
+  which is 0 for one that was refused. `stored`: how many of them the press stored, which is fewer when the limit
+  on purchases by hand left some out, and 0 when an earlier press had stored them already: such a press is `added`
+  whichever button it was, as it stores nothing, skips nothing and has the message say what is stored. A press by
+  somebody whom nothing is stored about has no such line.
 
 Telegram:
 
 - `telegram_failed`: a request to Telegram that failed, whoever made it: the bot, the mail checker or a sign-in.
   It is written whether or not what was being done went on without it, as the answering of a question does when
   the "typing" action is refused. `method`: the method of the Bot API, as in `sendMessage` or `sendChatAction`.
+  The fetching of a photo's file is two requests: `getFile` is the asking where the file is, and `downloadFile`,
+  which is no method of the API, is the fetching of its bytes.
   `status`: the HTTP status of the answer, which is missing when Telegram did not answer. It has the fields of a
   failure: a request that Telegram had not answered in 5 seconds was given up on, and has the `error`
   `TimeoutError`. A request that Telegram takes is not logged: a question makes up to twelve.
@@ -531,7 +843,8 @@ Telegram:
 
 The AI provider:
 
-- `ai_call`: a request to the provider, however it ended. A question takes four of them at the most.
+- `ai_call`: a request to the provider, however it ended. A question takes four of them at the most, and the
+  reading of a photo takes one.
   - `ms`: how long the request took. `status`: the HTTP status of the answer, which is missing when the provider
     did not answer.
   - `finish`: why the model stopped writing. It is `stop`, `length`, `tool_calls` or `content_filter`, `other` for
@@ -577,14 +890,20 @@ The line of a failure has up to three fields more:
   - `out_of_time`: the answering of a question used up its 25 seconds before the model had answered.
   - `no_answer`: the model's message held no answer and called no tool.
   - `still_calling_tools`: the model was still calling tools in its fourth message, which is its last.
-  - `took_too_long`: the reply to a question was not made in its 27 seconds.
+  - `took_too_long`: the reply to a question, or what came of a photo, was not made in its 27 seconds.
+  - `file_too_large`: a file that Telegram holds has more bytes than the bot fetches of one. No line has this
+    reason: the bot catches that error, and the `photo` line with the outcome `too_large` is its line.
+  - `not_json`: the model that read a photo answered with what is not JSON.
+  - `bad_reading`: what that model answered is not of the shape that it was asked for, or Telegram's answer to
+    `getFile` did not say where the file is.
 - `status`: the HTTP status of the answer that the error was thrown for. It is taken from an error only when it is
   a whole number from 100 to 599: any other number that an error holds could be anything, and is not written.
 
 ## When a message gets no reply
 
-A message that the bot takes is answered, or its user is told that it was not. A message that is not text is
-answered with that the bot only reads text, and a message of text that was edited with that it is not read again.
+A message that the bot takes is answered, or its user is told that it was not. A message that the bot does not
+read is answered with what it reads, which is text or, on a service that reads photos, text and photos. A message
+of text that was edited is answered with that it is not read again.
 When the handling of a message fails, the chat is sent one line: "Something went wrong on the bot's side. Please
 try again in a moment." That is so whatever failed, the sending of the reply included. No command but `/add` does
 harm when it is sent again, and some have to be: the token that `/mcp` makes is nowhere but in its reply, and
@@ -595,7 +914,10 @@ it again." It does not say to try again, because an `/add` that is sent again is
 purchase a second time. An `/add` that stored nothing, as one past the limit of purchases by hand, is answered with
 the first line, as any other command is. A press of a button that fails before it is answered is answered with
 "Something went wrong. Please try again in a moment.", so that the button stops waiting. And a question is answered
-with a placeholder before anything else is done about it.
+with a placeholder before anything else is done about it, as a photo is. A photo whose purchases are stored or held
+is not to be sent again either, and what its user is told when something fails after that says so: see Adding
+purchases from a photo. The same goes for a message that the assistant did things for: see Asking the bot to do
+things.
 
 Two things are passed over on purpose: an edit of a message that is not text, and what Telegram writes in a chat
 itself when a message is pinned or the timer that deletes messages is set. Both have an `update` line that says
@@ -611,20 +933,23 @@ itself when a message is pinned or the timer that deletes messages is set. Both 
   `failed` has `told`, which is false when the chat could not be told either, and `handled`, which is true when
   what the message asked for had been done all the same. The `telegram_failed` lines before it have what Telegram
   refused, or did not answer.
-- The request has an `update` line that says `deferred`, and no `question` line follows it. The answering of the
-  question did not get to its end, as when the Worker is ended before it does. The placeholder is then still in
-  the chat, and says what to make of that.
-- The request has an `update` line that says `deferred`, and the `question` line after it has `sent` `none` and
-  `placeholder` false. Telegram took neither the placeholder nor what was to be said after it, and the
+- The request has an `update` line that says `deferred`, and no `question` line follows it or, for a photo, no
+  `photo` line. The answering of the question, or the reading of the photo, did not get to its end, as when the
+  Worker is ended before it does. The placeholder is then still in the chat, and says what to make of that.
+- The request has an `update` line that says `deferred`, and the `question` or `photo` line after it has `sent`
+  `none` and `placeholder` false. Telegram took neither the placeholder nor what was to be said after it, and the
   `telegram_failed` lines between the two have what it refused, or did not answer.
 
-These are three lines of the bot: of a photo that was sent to it, of a question that was answered, and of a command
-that failed before its reply was made, with its user told so.
+These are five lines of the bot: of a voice message that was sent to it, of a question that was answered, of a
+command that failed before its reply was made, with its user told so, of a photo of which three purchases were added
+and two are asked about, and of the press of the button that added those two.
 
 ```json
 {"event":"update","kind":"not_text","outcome":"replied","ms":310}
 {"event":"question","user":12,"outcome":"answered","sent":"rich","placeholder":true,"requests":2,"tool_calls":1,"ms":3412}
 {"event":"update","kind":"command","command":"spend","outcome":"failed","handled":false,"told":true,"ms":95,"error":"Error"}
+{"event":"photo","user":12,"outcome":"read","sent":"rich","placeholder":true,"bytes":96412,"requests":1,"read":5,"unreadable":0,"stored":3,"held":2,"ms":2140}
+{"event":"held_press","user":12,"outcome":"added","held":2,"stored":2}
 ```
 
 What follows was seen in the Cloudflare dashboard on 11 October 2026.
@@ -646,11 +971,11 @@ What follows was seen in the Cloudflare dashboard on 11 October 2026.
 
 What the log cannot show is a run that Cloudflare ends early: such a run writes no more lines of the service's
 own. The mail checker writes its `check` line only as a run ends, so a run that was ended early has none. A
-question whose answering was ended early has no `question` line after its `update`. The runs that did not end
-normally are what `$workers.outcome != "ok"` lists, and such a question is known by an `update` that was `deferred`
-with no `question` line after it. A question whose reply was made late, while Telegram answered nothing, ends so
-too: see Asking the bot a question. Its `telegram_failed` lines, each with the `error` `TimeoutError`, are in the
-log, and its `question` line is not.
+question whose answering was ended early has no `question` line after its `update`, and a photo whose reading was
+ended early has no `photo` line. The runs that did not end normally are what `$workers.outcome != "ok"` lists, and
+such a question or photo is known by an `update` that was `deferred` with no line of its own after it. A question
+whose reply was made late, while Telegram answered nothing, ends so too: see Asking the bot a question. Its
+`telegram_failed` lines, each with the `error` `TimeoutError`, are in the log, and its `question` line is not.
 
 Two things were not seen there. A failure has not been seen to be counted as an error, or shown at the level of
 one, as nothing has failed since the lines of the bot were deployed. And Cloudflare's documentation calls a run that
@@ -660,7 +985,8 @@ its CPU limit ended `exceededCpu`: that is from the documentation, as no such ru
 
 - A purchase message that Telegram fails to accept is not sent again. The purchase is stored all the same, so the
   totals are unaffected.
-- A user can have 20 cards at most, and can add 100 purchases by hand in 24 hours at most.
+- A user can have 20 cards at most, and can add 100 purchases by hand in 24 hours at most, those that the bot reads
+  from a photo among them.
 - A button that is pressed twice is carried through twice, as the second press cannot be told from one that is made
   after Telegram failed the first. The purchase is moved once.
 - A category that only a rule gives has no button. So a purchase that its user has moved out of one cannot be moved
@@ -669,7 +995,8 @@ its CPU limit ended `exceededCpu`: that is from the documentation, as no such ru
 - The rich message of `/spend <nickname>` has not been looked at in Telegram's apps: how its tables are drawn there,
   and what an app from before rich messages shows of one. The text is sent in its place only when Telegram answers
   the request with an error, and it has no reason to do that for an app that cannot show the message. The same goes
-  for the rich message that an answer of the assistant's is sent as.
+  for the rich message that an answer of the assistant's is sent as, and for the one that tells of the purchases
+  that were added from a photo.
 - A question is answered on its own. Nothing of an earlier question or of its answer is kept, so one that follows
   on another has to say all of what it asks.
 - An answer is a model's, and can be wrong. What a card's window comes to is added up by the service. Any other sum,
@@ -677,7 +1004,41 @@ its CPU limit ended `exceededCpu`: that is from the documentation, as no such ru
   gives it.
 - The AI provider's limits are those of the whole service, and no user is kept to a share of them. A minute of many
   questions, or of one long one, uses them up for everybody, and so does a day of many. The bot then says that the
-  assistant has reached its limit for now, until the provider takes requests again.
+  assistant has reached its limit for now, until the provider takes requests again. The model that reads photos
+  has limits of its own, which about three photos in a minute use up.
+- The purchases of a photo are a model's reading, and can be wrong. A purchase that the model says it is sure of is
+  added with nothing asked, so an amount or a date that it misread is found only by its user, in the table of what
+  was added. The reading has not been tried on a real screenshot, or on a photo of a paper receipt.
+- A photo that is sent a second time is read as another photo, and its purchases are stored a second time. The bot
+  looks for no purchase that is like one that it has, so the same goes for a purchase that an alert of the bank's
+  has brought already. What a user has twice, they take out with `/remove`.
+- A message that was read is not read again, which the bot knows by a purchase of it that is stored or by purchases
+  of it that are held. Two deliveries of one message that are in flight together can each look before the other
+  has stored or held anything, and both are then read. What keeps them from storing a purchase twice is the
+  purchase's place in the reading, and a model can read the two differently, a photo or the words of a message:
+  the purchases in another order, or one more or one less. A purchase can then be stored twice, or be left out.
+  Telegram delivers a message again when it has not heard that the message was taken, and the Worker tells it so
+  before a photo is read or a question is answered.
+- A purchase is put on a card that its user's words name, and the bot does not weigh what the words say of it. The
+  card is kept when the model gives it and its nickname stands in the caption or the message as a word. So "these
+  are not on evol" names evol, and when the model gives evol for it, the purchases are added to evol.
+- The look that a press of a button under held purchases takes at what is stored is not one step with what it then
+  does. Two different buttons that are pressed at the same moment can each find nothing stored: "Skip" and "Add"
+  then leave the message saying whichever of the two was said last, though the purchases are stored.
+- A purchase that was read from a photo has a day and no time. It is dated as `/add` dates one that is given with a
+  date: at noon of that day in its user's time zone, or at the time that it is now, on a day that has not got to
+  its noon yet.
+- The assistant sorts 14 purchases for one message at the most, 8 when the model looked purchases up first, and
+  fewer when the message asks for other things too: each takes two database queries. The model is told that it may
+  give 20. And `/spend` with no card named is not run for a message whose model read first: it is asked for again.
+- A message for the assistant that Telegram delivers again is answered again: the model is asked a second time,
+  and what it then makes out is done a second time. Purchases are added from a message once all the same, and a
+  second doing of anything else that the bot does at once leaves it as it was, or says that it is done.
+- A picture that is sent as a file is not read: only one that is sent as a photo is. And a photo is not read again
+  when its caption is edited, which is passed over with nothing said.
+- When Telegram does not take the edit of the message that asked about held purchases, that message goes on asking,
+  with its buttons, though the purchases were added or skipped. The next press of one of its buttons brings it up
+  to date. When that press comes after the 24 hours, it is answered with that the button no longer works.
 - Telegram's reference gives the most that a rich message holds as 32,768 "UTF-8 characters". Should that be a
   count of bytes, 200 purchases whose names are long and in a script of three bytes to a character would come to
   more. Telegram would then answer with an error, and the text would be sent.
@@ -686,18 +1047,24 @@ its CPU limit ended `exceededCpu`: that is from the documentation, as no such ru
   amounts are never cut, so a row is longer where they alone come to more, which takes far more digits than the
   purchases on a card have.
 - Several photos or files that are sent together, which Telegram calls an album, come as a message for each of
-  them. So an album gets the reply that the bot only reads text once for each of its items.
+  them, and only one of those messages has the caption. On a service that reads photos, each photo of an album is
+  read on its own: the one with the caption goes by it, and each of the others is read as a photo with no caption,
+  so a user with more than one card is asked which card its purchases were made with. An album of anything else,
+  and one of photos on a service that reads none, gets the reply that says what the bot reads once for each of its
+  items.
 - An `edited_message` that its user did not make gets the reply that the bot does not read an edited message again.
   Telegram's reference says that such an update can come for a change to a field of a message that a bot does not
   use. This has not been seen.
 - After a notice that was said in the place of the placeholder, the chat can go on showing for a few seconds that
   the bot is writing. An edit does not clear that, as a new message does.
 - A placeholder that cannot be deleted stays above the answer, and goes on saying that the bot is working on it,
-  which is no longer true.
+  which is no longer true. The placeholder of a photo stays above what was added from it in the same way.
 - A request that the bot gave up on after 5 seconds may have been carried out by Telegram all the same, and the bot
   cannot tell. So an answer can be followed by the notice that the question could not be answered, and a notice can
   be in the chat twice. The reply to a command can be followed by the line that says that something went wrong, and
-  the reply to an `/add` by the line that says that the bot could not reply to it.
+  the reply to an `/add` by the line that says that the bot could not reply to it. The table of what was added from
+  a photo can be followed by the line that says that its purchases were read and that the bot could not finish its
+  reply.
 - For the same reason, a sign-in whose notice to the chat Telegram answers late ends on the page that says that the
   sign-in could not be completed, with no code on it, although the chat was told to send the code. The sign-in is
   begun again with `/connect`.

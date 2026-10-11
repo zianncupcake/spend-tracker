@@ -23,9 +23,9 @@ import { ingestAlert } from './ingest'
 import { log, logFailure, type Events } from './log'
 import { alertSenders } from './parsers'
 import { storeFor, type Card, type Transaction } from './store'
-import { mailStoreFor, removeExpiredAttempts, takeNextMailbox, type Mailbox } from './store-mail'
+import { mailStoreFor, removeExpiredAttempts, removeExpiredBatches, takeNextMailbox, type Mailbox } from './store-mail'
 import { ChatBlockedError, type MessageEntity } from './telegram/api'
-import { describeTotals, formatMoney, maskLast4 } from './telegram/format'
+import { carriedNotes, describeTotals, formatMoney, formatShortDate, maskLast4 } from './telegram/format'
 import { ADD_CARD_USAGE } from './telegram/handler'
 import { sortEnd } from './telegram/purchases'
 
@@ -99,9 +99,10 @@ export async function runCheck(deps: Deps): Promise<void> {
     notified: 0,
     checked: false,
     swept: 0,
+    batches: 0,
   }
+  const now = Math.floor(began / 1000)
   try {
-    const now = Math.floor(began / 1000)
     // A sign-in is deleted when its user comes back to it. These are the ones that nobody came back to.
     const abandoned = await removeExpiredAttempts(deps.db, now, ATTEMPTS_PER_RUN)
     run.swept = abandoned.length
@@ -113,6 +114,18 @@ export async function runCheck(deps: Deps): Promise<void> {
   } catch (error) {
     // Nothing of the error's message is logged: it could quote what Google sent.
     logFailure('check_failed', error, { stage: run.stage, user: run.user })
+  }
+  // Purchases that the bot asked about before adding them are let go of when their user answers. These are the
+  // ones that nobody answered for in the day that they are held. It is one statement, however many there are.
+  //
+  // It is run once the mailbox has had its turn, whatever came of that, and it fails on its own: nothing about held
+  // purchases is to keep anybody's mail from being checked. It would, in a service whose code is deployed before
+  // the migration that makes their table: the statement then fails in every run. It is of no one user, so its
+  // failure names none.
+  try {
+    run.batches = await removeExpiredBatches(deps.db, now)
+  } catch (error) {
+    logFailure('check_failed', error, { stage: 'batches', user: null })
   }
   // The run's own line, which a run that failed has too: it says what the run had done by then.
   const { stage, ...done } = run
@@ -323,7 +336,12 @@ async function tellOfPurchase(
     return deps.messenger.send(mailbox.chatId, text, marked)
   }
   const [totals] = await cardTotals(store, [card], deps.now(), mailbox.timezone)
-  const text = `${spent}\nRunning total: ${describeTotals(totals, mailbox.timezone)}`
+  // After the total comes the note of a purchase that is counted in the window after the one that it was made in:
+  // see carriedNotes. The line that says where the purchase is sorted stays the last, as a press of a button
+  // replaces the last line.
+  const shortDate = (date: Date) => formatShortDate(date, mailbox.timezone)
+  const notes = carriedNotes([{ card, purchases: [purchase] }], deps.now(), mailbox.timezone, shortDate)
+  const text = [spent, `Running total: ${describeTotals(totals, mailbox.timezone)}`, ...notes].join('\n')
   const product = productOf(card.product)
   if (!product) return deps.messenger.send(mailbox.chatId, text, marked)
   // On a card with a product, the message ends with where the purchase is sorted, and has the buttons that move it.
