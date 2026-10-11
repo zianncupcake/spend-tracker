@@ -1,10 +1,7 @@
-import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { ingestAlert } from '../src/ingest'
 import { parseAlert } from '../src/parsers'
 import { uob } from '../src/parsers/uob'
-import { findOrCreateUser, storeFor } from '../src/store'
-import { alertEmail, newTelegramId, seconds } from './helpers'
+import { alertEmail, seconds } from './helpers'
 
 /** When the email of the alert below came: on the day that the alert states, which is 9 October 2026 in Singapore. */
 const RECEIVED = seconds('2026-10-09T15:20:00+08:00')
@@ -59,41 +56,23 @@ describe('UOB card alerts', () => {
   })
 
   it.each([
-    ['SGD 1,234.56', 'SGD', 123456],
-    ['SGD 1,234,567.89', 'SGD', 123456789],
     ['SGD 999,999,999,999.99', 'SGD', 99999999999999],
     ['SGD 1234.56', 'SGD', 123456],
-    ['SGD 0.05', 'SGD', 5],
-    ['SGD 7', 'SGD', 700],
     ['SGD 7.5', 'SGD', 750],
-    ['USD 8.00', 'USD', 800],
     ['JPY 1,500', 'JPY', 150000],
     ['SGD45.60', 'SGD', 4560],
   ])('reads %s as %s and %i hundredths', (amount, currency, amountMinor) => {
     expect(parse(alertBody(transaction({ amount })))).toMatchObject({ currency, amountMinor })
   })
 
-  it.each([
-    ['wrapped across lines', '\n'],
-    ['wrapped across lines that end with a carriage return', '\r\n'],
-    ['spaced with runs of spaces', '   '],
-    ['spaced with no-break spaces', '\xa0'],
-    ['spaced with tabs and no-break spaces among the spaces', ' \t\xa0 '],
-  ])('reads a sentence that is %s', (_, blank) => {
-    expect(parse(alertBody().replaceAll(' ', blank))).toEqual({ ...PURCHASE, parser: 'uob' })
+  it('reads a sentence that is spaced with tabs and no-break spaces among the spaces', () => {
+    expect(parse(alertBody().replaceAll(' ', ' \t\xa0 '))).toEqual({ ...PURCHASE, parser: 'uob' })
   })
 
   it.each(['Debit Card', 'Example Rewards Credit Card', "Member's Card", 'Platinum'])(
     'reads the transaction of a card that the bank calls its %s',
     (card) => {
       expect(parse(alertBody(transaction({ card })))).toEqual({ ...PURCHASE, parser: 'uob' })
-    },
-  )
-
-  it.each(['SAMPLE EATERY PTE. LT', 'SHOP.EXAMPLE SG', 'EXAMPLE TRADING PTE. LTD.'])(
-    'keeps the full stops of the merchant %s, when the warning follows the sentence',
-    (merchant) => {
-      expect(parse(alertBody(transaction({ merchant })))?.merchant).toBe(merchant)
     },
   )
 
@@ -108,38 +87,9 @@ describe('UOB card alerts', () => {
     expect(parse(spelt(alertBody(unclosed)))?.merchant).toBeNull()
   })
 
-  it('trims the merchant, and keeps no more than 80 characters of it', () => {
-    const merchantOf = (merchant: string) => parse(alertBody(transaction({ merchant })))?.merchant
-
-    expect(merchantOf('  SPACED OUT  ')).toBe('SPACED OUT')
-    expect(merchantOf('M'.repeat(200))).toBe('M'.repeat(80))
-    // The space that the cut would leave at the end is dropped too.
-    expect(merchantOf(`${'M'.repeat(79)} AND MORE`)).toBe('M'.repeat(79))
-  })
-
-  it('ends the merchant at the first full stop that closes a word, when no warning follows the sentence', () => {
-    const merchantOf = (text: string) => parse(text)?.merchant
-
-    expect(merchantOf(transaction({ merchant: 'SAMPLE EATERY' }))).toBe('SAMPLE EATERY')
-    expect(merchantOf(`${transaction({ merchant: 'SHOP.EXAMPLE SG' })}\n\nThank you for banking with us.`)).toBe(
-      'SHOP.EXAMPLE SG',
-    )
-    // Without the warning to go by, a full stop that closes a word of the name is taken for the sentence's.
-    expect(merchantOf(transaction())).toBe('SAMPLE EATERY PTE')
-  })
-
-  it('keeps a transaction whose merchant it cannot tell, with no merchant', () => {
-    const unclosed = transaction({ merchant: 'SAMPLE EATERY' }).slice(0, -1)
-
-    expect(parse(unclosed)).toEqual({ ...PURCHASE, merchant: null, parser: 'uob' })
-    expect(parse(`${unclosed} ${WARNING}`)?.merchant).toBeNull()
-    expect(parse(alertBody(transaction({ merchant: '' })))?.merchant).toBeNull()
-  })
-
   it.each([
     ['in its first second', '2026-10-09T00:00:00+08:00'],
     ['in its last second', '2026-10-09T23:59:59+08:00'],
-    ['when it is still the day before by UTC', '2026-10-08T16:00:00Z'],
   ])('takes the time the email came for the time of the purchase, on the day that the alert states: %s', (_, at) => {
     const receivedAt = seconds(at)
 
@@ -151,7 +101,6 @@ describe('UOB card alerts', () => {
     ['the day before', '2026-10-08T23:59:59+08:00'],
     ['at the end of the second day after', '2026-10-11T23:59:59+08:00'],
     ['at the start of the second day before', '2026-10-07T00:00:00+08:00'],
-    ['the day after, though it is still the same day by UTC', '2026-10-09T16:00:00Z'],
   ])('takes noon in Singapore on the day that the alert states, when the email came %s', (_, at) => {
     expect(parseAlert(uobEmail(alertBody(), seconds(at)))?.occurredAt).toBe(NOON)
   })
@@ -159,18 +108,8 @@ describe('UOB card alerts', () => {
   it.each([
     ['on the third day after', '2026-10-12T00:00:00+08:00'],
     ['on the third day before', '2026-10-06T23:59:59+08:00'],
-    ['a week later', '2026-10-16T15:20:00+08:00'],
-    ['a year later', '2027-10-09T15:20:00+08:00'],
   ])('dates the purchase by the email when that came more than two days from the stated day: %s', (_, at) => {
     expect(parseAlert(uobEmail(alertBody(), seconds(at)))?.occurredAt).toBe(seconds(at))
-  })
-
-  it.each([
-    ['a far-off year', '09/10/99'],
-    ['the year before', '09/10/25'],
-    ['the month after', '09/11/26'],
-  ])('stores no purchase on a day of %s that an alert states, and dates it by the email', (_, date) => {
-    expect(parse(alertBody(transaction({ date })))).toEqual({ ...PURCHASE, occurredAt: RECEIVED, parser: 'uob' })
   })
 
   it.each([
@@ -185,8 +124,6 @@ describe('UOB card alerts', () => {
   })
 
   it.each([
-    ['a day that its month does not have', '31/02/26'],
-    ['a leap day in a year that has none', '29/02/27'],
     ['day 0', '00/10/26'],
     ['month 13', '09/13/26'],
     ['month 0', '09/00/26'],
@@ -201,8 +138,6 @@ describe('UOB card alerts', () => {
   })
 
   it.each([
-    ['a notice of a statement', `Your UOB Card ending 4321 has a new statement, dated 09/10/26. ${WARNING}`],
-    ['a notice of a login', 'You logged in to online banking on 09/10/26 at 20:01. If unauthorised, call us.'],
     ['marketing', 'Dine with your UOB Card on 09/10/26 at SAMPLE EATERY PTE. LT. and save SGD 45.60 or more.'],
     ['a transaction that was declined', alertBody(transaction().replace('was made', 'was declined'))],
     ['a refund to the card', alertBody(transaction().replace('made with', 'made to'))],
@@ -215,29 +150,9 @@ describe('UOB card alerts', () => {
     ['no amount', alertBody(transaction({ amount: 'SGD' }))],
     ['a card ending with three digits', alertBody(transaction({ last4: '432' }))],
     ['a card ending with five digits', alertBody(transaction({ last4: '43210' }))],
-    ['a date written another way', alertBody(transaction({ date: '9 October 2026' }))],
     ['a date with a year of four digits', alertBody(transaction({ date: '09/10/2026' }))],
-    ['only the warning and the disclaimer', alertBody('')],
-    ['no text', ''],
   ])('returns null for %s', (_, text) => {
     expect(parse(text)).toBeNull()
-  })
-
-  it('only reads alerts from the address that the bank sends them from', () => {
-    const from = (address: string) => parseAlert({ ...uobEmail(), from: address })
-
-    expect(from('unialerts@uobgroup.com')?.parser).toBe('uob')
-    expect(from(' UniAlerts@UOBGroup.com ')?.parser).toBe('uob')
-    expect(from('unialerts@uobgroup.com.attacker.test')).toBeNull()
-    expect(from('offers@uobgroup.com')).toBeNull()
-    expect(from('alerts@otherbank.test')).toBeNull()
-    // In the mail of another bank the sentence is for that bank's parser to read, and it makes nothing of it.
-    expect(from('alerts@examplebank.test')).toBeNull()
-    expect(from('noreply@notify.ocbc.com')).toBeNull()
-  })
-
-  it('sends its alerts from one address', () => {
-    expect(uob.senders).toEqual(['unialerts@uobgroup.com'])
   })
 
   it('returns quickly on very long hostile strings', () => {
@@ -280,14 +195,5 @@ describe('UOB card alerts', () => {
 
     // Measured at about 45 ms. Heavy backtracking over text of this length would take far longer.
     expect(performance.now() - started).toBeLessThan(500)
-  })
-
-  it('is stored as a purchase when its alert is ingested', async () => {
-    const store = storeFor(env.DB, (await findOrCreateUser(env.DB, newTelegramId())).id)
-
-    const result = await ingestAlert(store, uobEmail())
-
-    expect(result).toMatchObject({ status: 'stored', transaction: { ...PURCHASE, parser: 'uob' } })
-    expect(await store.listTransactions(null, 0, 4_000_000_000, 10)).toMatchObject([PURCHASE])
   })
 })

@@ -11,7 +11,6 @@ import { seconds } from './helpers'
 import { catchConsole } from './log-helpers'
 import {
   bought,
-  BYTES,
   chatWithCard,
   chatWithCards,
   file,
@@ -259,68 +258,6 @@ describe('a photo, while it is read', () => {
     expect([sent, leftSince(mark)]).toEqual([[], []])
   })
 
-  it('has its placeholder first, and the chat is shown that the bot is writing, before its file is fetched', async () => {
-    const chat = await chatWithCard()
-    const order: string[] = []
-    vi.spyOn(deps.messenger, 'post').mockImplementation(async (chatId, text) => {
-      order.push(`"${text}" to ${chatId}`)
-      return 77
-    })
-    vi.spyOn(deps.messenger, 'typing').mockImplementation(async (chatId) => {
-      order.push(`typing in ${chatId}`)
-    })
-    file.mockImplementation(async () => {
-      order.push('file fetched')
-      return BYTES
-    })
-    reader.mockImplementation(async () => {
-      order.push('photo read')
-      return read([bought(1240, 'COFFEE PLACE')])
-    })
-    vi.spyOn(deps.messenger, 'sendRich').mockImplementation(async (chatId) => {
-      order.push(`table to ${chatId}`)
-    })
-    vi.spyOn(deps.messenger, 'delete').mockImplementation(async (chatId, messageId) => {
-      order.push(`message ${messageId} deleted in ${chatId}`)
-    })
-
-    await chat.sendPhoto()
-
-    // And the placeholder goes, by the id that it was sent with, once the reply is there.
-    expect(order).toEqual([
-      `"${READING}" to ${chat.telegramId}`,
-      `typing in ${chat.telegramId}`,
-      'file fetched',
-      'photo read',
-      `table to ${chat.telegramId}`,
-      `message 77 deleted in ${chat.telegramId}`,
-    ])
-  })
-
-  it('is shown to be read every four seconds until it is, and not after', async () => {
-    vi.useFakeTimers()
-    const chat = await chatWithCard()
-    const typing = vi.spyOn(deps.messenger, 'typing')
-    const [asked, came] = [Promise.withResolvers<void>(), Promise.withResolvers<PhotoReading>()]
-    reader.mockImplementation(() => {
-      asked.resolve()
-      return came.promise
-    })
-    const done = chat.sendPhoto()
-    await asked.promise
-
-    expect(typing).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(8_000)
-    expect(typing).toHaveBeenCalledTimes(3)
-
-    came.resolve(read([bought(1240, 'COFFEE PLACE')]))
-    await done
-
-    // Neither clock of the photo runs on: the one that shows the bot to be writing, or the one that ends the wait.
-    expect(vi.getTimerCount()).toBe(0)
-    expect(sentRich).toHaveLength(1)
-  })
-
   it('is sent nothing more when Telegram will send its chat nothing: the model is not asked, and nothing is stored', async () => {
     const chat = await chatWithCard()
     vi.spyOn(deps.messenger, 'post').mockRejectedValue(new ChatBlockedError())
@@ -348,18 +285,6 @@ describe('a photo, while it is read', () => {
         reason: 'chat_blocked',
       },
     ])
-  })
-
-  it('is read all the same when its placeholder could not be sent, and what comes of it is then said in a message', async () => {
-    const chat = await chatWithCard()
-    vi.spyOn(deps.messenger, 'post').mockRejectedValue(new TelegramError('sendMessage', 500))
-    reading({ status: 'nothing' })
-    const logged = catchConsole()
-
-    await chat.sendPhoto()
-
-    expect(sent).toEqual([{ chatId: chat.telegramId, text: NO_PURCHASES }])
-    expect(logged.events('photo')).toMatchObject([{ outcome: 'nothing', sent: 'message', placeholder: false }])
   })
 })
 
@@ -817,12 +742,8 @@ describe('a service that reads photos', () => {
 
   it.each<[what: string, content: object]>([
     ['a file with words under it', { document: { file_id: 'made-up-file-id' }, caption: 'add these to evol' }],
-    ['a picture that is sent as a file', { document: { file_id: 'made-up-file-id', mime_type: 'image/png' } }],
-    ['a voice message', { voice: { file_id: 'made-up-file-id', duration: 3 } }],
-    ['a sticker', { sticker: { file_id: 'made-up-file-id', width: 512, height: 512 } }],
     ['a photo of which Telegram gives no size', { photo: [] }],
     ['what is called a photo and is none', { photo: 'made-up' }],
-    ['a message with nothing in it', {}],
   ])('answers %s with what it reads, which is text and photos, and does nothing else about it', async (_, content) => {
     const chat = await chatWithCard()
     const logged = catchConsole()

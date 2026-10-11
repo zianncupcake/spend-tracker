@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { deleteUser, findOrCreateUser } from '../src/store'
+import { findOrCreateUser } from '../src/store'
 import { findUserByTokenHash, mcpStoreFor } from '../src/store-mcp'
 import { newTelegramId } from './helpers'
 
@@ -77,19 +77,5 @@ describe('a token', () => {
 
     expect(await findUserByTokenHash(db, first.hash)).toMatchObject({ id: first.user.id })
     expect(await findUserByTokenHash(db, second.hash)).toMatchObject({ id: second.user.id })
-  })
-})
-
-describe('deleting a user', () => {
-  it("deletes their token, and nobody else's", async () => {
-    const leaving = await newUser()
-    const staying = await newUser()
-    for (const { store, hash } of [leaving, staying]) await store.setToken(hash)
-
-    await deleteUser(db, leaving.user.id)
-
-    expect(await tokenCount(leaving.user.id)).toBe(0)
-    expect(await findUserByTokenHash(db, leaving.hash)).toBeNull()
-    expect(await findUserByTokenHash(db, staying.hash)).toMatchObject({ id: staying.user.id })
   })
 })

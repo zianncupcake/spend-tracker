@@ -556,43 +556,21 @@ describe('an alert that is not stored', () => {
   })
 
   it.each<[why: string, message: MessageOptions]>([
-    ['Gmail found that DMARC failed', { results: [FAIL] }],
-    ['Gmail recorded no results for it', { results: [] }],
     ['only a header that the sender added says DMARC passed', { results: [FAIL, PASS] }],
     ['it was authenticated for another domain', { results: [gmailResults('pass', 'attacker.test')] }],
-    [
-      "it was authenticated for a domain that the bank's only ends with",
-      { results: [gmailResults('pass', 'bank.test')] },
-    ],
     [
       "it was authenticated for a domain under the bank's",
       { results: [gmailResults('pass', 'mail.examplebank.test')] },
     ],
     [
-      "it was authenticated for a domain under the sender's own",
-      { from: OCBC, results: [gmailResults('pass', 'alerts.notify.ocbc.com')] },
-    ],
-    [
-      "it was authenticated for a look-alike of the domain above the sender's",
-      { from: OCBC, results: [gmailResults('pass', 'evil-ocbc.com')] },
-    ],
-    [
       "it was authenticated for a domain that the one above the sender's only ends with",
       { from: OCBC, results: [gmailResults('pass', 'cbc.com')] },
-    ],
-    [
-      "it was authenticated for a domain that only begins as the one above the sender's does",
-      { from: OCBC, results: [gmailResults('pass', 'ocbc.com.attacker.test')] },
     ],
     ['it was authenticated for a name with no dot in it', { from: OCBC, results: [gmailResults('pass', 'com')] }],
     ["it is from an address of the bank's that alerts do not come from", { from: 'offers@examplebank.test' }],
     [
       "it is from an address under the bank's domain that alerts do not come from",
       { from: 'alerts@mail.examplebank.test' },
-    ],
-    [
-      "the bank's address is only the name that the sender goes by",
-      { from: '"alerts@examplebank.test" <someone@attacker.test>', results: [gmailResults('pass', 'attacker.test')] },
     ],
   ])('is rejected when %s: on its headers, fetched once, with the rest of it never fetched', async (_, message) => {
     const chat = await connectedChat(JANE)

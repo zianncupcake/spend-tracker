@@ -116,32 +116,36 @@ describe('the UOB EVOL Card', () => {
     expect(startingCategory(uobEvol, { currency: 'SGD', merchant: 'BOOK SHOP' })).toBeNull()
   })
 
-  it.each([
-    'Anytime Fitness',
-    'Classpass',
-    'Virgin Active',
-    'Fitness First',
-    'Body Fit Training',
-    'True Fitness',
-    '247 Fitness',
-    'Pure Yoga',
-    'True Yoga',
-    'Revolution SG',
-    'Starhub',
-    'Singtel',
-    'M1',
-    'Gomo',
-    'MyRepublic',
-    'Giga',
-    'CirclesLife',
-    'Netflix',
-    'Spotify',
-    'Disney plus',
-  ])('puts a purchase at %s under gym, telco and streaming, however the name is written', (name) => {
-    expect(at(name)).toBe('selected')
-    expect(at(name.toUpperCase())).toBe('selected')
-    expect(at(name.toLowerCase())).toBe('selected')
-    expect(at(`PAYMENT*${name.toUpperCase()} SINGAPORE SG`)).toBe('selected')
+  it('puts a purchase at a merchant that it names under gym, telco and streaming, however the name is written', () => {
+    const names = [
+      'Anytime Fitness',
+      'Classpass',
+      'Virgin Active',
+      'Fitness First',
+      'Body Fit Training',
+      'True Fitness',
+      '247 Fitness',
+      'Pure Yoga',
+      'True Yoga',
+      'Revolution SG',
+      'Starhub',
+      'Singtel',
+      'M1',
+      'Gomo',
+      'MyRepublic',
+      'Giga',
+      'CirclesLife',
+      'Netflix',
+      'Spotify',
+      'Disney plus',
+    ]
+
+    for (const name of names) {
+      expect(at(name)).toBe('selected')
+      expect(at(name.toUpperCase())).toBe('selected')
+      expect(at(name.toLowerCase())).toBe('selected')
+      expect(at(`PAYMENT*${name.toUpperCase()} SINGAPORE SG`)).toBe('selected')
+    }
   })
 
   it('takes the two characters of M1 for the telco only when they are a word of their own', () => {

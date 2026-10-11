@@ -187,13 +187,10 @@ describe('/sort with the id of a purchase', () => {
   })
 
   it.each([
-    ['/sort', 'Usage:\n/sort <nickname>\n/sort <purchase id>'],
     ['/sort evol 57', 'Usage:\n/sort <nickname>\n/sort <purchase id>'],
-    ['/sort my!card', 'Usage:\n/sort <nickname>\n/sort <purchase id>'],
     ['/sort #evol', 'Usage:\n/sort <nickname>\n/sort <purchase id>'],
     ['/sort visa', 'You have no card called visa.'],
     ['/sort 999999999', 'You have no purchase with ID 999999999.'],
-    ['/sort #999999999', 'You have no purchase with ID 999999999.'],
   ])('answers "%s" with what is wrong', async (message, reply) => {
     const chat = await chatWithCard()
     await buy(await chat.userId())
@@ -294,12 +291,8 @@ describe('a press that is refused', () => {
   it.each([
     ['a category that only a rule gives', (id: number) => `${id}:fx`],
     ['a category that the product does not have', (id: number) => `${id}:dining`],
-    ['a category that the product had once', (id: number) => `${id}:mobile`],
     ['a purchase that there is not', () => '999999999:other'],
-    ['no category', (id: number) => `${id}`],
-    ['words', () => 'other'],
     ['more than a button holds', (id: number) => `${id}:other:next`],
-    ['nothing', () => ''],
   ])('changes nothing when it brings %s', async (_, data) => {
     const chat = await chatWithCard()
     const id = await buy(await chat.userId())

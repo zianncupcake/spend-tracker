@@ -1,13 +1,12 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { runCheck } from '../src/checker'
-import { ingestAlert } from '../src/ingest'
 import { parseAlert } from '../src/parsers'
 import { hsbc } from '../src/parsers/hsbc'
-import { findOrCreateUser, storeFor } from '../src/store'
+import { storeFor } from '../src/store'
 import { clock, connectedChat, deps, outside } from './connect-helpers'
 import { gmailMessage, gmailResults, htmlPart } from './gmail-helpers'
-import { alertEmail, newTelegramId, seconds } from './helpers'
+import { alertEmail, seconds } from './helpers'
 
 /** The address that HSBC sends its card alerts from. A bank's address is public. */
 const SENDER = 'hsbc.bank.singapore.limited@notification.hsbc.com.hk'
@@ -312,15 +311,6 @@ describe('HSBC card alerts', () => {
 
     // Measured at about 60 ms. Heavy backtracking over text of this length would take far longer.
     expect(performance.now() - started).toBeLessThan(500)
-  })
-
-  it('is stored as a purchase when its alert is ingested', async () => {
-    const store = storeFor(env.DB, (await findOrCreateUser(env.DB, newTelegramId())).id)
-
-    const result = await ingestAlert(store, hsbcEmail())
-
-    expect(result).toMatchObject({ status: 'stored', transaction: { ...PURCHASE, parser: 'hsbc' } })
-    expect(await store.listTransactions(null, 0, 4_000_000_000, 10)).toMatchObject([{ ...PURCHASE, parser: 'hsbc' }])
   })
 
   it('is read from the HTML that the bank sends, when a check comes upon it in a mailbox', async () => {

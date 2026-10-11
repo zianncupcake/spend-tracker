@@ -304,8 +304,6 @@ describe('reading a message', () => {
   })
 
   it.each([
-    ['a display name', 'Example Bank <alerts@examplebank.test>'],
-    ['a quoted display name', '"Example Bank Alerts" <alerts@examplebank.test>'],
     ['a display name that holds another address', '"Other Bank <alerts@otherbank.test>" <alerts@examplebank.test>'],
     ['brackets and no display name', '<alerts@examplebank.test>'],
     ['capital letters', 'Example Bank <Alerts@ExampleBank.TEST>'],

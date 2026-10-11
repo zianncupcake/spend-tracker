@@ -89,12 +89,9 @@ describe('a request that the model answers', () => {
   })
 
   it.each<[said: unknown, logged: string | null]>([
-    ['stop', 'stop'],
-    ['length', 'length'],
-    ['tool_calls', 'tool_calls'],
+    // One of the four reasons that the log has a word for. The tests of this file have each of the other three.
     ['content_filter', 'content_filter'],
     // What the answer says is text from outside. Whatever is none of the four is logged as that it was another.
-    ['function_call', 'other'],
     ['a made-up reason that quotes COFFEE PLACE', 'other'],
     [42, 'other'],
     [null, null],

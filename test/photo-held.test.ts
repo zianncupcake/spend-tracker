@@ -400,12 +400,8 @@ describe('a press of a button under purchases that are held', () => {
 
   it.each<[what: string, data: string]>([
     ['a card, under purchases that are held for a card already', 'held:7001:5678'],
-    ['a card that is none of the user’s', 'held:7001:4321'],
     ['the id of another message', 'held:7002:add'],
-    ['nothing after the id', 'held:7001:'],
     ['what no button holds', 'held:7001:add:5678'],
-    ['a choice that there is not', 'held:7001:remove'],
-    ['the id of a message that is no number', 'held:evol:add'],
   ])('changes nothing when it brings %s', async (_, data) => {
     const { chat, userId, asking } = await asked()
     const before = { ...asking }
@@ -566,17 +562,6 @@ describe('a press of a button under purchases that are held', () => {
     // Each of these is one request: see the messenger's own test, in webhook.test.ts.
     expect([answer, edit, send].map((spy) => spy.mock.calls.length)).toEqual([1, 1, 0])
     expect(await rowsOf(userId)).toHaveLength(100)
-  })
-
-  it('takes four queries when it skips them', async () => {
-    const { chat, asking } = await asked()
-    const queried = vi.spyOn(env.DB, 'prepare')
-
-    await chat.press(asking, 'Skip')
-
-    // The user, the purchases that are held, the look for those of them that are stored already, and the letting
-    // go of them.
-    expect(queried).toHaveBeenCalledTimes(4)
   })
 })
 

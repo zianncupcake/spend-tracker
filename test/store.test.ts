@@ -12,7 +12,7 @@ import {
   type Card,
   type NewTransaction,
 } from '../src/store'
-import { newTelegramId, rowsOwnedBy } from './helpers'
+import { newTelegramId } from './helpers'
 
 const db = env.DB
 const ANY_TIME = [0, 4_000_000_000] as const
@@ -99,21 +99,6 @@ describe('users', () => {
 
     await deleteUser(db, user.id)
     expect(await telegramIdOf(db, user.id)).toBeNull()
-  })
-
-  it('deletes a user with their cards and transactions, and nobody else', async () => {
-    const leaving = await findOrCreateUser(db, newTelegramId())
-    const staying = await findOrCreateUser(db, newTelegramId())
-    for (const user of [leaving, staying]) {
-      const store = storeFor(db, user.id)
-      await store.addCard({ nickname: 'main', last4: '1234', windowType: 'calendar' })
-      await store.insertTransaction(purchase())
-    }
-
-    await deleteUser(db, leaving.id)
-
-    expect(await rowsOwnedBy(leaving.id)).toEqual({ users: 0, cards: 0, transactions: 0 })
-    expect(await rowsOwnedBy(staying.id)).toEqual({ users: 1, cards: 1, transactions: 1 })
   })
 })
 

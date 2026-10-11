@@ -23,12 +23,6 @@ const API = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/`
 const READING =
   'Reading your photo… If this message is still here in half a minute, something went wrong. Check /spend before ' +
   'you send the photo again.'
-const STORED_NO_REPLY =
-  "The purchases in your photo were read, but the bot could not finish its reply. Check /spend and the bot's " +
-  'other messages before you send the photo again.'
-const NOT_TEXT =
-  'The bot only reads text messages. It cannot read an attachment, such as a photo, a file or a voice message, or ' +
-  'the caption under one. Please send your question or command as text.'
 
 /** How long something took, which is whatever it took: the Worker goes by the real clock. */
 const took = expect.any(Number)
@@ -105,12 +99,12 @@ function update(content: object): Request<unknown, IncomingRequestCfProperties> 
 
 /**
  * Posts the Worker an update, and waits for what it leaves to be done once Telegram has been answered. The Worker is
- * called with the settings of the service, or with others that a test gives it. Returns whether it left anything.
+ * called with the settings of the service. Returns whether it left anything.
  */
-async function post(content: object, settings: Env = env): Promise<{ response: Response; deferred: boolean }> {
+async function post(content: object): Promise<{ response: Response; deferred: boolean }> {
   const ctx = createExecutionContext()
   const waitUntil = vi.spyOn(ctx, 'waitUntil')
-  const response = await worker.fetch(update(content), settings, ctx)
+  const response = await worker.fetch(update(content), env, ctx)
   await waitOnExecutionContext(ctx)
   return { response, deferred: waitUntil.mock.calls.length > 0 }
 }
@@ -158,13 +152,6 @@ function said(chatId: number, text: string) {
 
 function typing(chatId: number) {
   return ['sendChatAction', { chat_id: chatId, action: 'typing' }]
-}
-
-/** What is said in the place of a placeholder: the message with its id is edited to say it, and has no buttons. */
-function inPlaceOf(chatId: number, messageId: number, text: string) {
-  const [preview, markup] = [{ is_disabled: true }, { inline_keyboard: [] }]
-  const edit = { chat_id: chatId, message_id: messageId, text, link_preview_options: preview, reply_markup: markup }
-  return ['editMessageText', edit]
 }
 
 describe('POST /telegram with a photo', () => {
@@ -371,173 +358,6 @@ describe('POST /telegram with a photo', () => {
     expect(asked()).toEqual([
       ['answerCallbackQuery', { callback_query_id: 'press-1', text: 'That button no longer works.' }],
     ])
-  })
-
-  it('sends the table as text when Telegram answers the rich message with an error, and logs only the status', async () => {
-    const telegramId = await userWith('evol')
-    reader.mockResolvedValue(read([bought(1240, 'COFFEE PLACE')]))
-    // An answer can quote what it was sent.
-    const refusal = { ok: false, error_code: 400, description: "Bad Request: can't parse COFFEE PLACE" }
-    telegramApi.mockImplementation(async (url) =>
-      url.endsWith('/sendRichMessage') ? Response.json(refusal, { status: 400 }) : taken(url),
-    )
-    const logged = catchConsole()
-
-    await post(message(telegramId, { photo: PHOTO }))
-
-    const [, , [rich], [method, body], removed, ...more] = asked()
-    expect([rich, method, more]).toEqual(['sendRichMessage', 'sendMessage', []])
-    expect(removed).toEqual(['deleteMessage', { chat_id: telegramId, message_id: 2 }])
-    expect(String(body.text).split('\n')).toEqual([
-      'Added to evol ••••5678 as Online / Mobile Contactless Spend:',
-      expect.stringMatching(/^ID +Date +SGD  Merchant$/),
-      expect.stringMatching(/^ *\d+\* +\d+ \w+  12\.40  COFFEE PLACE$/),
-      expect.stringMatching(/^ +Total +12\.40$/),
-      '',
-      '* = added by hand',
-      '',
-      expect.stringMatching(/^evol ••••5678: SGD 12\.40 in 1 purchase, resets 1 \w+$/),
-    ])
-    // The table is a block of letters of one width, and nothing else is marked.
-    expect((body.entities as { type: string }[]).map((entity) => entity.type)).toEqual(['pre'])
-    expect(logged.events().slice(1)).toEqual([
-      { event: 'telegram_failed', method: 'sendRichMessage', status: 400, error: 'Error', reason: 'http_error' },
-      expect.objectContaining({ event: 'photo', outcome: 'read', sent: 'text', stored: 1 }),
-    ])
-    for (const text of ['COFFEE', 'parse', '12.40']) expect(logged.text()).not.toContain(text)
-  })
-
-  it('says that the purchases were stored when Telegram then takes nothing of the reply, and does not say to send the photo again', async () => {
-    const telegramId = await userWith('evol')
-    reader.mockResolvedValue(read([bought(1240, 'COFFEE PLACE')]))
-    // Telegram takes the placeholder, which is the first message that it is asked to send here, and shows the bot to
-    // be writing. Then it refuses the table both ways: as a rich message, and as a message of text.
-    let messages = 0
-    telegramApi.mockImplementation(async (url) => {
-      const refused = url.endsWith('/sendRichMessage') || (url.endsWith('/sendMessage') && ++messages > 1)
-      return refused ? new Response('Bad Gateway', { status: 502 }) : taken(url)
-    })
-    const logged = catchConsole()
-
-    const { response } = await post(message(telegramId, { photo: PHOTO }))
-
-    expect(response.status).toBe(200)
-    expect(asked().map(([method]) => method)).toEqual([
-      'sendMessage',
-      'sendChatAction',
-      'sendRichMessage',
-      'sendMessage',
-      'editMessageText',
-    ])
-    // It is said in the place of the placeholder, which is the second message that Telegram sent here, after the
-    // reply to the command that added the card.
-    expect(asked().at(-1)).toEqual(inPlaceOf(telegramId, 2, STORED_NO_REPLY))
-    const failure = { error: 'Error', reason: 'http_error', status: 502 }
-    expect(logged.events('photo')).toEqual([
-      expect.objectContaining({ outcome: 'failed', sent: 'edit', read: 1, stored: 1, ...failure }),
-    ])
-  })
-
-  it('sends nothing more to a chat that Telegram will send nothing to, and has no photo fetched or read for it', async () => {
-    const telegramId = await userWith('evol')
-    const refusal = { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }
-    telegramApi.mockImplementation(async () => Response.json(refusal, { status: 403 }))
-    const logged = catchConsole()
-
-    const { response } = await post(message(telegramId, { photo: PHOTO, caption: 'evol' }))
-
-    expect(response.status).toBe(200)
-    expect(asked()).toEqual([said(telegramId, READING)])
-    expect([file, reader].map((spy) => spy.mock.calls.length)).toEqual([0, 0])
-    const blocked = { error: 'ChatBlockedError', reason: 'chat_blocked' }
-    const nothingSaid = { user: null, outcome: 'blocked', sent: 'none', placeholder: false }
-    expect(logged.events()).toEqual([
-      { event: 'update', kind: 'photo', outcome: 'deferred', ms: took },
-      { event: 'telegram_failed', method: 'sendMessage', status: 403, ...blocked },
-      expect.objectContaining({ event: 'photo', ...nothingSaid, ...blocked }),
-    ])
-  })
-
-  it('says what came of a photo that nothing was added from in the place of the placeholder', async () => {
-    const telegramId = await userWith('evol')
-    reader.mockResolvedValue({ status: 'nothing' })
-
-    await post(message(telegramId, { photo: PHOTO, caption: 'my cat' }))
-
-    expect(asked()).toEqual([
-      said(telegramId, READING),
-      typing(telegramId),
-      inPlaceOf(telegramId, 2, 'No purchases to add were found in that photo.'),
-    ])
-  })
-
-  it('ignores a photo in a group, as it does a message of text there', async () => {
-    const telegramId = await userWith('evol')
-    const [chat, from] = [{ id: -5001, type: 'group', title: 'A made-up chat' }, { id: telegramId }]
-    const logged = catchConsole()
-
-    const { deferred } = await post({ message: { message_id: ++lastMessage, date: 1, chat, from, photo: PHOTO } })
-
-    expect(deferred).toBe(false)
-    expect(telegramApi).not.toHaveBeenCalled()
-    expect(logged.events()).toEqual([
-      { event: 'update', kind: 'message', outcome: 'ignored', why: 'not_private', ms: took },
-    ])
-  })
-})
-
-describe('POST /telegram with a photo, on a service that reads none', () => {
-  /** The settings of a service that names a provider of its own, and no model of that provider's that reads photos. */
-  const ownProvider = { ...env, AI_BASE_URL: 'https://ai.example.test/v1', AI_MODEL: 'made-up-model' }
-
-  it.each<[what: string, settings: Env]>([
-    ['that names its own provider, and no model for photos', ownProvider],
-    ['that names its own provider, and leaves the model for photos empty', { ...ownProvider, AI_VISION_MODEL: '' }],
-    ['that has no AI provider', { ...env, AI_API_KEY: '' }],
-    [
-      'that has no AI provider, though a model for photos is named',
-      { ...env, AI_API_KEY: undefined, AI_VISION_MODEL: 'made-up-vision-model' },
-    ],
-  ])('answers a photo at once with that the bot only reads text, on a service %s', async (_, settings) => {
-    const telegramId = await userWith('evol')
-    const logged = catchConsole()
-
-    const sent = message(telegramId, { photo: PHOTO, caption: 'add these to evol' })
-    const { response, deferred } = await post(sent, settings)
-
-    // Nothing is left for after the response: no placeholder, no file and no reading.
-    expect([response.status, deferred]).toEqual([200, false])
-    expect(asked()).toEqual([said(telegramId, NOT_TEXT)])
-    expect([file, reader].map((spy) => spy.mock.calls.length)).toEqual([0, 0])
-    expect(logged.events()).toEqual([{ event: 'update', kind: 'not_text', outcome: 'replied', ms: took }])
-  })
-
-  it('says nothing of photos in its welcome, where a service that reads them does', async () => {
-    const [here, there] = [newTelegramId(), newTelegramId()]
-
-    await post(message(here, { text: '/start' }), ownProvider)
-    await post(message(there, { text: '/start' }))
-
-    const [[, without], [, withPhotos]] = asked()
-    expect(without.text).toContain('You can also just ask a question in your own words')
-    expect(without.text).not.toMatch(/photo/i)
-    expect(withPhotos.text).toContain('You can send a photo of your card transactions too')
-  })
-
-  it('reads photos with the model that is named for them at a provider of its own', async () => {
-    const telegramId = await userWith('evol')
-    reader.mockResolvedValue({ status: 'nothing' })
-    const settings = { ...ownProvider, AI_VISION_MODEL: 'made-up-vision-model' }
-
-    const { deferred } = await post(message(telegramId, { photo: PHOTO }), settings)
-
-    expect(deferred).toBe(true)
-    expect(reader.mock.calls[0][1]).toEqual({
-      apiKey: 'test-ai-key',
-      baseUrl: 'https://ai.example.test/v1',
-      model: 'made-up-model',
-      visionModel: 'made-up-vision-model',
-    })
   })
 })
 

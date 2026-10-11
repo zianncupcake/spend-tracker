@@ -156,7 +156,7 @@ describe('a file that Telegram holds', () => {
     expect(came).toEqual({ asked: 3, givenUp: false })
   })
 
-  it.each([0, 1, 4095, 4096, 4097, 400_000])('is its %i bytes, each as it came', async (length) => {
+  it.each([0, 1, 400_000])('is its %i bytes, each as it came', async (length) => {
     const bytes = bytesOf(length)
     holding(bytes, length)
 

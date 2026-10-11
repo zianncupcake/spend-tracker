@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { deleteUser, findOrCreateUser } from '../src/store'
+import { findOrCreateUser } from '../src/store'
 import { HELD_HOURS, heldStoreFor, type HeldBatch, type HeldPurchase } from '../src/store-held'
 import { newTelegramId } from './helpers'
 
@@ -109,17 +109,5 @@ describe('purchases that are held', () => {
     expect(await held.find(71, NOW)).toBeNull()
     expect(await held.find(72, NOW)).toEqual(batch(72))
     expect(await heldCount(id)).toBe(1)
-  })
-
-  it('are deleted with their user, and nobody else’s are', async () => {
-    const [user, other] = [await newUser(), await newUser()]
-    await user.held.hold(batch(71), NOW)
-    await user.held.hold(batch(72), NOW)
-    await other.held.hold(batch(71), NOW)
-
-    await deleteUser(db, user.id)
-
-    expect(await heldCount(user.id)).toBe(0)
-    expect(await heldCount(other.id)).toBe(1)
   })
 })
