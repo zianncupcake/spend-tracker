@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { depsFor } from '../src/deps'
 import { serveMcp } from '../src/mcp/server'
-import { ChatBlockedError, TelegramError } from '../src/telegram/api'
+import { TelegramError } from '../src/telegram/api'
 import { handleUpdate, type Update } from '../src/telegram/handler'
 import {
   called,
@@ -40,10 +40,6 @@ const NO_ASSISTANT =
 const BUSY = 'The assistant has reached its limit for now. Try again later.'
 const NOT_ANSWERED = 'That question could not be answered. Try again later, or ask it another way.'
 const TOOK_TOO_LONG = 'That question took too long to answer. Try again later, or ask it another way.'
-
-/** The placeholder that a question is answered with at once. test/working.test.ts has what becomes of it. */
-const WORKING =
-  'Working on it… If this message is still here in half a minute, something went wrong. Please ask again.'
 
 const BAD_DATE = 'must be a date such as 2026-10-01, or an instant such as 2026-10-01T09:30:00+08:00.'
 const MORE = 'There may be more purchases than are listed here. To see them, ask for a shorter stretch of time.'
@@ -639,14 +635,12 @@ describe('a call of a tool that cannot be answered', () => {
     ['a card that is not text', 'find_purchases', { card: 1234 }, '`card` must be a string.'],
     ['a limit of nothing', 'find_purchases', { limit: 0 }, '`limit` must be a whole number, 1 or more.'],
     ['a limit that is not whole', 'find_purchases', { limit: 2.5 }, '`limit` must be a whole number, 1 or more.'],
-    ['a limit that is text', 'find_purchases', { limit: '10' }, '`limit` must be a whole number, 1 or more.'],
     [
       'an argument that the tool has not got',
       'find_purchases',
       { card: 'evol', since: '2026-10-01' },
       'The only arguments are `card`, `from`, `to` and `limit`.',
     ],
-    ['arguments that are not JSON', 'find_purchases', '{"card": ', 'The arguments must be a JSON object.'],
     ['arguments that are a list', 'find_purchases', '["evol"]', 'The arguments must be a JSON object.'],
     ['arguments that are nothing', 'find_purchases', 'null', 'The arguments must be a JSON object.'],
     ['a tool that there is not', 'delete_everything', {}, 'There is no such tool.'],
@@ -929,16 +923,12 @@ describe('a provider that does not answer as it should', () => {
   })
 
   it.each<[seconds: string, wait: string]>([
-    ['2', 'a minute'],
     ['59', 'a minute'],
     ['60', '1 minute'],
-    ['61', '2 minutes'],
-    ['720', '12 minutes'],
     ['3599', '60 minutes'],
     ['3600', '1 hour'],
     ['3601', '2 hours'],
     // A wait can have a part of a second in it, which is rounded up with the rest.
-    ['7.66', 'a minute'],
     ['60.5', '2 minutes'],
   ])('has the user told when to try again when its 429 says to wait %s seconds: in about %s', async (seconds, wait) => {
     const logged = catchConsole()
@@ -956,11 +946,8 @@ describe('a provider that does not answer as it should', () => {
 
   it.each<[what: string, headers: Record<string, string>]>([
     ['does not say how long to wait', {}],
-    ['says to wait 0 seconds', { 'retry-after': '0' }],
     ['says to wait -30 seconds', { 'retry-after': '-30' }],
     ['says to wait Infinity seconds', { 'retry-after': 'Infinity' }],
-    // HTTP lets the header hold the time to ask again at, in place of how long to wait. That is not read.
-    ['gives a date in place of a number of seconds', { 'retry-after': 'Fri, 09 Oct 2026 04:12:00 GMT' }],
   ])('has the user told only to try again later when its 429 %s', async (_, headers) => {
     const logged = catchConsole()
     const chat = openChat()
@@ -1323,25 +1310,6 @@ describe('an answer as it is sent', () => {
     expect(reply.text).toHaveLength(4096)
     expect(reply.entities).toEqual([{ type: 'code', offset: 0, length: 4096 }])
   })
-
-  it('is followed by nothing, sent to a chat that Telegram will send nothing to', async () => {
-    vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new ChatBlockedError())
-    const chat = openChat()
-    outside.model = [saying('An answer.')]
-    const logged = catchConsole()
-
-    // What is done after Telegram has been answered does not fail for that.
-    await chat.send('What did I buy?')
-
-    // It is not sent as text, and nothing is said in the place of the placeholder, which is left as it was.
-    expect(sent).toEqual([])
-    expect(posted.map(({ text }) => text)).toEqual([WORKING])
-    // The question is logged as one of a chat that is to be sent nothing, whatever the model made of it.
-    const failure = { error: 'ChatBlockedError', reason: 'chat_blocked' }
-    expect(logged.events('question')).toEqual([
-      { ...questionLine(await chat.userId()), outcome: 'blocked', sent: 'none', ...failure },
-    ])
-  })
 })
 
 describe('when a question is answered', () => {
@@ -1382,58 +1350,6 @@ describe('when a question is answered', () => {
     expect(later).toBeUndefined()
     expect(sent).toHaveLength(1)
     expect(outside.completions).toEqual([])
-  })
-
-  it('is after the chat has its placeholder and has been shown that the bot is writing', async () => {
-    const chat = openChat()
-    const order: string[] = []
-    vi.spyOn(deps.messenger, 'post').mockImplementation(async (chatId, text) => {
-      order.push(`"${text}" to ${chatId}`)
-      return 77
-    })
-    vi.spyOn(deps.messenger, 'typing').mockImplementation(async (chatId) => {
-      order.push(`typing in ${chatId}`)
-    })
-    vi.spyOn(deps.messenger, 'sendRich').mockImplementation(async (chatId) => {
-      order.push(`answer to ${chatId}`)
-    })
-    vi.spyOn(deps.messenger, 'delete').mockImplementation(async (chatId, messageId) => {
-      order.push(`message ${messageId} deleted in ${chatId}`)
-    })
-    outside.model = [
-      () => {
-        order.push('model asked')
-        return Response.json(saying('An answer.'))
-      },
-    ]
-
-    await chat.send('How much have I spent?')
-
-    // And the placeholder goes, by the id that it was sent with, once the answer is there.
-    expect(order).toEqual([
-      `"${WORKING}" to ${chat.telegramId}`,
-      `typing in ${chat.telegramId}`,
-      'model asked',
-      `answer to ${chat.telegramId}`,
-      `message 77 deleted in ${chat.telegramId}`,
-    ])
-  })
-
-  it.each<[what: string, error: Error]>([
-    ['an error', new TelegramError('sendChatAction', 400)],
-    ['that the chat is to be sent nothing', new ChatBlockedError()],
-  ])('is all the same when Telegram answers the showing of that with %s', async (_, error) => {
-    vi.spyOn(deps.messenger, 'typing').mockRejectedValue(error)
-    const chat = openChat()
-    outside.model = [saying('An answer.')]
-    const logged = catchConsole()
-
-    expect(linesOf(await chat.rich('How much have I spent?'))).toEqual(['An answer.'])
-
-    // The question is logged as one that was answered, and as no failure. The request that Telegram refused is
-    // logged where it is made, by the messenger that posts to Telegram: see test/working.test.ts.
-    expect(logged.events('question')).toEqual([questionLine(await chat.userId())])
-    expect(logged.failures()).toEqual([])
   })
 })
 

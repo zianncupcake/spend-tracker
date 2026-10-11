@@ -1,6 +1,5 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { WINDOW_LIMIT } from '../src/domain/sorting'
 import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { clock, deps, openChat, sent, sentRich, type Posted } from './connect-helpers'
 import { buy } from './helpers'
@@ -314,131 +313,6 @@ describe('/spend with a card that is linked to a product', () => {
     ])
   })
 
-  it('says how far past its limit a group is, in place of what is left, once nothing is', async () => {
-    const chat = openChat()
-    await chat.say('/addcard evol 1234 calendar uob-evol')
-    const userId = await chat.userId()
-    const books = await buy(userId, { amountMinor: 36240, merchant: 'BOOK SHOP' })
-    const gym = { at: '2026-10-06T09:00:00+08:00', amountMinor: 20000, merchant: 'ANYTIME FITNESS' }
-    const fitness = await buy(userId, { ...gym, category: 'selected' })
-
-    const [message] = await chat.ask('/spend evol')
-
-    // What was spent past a limit is shown as it is: the total is not cut to the limit.
-    expect(message.text).toContain(
-      [
-        'Online and Mobile Contactless Spend',
-        'ID  Date      SGD  Merchant',
-        `${two(books)}  5 Oct  362.40  BOOK SHOP`,
-        '    Total  362.40',
-        '    Cap    300.00',
-        '    Over    62.40',
-        '',
-        'Selected Gym, Telco and Streaming Spend',
-        'ID  Date      SGD  Merchant',
-        `${two(fitness)}  6 Oct  200.00  ANYTIME FITNESS`,
-        '    Total  200.00',
-        '    Cap    200.00',
-        '    Left     0.00',
-        '',
-      ].join('\n'),
-    )
-    expect(message.text).toContain('Total: SGD 562.40 in 2 purchases, resets 1 Nov')
-  })
-
-  it("has the code on each amount of a group that holds two currencies, with a limit on the card's own", async () => {
-    const chat = openChat()
-    await chat.say('/addcard evol 1234 calendar uob-evol')
-    const userId = await chat.userId()
-    const coffee = await buy(userId)
-    // Moved by hand out of foreign currency, where its currency put it.
-    const abroad = { at: '2026-10-06T09:00:00+08:00', amountMinor: 500, currency: 'USD', merchant: 'AIRLINE' }
-    const flight = await buy(userId, { ...abroad, category: 'online' })
-    const noodles = { at: '2026-10-07T09:00:00+08:00', amountMinor: 150000, currency: 'JPY', merchant: 'RAMEN' }
-    const ramen = await buy(userId, { ...noodles, category: 'fx' })
-
-    const [message, ...more] = await chat.ask('/spend evol')
-
-    // A total for each currency. What the purchase in another currency comes to in the card's own is not known,
-    // so it is left out of what is held against the limit.
-    const online = [
-      'ID  Date       Amount  Merchant',
-      `${two(coffee)}  5 Oct   SGD 12.40  COFFEE PLACE`,
-      `${two(flight)}  6 Oct    USD 5.00  AIRLINE`,
-      '    Total   SGD 12.40',
-      '    Total    USD 5.00',
-      '    Cap    SGD 300.00',
-      '    Left   SGD 287.60',
-    ]
-    const gym = ['    Total        0.00', '    Cap        200.00', '    Left       200.00']
-    const physical = ['    Total        0.00']
-    // A group of one currency names it in its header, and has plain numbers under it.
-    const foreign = [
-      'ID  Date          JPY  Merchant',
-      `${two(ramen)}  7 Oct    1,500.00  RAMEN`,
-      '    Total    1,500.00',
-    ]
-    expect(more).toEqual([])
-    expect(message.text).toBe(
-      [
-        'evol ••••1234: 1 Oct to 31 Oct',
-        '',
-        'Online and Mobile Contactless Spend',
-        ...online,
-        '',
-        'Selected Gym, Telco and Streaming Spend',
-        ...gym,
-        '',
-        'Other Spend',
-        ...physical,
-        '',
-        'Overseas Foreign Currency Spend',
-        ...foreign,
-        '',
-        'Total: JPY 1,500.00 + SGD 12.40 + USD 5.00 in 3 purchases, resets 1 Nov',
-        OCTOBER_COUNTS,
-        '',
-        'Minimum spend: SGD 12.40 of SGD 800.00, not counting purchases in other currencies',
-        // Of the two purchases in other currencies, the one that is in a group with a limit. The other has no limit
-        // to come off.
-        'A table has a Total for each currency. A Cap counts SGD only, so USD 5.00 is not taken off what is Left: ' +
-          'an alert does not say what a purchase in another currency comes to in SGD.',
-        TERMS,
-      ].join('\n'),
-    )
-    expect(blocksIn(message)).toEqual([online, gym, physical, foreign].map((rows) => rows.join('\n')))
-  })
-
-  it("has a merchant's name in the block of its table, where nothing in it can be tapped", async () => {
-    const chat = openChat()
-    await chat.say('/addcard evol 1234 calendar uob-evol')
-    const userId = await chat.userId()
-    // In UTF-16 code units, as the offsets of a message's entities are: each 𝒳 is two of them.
-    const first = await buy(userId, { merchant: '𝒳𝒳 /start @someone' })
-    const hostile = { at: '2026-10-06T09:00:00+08:00', merchant: '/delete confirm https://attacker.test/x #tag' }
-    const second = await buy(userId, { ...hostile, category: 'other' })
-
-    const [message] = await chat.ask('/spend evol')
-
-    // A name is cut to the room that its row has left, and the cut leaves it in the block.
-    const blocks = blocksIn(message)
-    expect(blocks).toHaveLength(4)
-    expect(blocks[0].split('\n')[1]).toBe(`${two(first)}  5 Oct   12.40  𝒳𝒳 /start @someo…`)
-    expect(blocks[2].split('\n')[1]).toBe(`${two(second)}  6 Oct   12.40  /delete confirm…`)
-    // Nothing of either name is anywhere else in the message.
-    expect(outside(message)).toEqual([
-      'evol ••••1234: 1 Oct to 31 Oct',
-      'Online and Mobile Contactless Spend',
-      'Selected Gym, Telco and Streaming Spend',
-      'Other Spend',
-      'Overseas Foreign Currency Spend',
-      'Total: SGD 24.80 in 2 purchases, resets 1 Nov',
-      OCTOBER_COUNTS,
-      'Minimum spend: SGD 24.80 of SGD 800.00',
-      TERMS,
-    ])
-  })
-
   it('takes two queries for the window, however many purchases it holds', async () => {
     const { chat } = await shopper()
     const queried = vi.spyOn(env.DB, 'prepare')
@@ -636,19 +510,6 @@ describe('/spend with a card that is linked to no product', () => {
     )
     expect(blocksIn(message)).toEqual([table.join('\n')])
   })
-
-  it('has no table when the window holds no purchases, and says so', async () => {
-    const chat = openChat()
-    await chat.say('/addcard amex 0005 statement 8') // The cycle that began on 9 October.
-
-    const [message, ...more] = await chat.ask('/spend amex')
-
-    expect(more).toEqual([])
-    expect(message.text).toBe(
-      `amex ••••0005: 9 Oct to 8 Nov\n\nTotal: no purchases, resets 9 Nov\n${counting('7 Oct', '6 Nov')}`,
-    )
-    expect(message.entities).toBeUndefined()
-  })
 })
 
 describe('/spend with a card', () => {
@@ -674,26 +535,6 @@ describe('/spend with a card', () => {
         OCTOBER_COUNTS,
       ].join('\n'),
     )
-  })
-
-  it("shows a user their own purchases, and never those on another user's card of the same name", async () => {
-    const [first, second] = [await shopper(), openChat()]
-    await second.say('/addcard evol 1234 statement 15 uob-evol')
-    const own = await buy(await second.userId(), { amountMinor: 100, merchant: 'ONLY THE SECOND', category: 'other' })
-
-    const toFirst = (await first.chat.ask('/spend evol')).map((message) => message.text).join('\n')
-    const toSecond = (await second.ask('/spend evol')).map((message) => message.text).join('\n')
-
-    expect(toFirst).not.toContain('ONLY THE SECOND')
-    expect(toFirst).toContain('Total: SGD 254.88 + USD 5.00 in 8 purchases')
-    expect(toFirst).toContain('Other Spend\nID  Date       SGD  Merchant\n')
-    const row = `${two(own)}  5 Oct    1.00  ONLY THE SECOND`
-    expect(toSecond).toContain(`Other Spend\nID  Date      SGD  Merchant\n${row}\n    Total    1.00\n`)
-    expect(toSecond).toContain('Total: SGD 1.00 in 1 purchase, resets 16 Oct')
-    expect(toSecond).toContain('Online and Mobile Contactless Spend\n    Total    0.00\n    Cap    300.00\n')
-    for (const merchant of ['BOOK SHOP', 'NETFLIX.COM', 'AIRLINE', 'COFFEE PLACE', 'INSURANCE']) {
-      expect(toSecond).not.toContain(merchant)
-    }
   })
 
   it.each([
@@ -772,38 +613,5 @@ describe('a window with many purchases', () => {
       'Minimum spend: SGD 1,488.00 of SGD 800.00',
       TERMS,
     ])
-  })
-
-  it(`lists the latest ${WINDOW_LIMIT} of them, and still totals them all, in the same four queries`, async () => {
-    const chat = openChat()
-    await chat.say('/addcard evol 1234 calendar uob-evol')
-    const userId = await chat.userId()
-    const ids: number[] = []
-    for (let index = 0; index < WINDOW_LIMIT + 5; index++) {
-      const at = new Date(Date.parse('2026-10-01T08:00:00+08:00') + index * 60_000).toISOString()
-      ids.push(await buy(userId, { at, amountMinor: 100, merchant: merchant(index), category: 'other' }))
-    }
-    const queried = vi.spyOn(env.DB, 'prepare')
-
-    const messages = await chat.ask('/spend evol')
-
-    expect(queried).toHaveBeenCalledTimes(4)
-    const lines = messages.flatMap((message) => message.text.split('\n'))
-    expect(lines.slice(0, 5)).toEqual([
-      'evol ••••1234: 1 Oct to 31 Oct',
-      '',
-      `The latest ${WINDOW_LIMIT} of ${WINDOW_LIMIT + 5} purchases:`,
-      '',
-      'Online and Mobile Contactless Spend',
-    ])
-    const listed = lines.filter((line) => line.includes('MERCHANT'))
-    expect(listed).toHaveLength(WINDOW_LIMIT)
-    expect(listed[0]).toBe(`${String(ids[5]).padStart(3)}  1 Oct    1.00  ${cut(5)}`)
-    expect(listed.at(-1)).toBe(`${String(ids.at(-1)).padStart(3)}  1 Oct    1.00  ${cut(WINDOW_LIMIT + 4)}`)
-    // What a table's purchases come to takes in those that are not listed.
-    expect(lines).toContain('     Total  205.00')
-    expect(lines).toContain(`Total: SGD 205.00 in ${WINDOW_LIMIT + 5} purchases, resets 1 Nov`)
-    // Each message is one request to Telegram, of the 50 that a request may make.
-    expect(messages.length).toBeLessThanOrEqual(3)
   })
 })

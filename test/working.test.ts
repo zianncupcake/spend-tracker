@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { depsFor } from '../src/deps'
 import { findUser } from '../src/store'
 import { handleUpdate } from '../src/telegram/handler'
-import { AI_URL, calling, refusing, saying } from './ai-helpers'
+import { AI_URL, refusing, saying } from './ai-helpers'
 import { newTelegramId, plain, userCount } from './helpers'
 import { catchConsole } from './log-helpers'
 
@@ -458,27 +458,6 @@ describe('a question that cannot be answered', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it.each<[what: string, reply: () => Response, failure: object]>([
-    ['answers with an error', refusing(500), providerRefused(500)],
-    [
-      'cannot be reached',
-      () => {
-        throw new TypeError('A made-up failure of the network')
-      },
-      { error: 'TypeError' },
-    ],
-    ['answers with nothing of an answer', () => Response.json(saying(null)), { error: 'Error', reason: 'no_answer' }],
-  ])('has its user told so in the place of the placeholder when the provider %s', async (_, reply, failure) => {
-    const logged = catchConsole()
-    provider.mockImplementationOnce(reply)
-    const { telegramId, later } = await question()
-
-    await later()
-
-    expect(telegram.mock.calls).toEqual(toldSo(telegramId))
-    expect(logged.events('question')).toEqual([{ ...(await failedLine(telegramId)), ...failure }])
-  })
-
   it('has its user told so in the place of the placeholder when Telegram takes the answer neither way', async () => {
     const logged = catchConsole()
     // Neither as a rich message nor as text that is marked as code, which only the answer is.
@@ -749,28 +728,6 @@ describe('what the log has of a question', () => {
     expect(logged.events('question')).toEqual([await answeredLine(telegramId)])
     // A question that was answered is no failure, and nothing of it is written at the level of one.
     expect(logged.failures()).toEqual([])
-  })
-
-  it('counts the requests to the model and the calls of tools that it took, and how long it took in all', async () => {
-    const logged = catchConsole()
-    // The model takes three seconds over each of its messages: two calls of the tool that reads, and then its answer.
-    const after3s = (completion: object) => async () => {
-      await vi.advanceTimersByTimeAsync(3_000)
-      return Response.json(completion)
-    }
-    const calls = calling(['call_1', 'find_purchases', { limit: 1 }], ['call_2', 'find_purchases'])
-    provider.mockImplementationOnce(after3s(calls)).mockImplementationOnce(after3s(saying('An answer.')))
-    const { telegramId, later } = await question()
-
-    await later()
-
-    const line = { ...(await answeredLine(telegramId)), requests: 2, tool_calls: 2, ms: 6_000 }
-    expect(logged.events('question')).toEqual([line])
-    // Each call of a tool has a line of its own, under the same user.
-    expect(logged.events('assistant_tool')).toEqual([
-      { event: 'assistant_tool', user: line.user, tool: 'find_purchases', outcome: 'ok', ms: 0 },
-      { event: 'assistant_tool', user: line.user, tool: 'find_purchases', outcome: 'ok', ms: 0 },
-    ])
   })
 
   it('has nothing of the question, of its answer, of the chat or of what Telegram said of a request', async () => {

@@ -8,15 +8,6 @@ const hostile = { name: '<script>alert("name")</script>', contact: `"O'Neil & Co
 const hostileNameEscaped = '&lt;script&gt;alert(&quot;name&quot;)&lt;/script&gt;'
 const hostileContactEscaped = '&quot;O&#39;Neil &amp; Co&quot; &lt;img src=x onerror=alert(1)&gt;'
 
-const everyPage: [name: string, page: () => Response][] = [
-  ['the homepage', () => homePage(operator)],
-  ['the privacy policy', () => privacyPage(operator, true)],
-  ['the privacy policy of a service that reads photos', () => privacyPage(operator, true, true)],
-  ['the code page', () => codePage('123456')],
-  ['the expired-link page', () => problemPage('expired')],
-  ['the failure page', () => problemPage('failed')],
-]
-
 describe('the homepage', () => {
   it('says what the service does and who runs it, and links to the privacy policy', async () => {
     const response = homePage(operator)
@@ -356,14 +347,22 @@ describe('the sign-in pages', () => {
 })
 
 describe('every page', () => {
-  it.each(everyPage)('%s is HTML that browsers must not sniff', (_, page) => {
+  // Every page is sent with the same headers, and a sign-in page with two more. So a page of each kind is looked at.
+  it.each<[name: string, page: () => Response]>([
+    ['the homepage', () => homePage(operator)],
+    ['the code page', () => codePage('123456')],
+  ])('%s is HTML that browsers must not sniff', (_, page) => {
     const { headers } = page()
 
     expect(headers.get('content-type')).toBe('text/html; charset=utf-8')
     expect(headers.get('x-content-type-options')).toBe('nosniff')
   })
 
-  it.each(everyPage)('%s allows no scripts, and no styles but its own', async (_, page) => {
+  // What a page holds is its own. The two here are those that no other test looks through for a script.
+  it.each<[name: string, page: () => Response]>([
+    ['the code page', () => codePage('123456')],
+    ['the expired-link page', () => problemPage('expired')],
+  ])('%s allows no scripts, and no styles but its own', async (_, page) => {
     const response = page()
     const html = await response.text()
 

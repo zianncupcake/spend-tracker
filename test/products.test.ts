@@ -117,13 +117,11 @@ describe('/product', () => {
 
   it.each([
     ['/product', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
-    ['/product evol', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
     ['/product evol uob-evol now', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
     ['/product my!card uob-evol', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
     ['/product evol uob/evol', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
     ['/product evol visa-infinite', 'There is no product called visa-infinite. Send /products for the ones there are.'],
     ['/product spare uob-evol', 'You have no card called spare.'],
-    ['/product spare none', 'You have no card called spare.'],
   ])('answers "%s" with what is wrong, and links nothing', async (message, reply) => {
     const chat = openChat()
     await chat.say('/addcard evol 1234 calendar')

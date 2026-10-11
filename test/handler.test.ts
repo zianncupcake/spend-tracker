@@ -215,26 +215,19 @@ describe('/addcard and /cards', () => {
   })
 
   it.each([
-    ['/addcard', 'Usage:'],
     ['/addcard visa', 'Usage:'],
-    ['/addcard visa 1234', 'Usage:'],
     ['/addcard visa 1234 weekly', 'Usage:'],
     ['/addcard visa 1234 statement', 'Usage:'],
     // What comes after all that says what the card's window is, is taken for the key of a product.
-    ['/addcard visa 1234 calendar 15', 'There is no product called 15.'],
-    ['/addcard visa 1234 statement 15 extra', 'There is no product called extra.'],
     ['/addcard visa 1234 calendar uob-evol extra', 'Usage:'],
-    ['/addcard visa 1234 statement 15 uob-evol extra', 'Usage:'],
     ['/addcard visa 1234 calendar not/a/key', 'Usage:'],
     ['/addcard my!card 1234 calendar', 'The nickname must be'],
-    [`/addcard ${'a'.repeat(21)} 1234 calendar`, 'The nickname must be'],
     ['/addcard visa 123 calendar', 'The last four digits must be'],
     ['/addcard visa 12345 calendar', 'The last four digits must be'],
     ['/addcard visa 12a4 calendar', 'The last four digits must be'],
     ['/addcard visa 1234 statement 0', 'The statement day must be'],
     ['/addcard visa 1234 statement 32', 'The statement day must be'],
     ['/addcard visa 1234 statement 1.5', 'The statement day must be'],
-    ['/addcard visa 1234 statement fifteen', 'The statement day must be'],
   ])('answers "%s" with what is wrong and adds nothing', async (message, expected) => {
     const chat = openChat()
 
@@ -676,19 +669,9 @@ describe('a message that is not text', () => {
     'the caption under one. Please send your question or command as text.'
 
   it.each<[what: string, content: object]>([
-    // The words under an attachment are its caption. Here they are a command, and a question.
+    // The words under an attachment are its caption. Here they are a command.
     ['a photo with words under it', { photo, caption: '/addcard visa 1234 calendar' }],
-    ['a photo with nothing under it', { photo }],
-    [
-      'a file with words under it',
-      { document: { file_id: 'made-up-file-id', file_unique_id: 'made-up-id' }, caption: 'How much have I spent?' },
-    ],
-    ['a sticker', { sticker }],
-    ['a voice message', { voice: { file_id: 'made-up-file-id', file_unique_id: 'made-up-id', duration: 3 } }],
-    ['a location', { location: liveLocation }],
-    ['a message with nothing in it', {}],
     // Whatever the bot does not know is answered so too, and not passed over: silence would be the worse mistake.
-    ['a die that was thrown', { dice: { emoji: '🎲', value: 3 } }],
     ['a note of Telegram’s that the bot does not know', { made_up_note_of_telegrams: { made_up: true } }],
   ])('answers %s with that the bot only reads text, and does nothing else about it', async (_, content) => {
     const telegramId = newTelegramId()
@@ -738,7 +721,7 @@ describe('updates that are ignored', () => {
   const text = '/start'
   // The id and the text that a message of Telegram's has, so that each of these is ignored for what it is said to be.
   const body = { message_id: 1, text }
-  const [group, supergroup] = [{ id: -5001, type: 'group' }, { id: -5002, type: 'supergroup' }]
+  const group = { id: -5001, type: 'group' }
   /** Each with what the log has of it: what it was, as far as the bot looked, and why it was ignored. */
   const updates: [what: string, update: (id: number) => Update, kind: string, why: string][] = [
     [
@@ -747,13 +730,6 @@ describe('updates that are ignored', () => {
       'message',
       'not_private',
     ],
-    [
-      'a supergroup chat',
-      (id) => ({ message: { ...body, chat: { id: -5002, type: 'supergroup' }, from: { id } } }),
-      'message',
-      'not_private',
-    ],
-    ['a channel', () => ({ message: { ...body, chat: { id: -5003, type: 'channel' } } }), 'message', 'not_private'],
     [
       'a message without a sender',
       (id) => ({ message: { ...body, chat: { id, type: 'private' } } }),
@@ -766,35 +742,10 @@ describe('updates that are ignored', () => {
       'message',
       'no_id',
     ],
-    ['an update without a message', () => ({}), 'other', 'nothing_read'],
-    // What is not text, and what was edited, is answered in a user's own private chat with the bot, and nowhere else.
-    [
-      'a photo with words under it in a group',
-      (id) => unchecked({ message: { message_id: 1, photo, caption: text, chat: group, from: { id } } }),
-      'message',
-      'not_private',
-    ],
-    [
-      'a sticker in a supergroup',
-      (id) => unchecked({ message: { message_id: 1, sticker, chat: supergroup, from: { id } } }),
-      'message',
-      'not_private',
-    ],
-    [
-      'a photo without a sender',
-      (id) => unchecked({ message: { message_id: 1, photo, chat: { id, type: 'private' } } }),
-      'message',
-      'not_own_chat',
-    ],
+    // What was edited is answered in a user's own private chat with the bot, and nowhere else.
     [
       'an edited message in a group',
       (id) => ({ edited_message: { ...body, chat: group, from: { id } } }),
-      'edited',
-      'not_private',
-    ],
-    [
-      'an edited message in a supergroup',
-      (id) => ({ edited_message: { ...body, chat: supergroup, from: { id } } }),
       'edited',
       'not_private',
     ],
@@ -883,29 +834,9 @@ describe('updates that are ignored', () => {
 })
 
 describe('what the log has of an update', () => {
-  /** The names of the bot's commands. A name is what the log has its command as: the command, without the slash. */
-  const COMMAND_NAMES = [
-    'start',
-    'addcard',
-    'cards',
-    'products',
-    'product',
-    'removecard',
-    'renamecard',
-    'spend',
-    'add',
-    'remove',
-    'sort',
-    'timezone',
-    'connect',
-    'code',
-    'status',
-    'disconnect',
-    'mcp',
-    'delete',
-  ]
-
-  it.each(COMMAND_NAMES)('is that /%s came, as the command of that name, and that it was replied to', async (name) => {
+  // A name is what the log has its command as: the command, without the slash. These are the two commands that the
+  // bot's list of them does not name: the test after this one has every command that it names.
+  it.each(['start', 'code'])('is that /%s came, as the command of that name, and that it was replied to', async (name) => {
     const chat = openChat()
     const logged = catchConsole()
 

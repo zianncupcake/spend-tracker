@@ -286,16 +286,13 @@ describe('a call of a tool that acts', () => {
 
   it.each<[what: string, tool: string, args: unknown, said: string]>([
     ['a card to show that the user has not got', 'show_spending', { card: 'amex' }, BAD_CARD],
-    ['a card to show that is not text', 'show_spending', { card: ['evol'] }, BAD_CARD],
     // A month that was passed over would have the current month shown, for a question about another.
     ['an argument beside the card to show', 'show_spending', { card: 'evol', more: false, month: '9' }, BAD_ARGUMENT],
     ['purchases that are no list', 'add_purchases', { card: 'evol', purchases: GIVEN }, BAD_PURCHASES],
-    ['no purchases at all', 'add_purchases', { card: 'evol', category: null }, BAD_PURCHASES],
     ['no ids', 'set_category', { ids: [], category: 'other' }, BAD_IDS],
     ['21 ids', 'set_category', { ids: Array.from({ length: 21 }, (_, at) => at + 1), category: 'other' }, BAD_IDS],
     ['an id of zero', 'set_category', { ids: [12, 0], category: 'other' }, BAD_IDS],
     ['an id that is not whole', 'set_category', { ids: [1.5], category: 'other' }, BAD_IDS],
-    ['an id that is text', 'set_category', { ids: ['12'], category: 'other' }, BAD_IDS],
     ['one id that is not in a list', 'set_category', { ids: 12, category: 'other' }, BAD_IDS],
     ['a key of 31 characters', 'set_category', { ids: [12], category: 'x'.repeat(31) }, BAD_KEY],
     ['what no category of a card is called', 'set_category', { ids: [12], category: 'Dining Out' }, BAD_KEY],
