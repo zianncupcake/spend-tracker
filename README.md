@@ -520,11 +520,11 @@ that asks, the message of what else there is to know and, when Telegram did not 
 in the place of the placeholder and again as a message of its own. A press takes 7 queries and 2 requests at the
 most.
 
-The table of held purchases is made by `migrations/0009_photos.sql`, which is to be applied before the code is
-deployed: a service whose code is ahead of its database fails at whatever reads or writes that table, which every
-photo does. The checking of mail does not fail with it. A run deletes the batches that nobody answered for once
-the mailbox has had its turn, in a `try` of its own, so a failure there is logged at a stage of its own, `batches`,
-and keeps nobody's mail from being checked.
+The table of held purchases is made by `migrations/0009_photos.sql`. A deploy applies the migrations before it
+deploys the code: see Deploying. A service whose code is ahead of its database fails at whatever reads or writes
+that table, which every photo does. The checking of mail does not fail with it. A run deletes the batches that
+nobody answered for once the mailbox has had its turn, in a `try` of its own, so a failure there is logged at a
+stage of its own, `batches`, and keeps nobody's mail from being checked.
 
 What is done with a reading knows nothing of photos: `addRead` in `src/telegram/handler.ts` takes the user, their
 cards, the reading and the id of the message. So purchases that are read from anything else can be added by the same
@@ -1082,3 +1082,56 @@ npm run logs       # wrangler tail: the log of the deployed Worker, as it is wri
 
 `wrangler.example.jsonc` and `.dev.vars.example` are templates. Their real counterparts, `wrangler.jsonc` and
 `.dev.vars`, are git-ignored. The comments in `.dev.vars.example` say what the less obvious settings are.
+
+## Deploying
+
+A pull request is tested, and merging it into `main` deploys it. Both are the work of `.github/workflows/ci.yml`.
+There is no staging environment: what is merged goes live. `wrangler deploy` from a laptop is no longer how the
+service is deployed. It uploads the working folder as it is, committed or not, and applies no migration, so what
+was live was often not what `main` had.
+
+For a pull request, and for a push to `main`, the workflow installs with `npm ci` and runs `npm run typecheck` and
+`npm test`. That job is given no secret, so it runs the same for a pull request from a fork. For a push to `main`,
+and only once that job has passed, a second job does four things, in this order:
+
+1. It writes `wrangler.jsonc`. The real config is kept out of the repository, so `scripts/deploy-config.mjs` makes
+   it from `wrangler.example.jsonc`, with the id of the database and the three `vars` added. What is deployed is
+   the template with those four values, so the two cannot drift.
+2. It applies the migrations to the live database, with `wrangler d1 migrations apply spend-tracker --remote`.
+3. It deploys the code, with `wrangler deploy`. Only the warnings and errors of that are printed (`WRANGLER_LOG`),
+   as what wrangler prints besides has the values of the `vars`.
+4. It checks the live service: a `GET` of the public URL has to answer 200, and a `POST` to `/telegram` with no
+   secret has to answer 401. The second leaves a `webhook_refused` line in the log, with the `why` `no_secret`.
+
+A step that fails fails the run, and nothing after it is done. The migrations come before the code because code
+that is ahead of its database fails at whatever reads or writes what is not there yet: without the table of held
+purchases, every photo fails, and every scheduled run fails at its stage `batches`. A table that no code uses yet
+is in nobody's way. But until the code is deployed, and for as long as a deploy fails after its migrations, the
+code that is live is the one from before, on the database as the migrations left it. So a migration that takes
+away what that code still uses breaks it.
+
+The runs of `main` go one at a time, and a run that has begun is not cancelled for a later one, so a deploy is not
+cut off between its migrations and its code.
+
+The workflow reads six secrets of the repository, by these names:
+
+- `CLOUDFLARE_API_TOKEN`: a Cloudflare API token. It has to be allowed to edit Workers scripts, which a deploy
+  does, and to edit D1, which applying a migration does, for the one account and no other. In Cloudflare's list of
+  permissions those are Workers Scripts and D1 under Account, each set to Edit.
+- `CLOUDFLARE_ACCOUNT_ID`: the id of that account.
+- `D1_DATABASE_ID`: the id of the D1 database. It becomes the `database_id` of the entry in `d1_databases`.
+- `PUBLIC_BASE_URL`: where the service is reached, with no trailing slash. It becomes the var of that name, and it
+  is the address that the last step checks.
+- `OPERATOR_NAME`: who runs the service, as the public pages name them. It becomes the var of that name.
+- `OPERATOR_CONTACT`: how to reach them, as the public pages say it. It becomes the var of that name.
+
+The Worker's own secrets, such as the bot's token, are not among the six: they are set on the Worker, and a deploy
+leaves them as they are.
+
+The `wrangler` that the workflow runs is a dev dependency of the project's own, pinned to one version. It is the
+version that `@cloudflare/vitest-plugin` depends on, so the tests and a deploy use the same one, and the pin is to
+be raised when the plugin is.
+
+When this was written, the workflow had not run on GitHub, and a token with only those two permissions had not
+been tried. What was tried is the script, with made-up values, and the last step, against a server on the same
+machine.
