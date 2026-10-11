@@ -4,7 +4,11 @@
 // Email text can be hostile. Of the two patterns here, one matches a run of blanks and nothing after it, and the
 // other holds no repetition, so neither can backtrack.
 
-const MAX_MERCHANT_LENGTH = 80
+/** How many characters of a merchant's name are kept, at the most. */
+export const MAX_MERCHANT_LENGTH = 80
+
+/** The three letters that a bank writes a month with, in lower case: a month's place here is its number from 0. */
+export const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
 // A full stop that ends a sentence: a space comes after it, or nothing does.
 const SENTENCE_END = /\.(?: |$)/
@@ -55,13 +59,21 @@ export function merchantIn(rest: string, following: string): string | null {
  * time: one that does not exist, such as 31 February or 24:00, rolls over into one that does, and then does not
  * read back as it was given.
  */
-export function singaporeTime(year: number, month: number, day: number, hour = 0, minute = 0): number | null {
+export function singaporeTime(
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+): number | null {
   // What a clock in Singapore shows, held as though it were a time in UTC.
-  const shown = new Date(Date.UTC(year, month, day, hour, minute))
+  const shown = new Date(Date.UTC(year, month, day, hour, minute, second))
   const exists =
     shown.getUTCMonth() === month &&
     shown.getUTCDate() === day &&
     shown.getUTCHours() === hour &&
-    shown.getUTCMinutes() === minute
+    shown.getUTCMinutes() === minute &&
+    shown.getUTCSeconds() === second
   return exists ? shown.getTime() / 1000 - SINGAPORE_OFFSET : null
 }

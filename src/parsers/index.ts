@@ -1,9 +1,10 @@
 import { exampleBank } from './example-bank'
+import { hsbc } from './hsbc'
 import { ocbc } from './ocbc'
 import type { AlertEmail, ParsedTransaction, Parser } from './types'
 import { uob } from './uob'
 
-const parsers: Parser[] = [exampleBank, ocbc, uob]
+const parsers: Parser[] = [exampleBank, ocbc, uob, hsbc]
 
 // Email text can be hostile, so no parser ever sees more of it than this.
 const MAX_TEXT_LENGTH = 20_000

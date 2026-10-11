@@ -9,6 +9,7 @@ import {
   ruledByName,
   startingCategory,
 } from '../src/catalogue'
+import { hsbcRevolution } from '../src/catalogue/hsbc-revolution'
 import type { Product } from '../src/catalogue/types'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { sortEnd } from '../src/telegram/purchases'
@@ -24,7 +25,7 @@ function at(merchant: string | null, product: Product = uobEvol): string | null 
 
 describe('the catalogue', () => {
   it('holds the products that a card can be linked to, each found by its key', () => {
-    expect(products.map((product) => product.key)).toEqual(['uob-evol'])
+    expect(products.map((product) => product.key)).toEqual(['uob-evol', 'hsbc-revolution'])
     expect(productOf('uob-evol')).toBe(uobEvol)
     expect(productOf('UOB-EVOL')).toBeUndefined()
     expect(productOf('none')).toBeUndefined()
@@ -165,6 +166,52 @@ describe('the UOB EVOL Card', () => {
     expect(ruledByName(uobEvol, 'COFFEE PLACE')).toBeUndefined()
     // A rule for another currency places a purchase, and no merchant.
     expect(ruledByName(uobEvol, 'AIRLINE')).toBeUndefined()
+  })
+})
+
+describe('the HSBC Revolution Credit Card', () => {
+  it('starts a purchase at a travel agency that it names in Other Transactions, however the name is written', () => {
+    const names = [
+      'Trip.com',
+      'Agoda',
+      'Booking.com',
+      'Expedia',
+      'Hotels.com',
+      'Kayak',
+      'Klook',
+      'KKday',
+      'Pelago',
+      'Traveloka',
+      'Airbnb',
+    ]
+
+    for (const name of names) {
+      expect(at(name, hsbcRevolution)).toBe('other')
+      expect(at(`PAYMENT*${name.toUpperCase()} SINGAPORE SG`, hsbcRevolution)).toBe('other')
+    }
+    // With more of the merchant's text to either side of the name.
+    for (const merchant of ['TRIP.COM INTERNATIONAL', 'AGODA.COM', 'WWW.HOTELS.COM', 'BOOKING.COM123456']) {
+      expect(at(merchant, hsbcRevolution)).toBe('other')
+    }
+  })
+
+  it('takes no other merchant for a travel agency, though its name holds one of theirs or comes near one', () => {
+    const merchants = [
+      'ROUND TRIP COMPANY',
+      'KAYAKING CLUB',
+      'GOLDEN PAGODA CAFE',
+      'ARCHIPELAGO BAR',
+      'SOMEHOTELS.COM',
+      'SOMEBOOKING.COM',
+      'COFFEE PLACE',
+      null,
+    ]
+
+    for (const merchant of merchants) {
+      // Nothing is stored for it, which leaves it an Eligible Transaction.
+      expect(at(merchant, hsbcRevolution)).toBeNull()
+      expect(categoryOf(hsbcRevolution, at(merchant, hsbcRevolution))).toBe('eligible')
+    }
   })
 })
 

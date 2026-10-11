@@ -25,7 +25,7 @@ export interface Parser {
    * What a purchase that the parser read is stored under, and what the log knows the bank by. The name of a new
    * parser is added here, and to the `alert` event in src/log.ts.
    */
-  name: 'example-bank' | 'ocbc' | 'uob'
+  name: 'example-bank' | 'ocbc' | 'uob' | 'hsbc'
   /** The bare addresses that the bank sends its alerts from, in lower case. */
   senders: string[]
   /** Null when the email is from this parser's bank but holds no purchase it can read. */
