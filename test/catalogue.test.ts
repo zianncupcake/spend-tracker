@@ -25,7 +25,7 @@ function at(merchant: string | null, product: Product = uobEvol): string | null 
 
 describe('the catalogue', () => {
   it('holds the products that a card can be linked to, each found by its key', () => {
-    expect(products.map((product) => product.key)).toEqual(['uob-evol', 'hsbc-revolution'])
+    expect(products.map((product) => product.key)).toEqual(['uob-evol', 'hsbc-revolution', 'ocbc-rewards'])
     expect(productOf('uob-evol')).toBe(uobEvol)
     expect(productOf('UOB-EVOL')).toBeUndefined()
     expect(productOf('none')).toBeUndefined()

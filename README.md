@@ -18,8 +18,9 @@ counted in the next window says so and why, `/spend` says under each card which 
 `get_spending_summary` gives the card `countedFrom`. The rule is from UOB's terms for the EVOL card, which count
 spend that is "successfully charged and posted to the Card account in each Statement Month". HSBC's terms for the
 Revolution card count by the day of posting too: "the total amount of Eligible Transactions posted into HSBC's
-credit card system within each qualifying calendar month". It is taken to hold for other cards, and has not been
-checked for them. The two days are the owner's choice: how long a posting really takes was not measured.
+credit card system within each qualifying calendar month". So do OCBC's for the Rewards Card: "Spend will be
+computed based on transaction posted date." It is taken to hold for other cards, and has not been checked for
+them. The two days are the owner's choice: how long a posting really takes was not measured.
 
 It runs on Cloudflare Workers with a D1 database.
 
@@ -155,9 +156,9 @@ counts as known and is never stored again. Whatever totals, lists or counts purc
 
 The service knows the reward rules of some card products. They are data, in `src/catalogue/`: a file for each
 product, which also says where the bank publishes its terms and what date those terms are as of. So far there are
-two, the UOB EVOL Card (`uob-evol`) and the HSBC Revolution Credit Card (`hsbc-revolution`). `/products` lists
-them, `/product <nickname> <product key>` links a card to one (`none` in place of the key unlinks it), and
-`/addcard` takes the key as a last word.
+three: the UOB EVOL Card (`uob-evol`), the HSBC Revolution Credit Card (`hsbc-revolution`) and the OCBC Rewards
+Card (`ocbc-rewards`). `/products` lists them, `/product <nickname> <product key>` links a card to one (`none` in
+place of the key unlinks it), and `/addcard` takes the key as a last word.
 
 A purchase on a linked card is in one of the product's categories. A product can name one of them as its default:
 the category that a purchase is in unless something says otherwise. Two things say otherwise with nobody choosing,
@@ -193,6 +194,20 @@ of its own. A booking that an airline or a hotel charges itself is under that ai
 rule does not cover it. The HSBC Singapore app shows the code of a transaction once it is posted, which is how a
 cardholder can check, and then move the purchase. The names are not the bank's: see Known limits.
 
+The two groups of the OCBC Rewards Card are Shopping Spend, after the "shopping spend categories" of the bank's
+terms, and Other Spend. Shopping Spend earns a bonus of 45 OCBC$ for every S$5, on top of the 5 that all spend
+earns, and the bank credits no more than 10,000 OCBC$ of that bonus in a calendar month. At 45 for every S$5 that
+is 222 blocks of S$5 and a part of one more, so the limit of the group is SGD 1,110 of spend. Other Spend has no
+limit, and the terms set no minimum spend. The bonus is for a purchase at a merchant whose category code is one of
+those that the terms list, which are of department, clothing, shoe, bag, sports and duty-free shops, and for any
+purchase at one of the merchants that the terms name, such as Shopee, Lazada or Watsons. An alert does not say the
+code, so a purchase is Shopping Spend by default, and the user marks the ones that are not as Other Spend, or
+takes the mark off again. Nothing puts a purchase in Shopping Spend by its merchant's name, as every purchase
+starts there anyway. One thing is placed by name, the other way: the terms say that a transaction with the
+description "Shopee Pay" earns nothing, so a purchase whose merchant's name holds that, with its space or without,
+starts in Other Spend, and has the button that marks it as Shopping Spend. The note of this product says what
+Shopping Spend is, with every merchant that the terms name, and that groceries and Shopee Pay are Other Spend.
+
 The bot's message about a purchase has a button for each category that the purchase can be moved to by hand and is
 not in already. On the UOB EVOL Card that is "Mark as Other Spend" under a purchase that is Online / Mobile
 Contactless Spend, "Mark as Online / Mobile Contactless Spend" under one that is Other Spend, and both under a
@@ -219,13 +234,19 @@ seen: its table is the rows that sum it up, and no others. A table ends with a `
 purchases come to. A group with a limit has a `Cap` row for the limit after it, and then a `Left` row for what is
 left of the limit or, once nothing is, an `Over` row for how far past it the spend is. The limit is held against
 what was spent in the card's own currency, and a group that holds another currency too has a `Total` row for each.
-On a product with no default category, what is not sorted has a table of its own after the groups.
+The reply says so itself when a group with a limit holds anything in another currency. A line under the tables then
+says that a table has a Total for each currency, that a Cap counts the card's own currency only, and what is
+therefore not taken off what is Left, as in "USD 1.00", with a total for each of the other currencies. It says why,
+too: an alert does not say what a purchase in another currency comes to in the card's own. A purchase in another
+currency that is in a group without a limit brings no such line, as it has no limit to come off. On a product with
+no default category, what is not sorted has a table of its own after the groups.
 
 After the tables comes how far the spend is towards the product's minimum, as a line that begins "Minimum spend".
 Every purchase in the card's own currency counts towards the minimum. Purchases in other currencies are left out of
 it, as what they come to in the card's own currency is not known. A product whose terms set no minimum has no such
-line: the UOB EVOL Card has one, and the HSBC Revolution Credit Card has none. Last comes the line that says whose
-terms the limits are from, and what date those terms are as of.
+line: the UOB EVOL Card has one, and the other two products have none. Then comes the line about other
+currencies, when there is one. Last comes the line that says whose terms the limits are from, and what date those
+terms are as of.
 
 A press of a button reaches the bot as a `callback_query` update, and a message as it stands after an edit as an
 `edited_message` update. A webhook that was set with a list of `allowed_updates` has to have both in that list, as
@@ -1079,6 +1100,19 @@ its CPU limit ended `exceededCpu`: that is from the documentation, as no such ru
   merchant is empty, that line is the bank's own sentence after the table, which the parser knows by how it begins
   ("You can also log on"), and the purchase is stored with no merchant. Should the bank word that sentence another
   way, it would be stored as the merchant of such a purchase.
+- The limit of the OCBC Rewards Card is held against the whole amount of each purchase. The bank counts a purchase
+  in blocks of S$5, drops what does not make up a block, and counts nothing of a purchase under S$5. So what is
+  Left of that limit is a little less than what the bank has left of it.
+- The 15X campaign of the OCBC Rewards Card is not tracked. From 1 July 2026 to 31 March 2027 the bank gives 5 more
+  OCBC$ for every S$1 at Watsons, Shopee, Lazada, TikTok Shop and Taobao, up to 5,000 OCBC$ a calendar month. That
+  is a second limit, on spend that is in Shopping Spend too, and a group has the one limit.
+- The terms of the OCBC Rewards Card count by the calendar month, as those of the HSBC Revolution Credit Card do. So
+  a card of that product too has to be added with `calendar` for its limit to be counted as the bank counts it,
+  and nothing checks that it was.
+- Which of the two groups of the OCBC Rewards Card a purchase belongs in is its user's to say, but for a purchase
+  with the description of Shopee Pay. Whether one earns the bonus goes by the category code of its merchant, which
+  an alert does not say. So a purchase is taken for Shopping Spend until its user marks it as Other Spend, and one
+  of groceries has to be marked so too: it is the limit that a user watches.
 - A purchase that has been taken out cannot be put back. It can be added again by hand.
 - The rich message of `/spend <nickname>` has not been looked at in Telegram's apps: how its tables are drawn there,
   and what an app from before rich messages shows of one. The text is sent in its place only when Telegram answers

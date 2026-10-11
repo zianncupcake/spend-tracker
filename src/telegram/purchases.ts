@@ -12,7 +12,7 @@
 
 import { categoryName, categoryOf, choicesOf } from '../catalogue'
 import type { Product } from '../catalogue/types'
-import type { Amount, Breakdown } from '../domain/breakdown'
+import { perCurrency, type Amount, type Breakdown } from '../domain/breakdown'
 import { MANUAL, type Card, type Transaction } from '../store'
 import type { HeldPurchase } from '../store-held'
 import type { Button, MessageEntity, Outgoing, RichBlock, TableCell } from './api'
@@ -451,17 +451,39 @@ function fitted(text: string, width: number): string {
 
 /**
  * What comes after the tables of a card with a product: how far the spend of the window is towards the product's
- * minimum, when it has one, and whose terms the limits in the tables are from.
+ * minimum, when it has one, then what a group with a limit holds in other currencies, when one holds any, and last
+ * whose terms the limits in the tables are from.
  */
 export function breakdownLines(product: Product, breakdown: Breakdown): string[] {
   const { name, homeCurrency, minimumSpendMinor, termsAsOf } = product
+  const others = otherCurrencyLines(breakdown, homeCurrency)
   const terms = `Limits are from the bank's terms for the ${name}, as of ${termsAsOf}.`
-  if (minimumSpendMinor === undefined) return [terms]
+  if (minimumSpendMinor === undefined) return [...others, terms]
   const counted = formatMoney(breakdown.countedMinor, homeCurrency)
   const minimum = `Minimum spend: ${counted} of ${formatMoney(minimumSpendMinor, homeCurrency)}`
   return [
     // What a purchase in another currency comes to in the product's own is not known here.
     breakdown.foreignLeftOut ? `${minimum}, not counting purchases in other currencies` : minimum,
+    ...others,
     terms,
+  ]
+}
+
+/**
+ * The line that says why a table has more than one `Total`, and why a purchase in another currency leaves its
+ * `Left` as it was: a limit is held against what was spent in the card's own currency, as `sumsOf` has it. The line
+ * names what the groups with a limit hold in other currencies, a total to each currency, joined as the total of a
+ * card joins them. There is no line when no such group holds any: a purchase in a group without a limit has no
+ * limit to come off, whatever its currency.
+ */
+function otherCurrencyLines(breakdown: Breakdown, homeCurrency: string): string[] {
+  const limited = breakdown.groups.filter((group) => group.limitMinor !== undefined)
+  const spent = limited.flatMap((group) => group.spent)
+  const foreign = perCurrency(spent.filter(({ currency }) => currency !== homeCurrency))
+  if (foreign.length === 0) return []
+  const amounts = foreign.map(({ amountMinor, currency }) => formatMoney(amountMinor, currency)).join(' + ')
+  return [
+    `A table has a Total for each currency. A Cap counts ${homeCurrency} only, so ${amounts} is not taken off what ` +
+      `is Left: an alert does not say what a purchase in another currency comes to in ${homeCurrency}.`,
   ]
 }

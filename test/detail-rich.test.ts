@@ -266,6 +266,12 @@ describe('/spend with a card that is linked to a product', () => {
         plain('Total: JPY 1,500.00 + SGD 12.40 + USD 5.00 in 3 purchases, resets 1 Nov'),
         plain(OCTOBER_COUNTS),
         plain('Minimum spend: SGD 12.40 of SGD 800.00, not counting purchases in other currencies'),
+        // Of the two purchases in other currencies, the one that is in a group with a limit. The other has no limit
+        // to come off.
+        plain(
+          'A table has a Total for each currency. A Cap counts SGD only, so USD 5.00 is not taken off what is Left: ' +
+            'an alert does not say what a purchase in another currency comes to in SGD.',
+        ),
         plain(TERMS),
       ],
     })

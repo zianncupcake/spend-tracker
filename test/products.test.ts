@@ -27,6 +27,7 @@ describe('/products', () => {
         'The card products whose reward rules are known:',
         'uob-evol - UOB EVOL Card',
         'hsbc-revolution - HSBC Revolution Credit Card',
+        'ocbc-rewards - OCBC Rewards Card',
         '',
         'To link a card to one, send /product <nickname> <product key>. Or add the key to the end of /addcard.',
       ].join('\n'),
@@ -282,6 +283,135 @@ describe('a card that is linked to the HSBC Revolution Credit Card', () => {
 
     expect(await categoriesOf(userId)).toEqual({ 'Trip.com': 'eligible', 'COFFEE PLACE': null })
     expect(labels(agency)).toEqual([`Mark as ${OTHER}`])
+  })
+
+  it('says under its tables why a purchase in another currency is not taken off what is left', async () => {
+    const chat = openChat()
+    await chat.say('/addcard hsbc 1234 calendar hsbc-revolution')
+    /** The id of the purchase that a line of /add stores, which its reply begins with. */
+    const added = async (line: string) => /^ID (\d+) /.exec((await chat.ask(line))[0].text)?.[1]
+    const shop = await added('/add hsbc USD 1.00 SOME SHOP')
+    const coffee = await added('/add hsbc 1.00 COFFEE PLACE')
+
+    expect(linesOf(await chat.rich('/spend hsbc'))).toEqual([
+      'hsbc ••••1234: 1 Oct to 31 Oct',
+      ELIGIBLE,
+      // The table holds two currencies, so each amount has its code, and each currency a Total. The limit is held
+      // against the one in the card's own.
+      'ID | Date | Amount | Merchant',
+      `${shop}* | 9 Oct | USD 1.00 | SOME SHOP`,
+      `${coffee}* | 9 Oct | SGD 1.00 | COFFEE PLACE`,
+      'Total | SGD 1.00',
+      'Total | USD 1.00',
+      'Cap | SGD 1,000.00',
+      'Left | SGD 999.00',
+      OTHER,
+      'Total | 0.00',
+      '* = added by hand',
+      'Total: SGD 1.00 + USD 1.00 in 2 purchases, resets 1 Nov',
+      expect.stringMatching(/^The total counts purchases made from 29 Sep to 29 Oct\./),
+      'A table has a Total for each currency. A Cap counts SGD only, so USD 1.00 is not taken off what is Left: ' +
+        'an alert does not say what a purchase in another currency comes to in SGD.',
+      "Limits are from the bank's terms for the HSBC Revolution Credit Card, as of 1 April 2026.",
+    ])
+  })
+})
+
+describe('a card that is linked to the OCBC Rewards Card', () => {
+  /** The two groups of the product. A purchase is in the first until it is marked otherwise. */
+  const SHOPPING = 'Shopping Spend'
+  const OTHER = 'Other Spend'
+
+  const labels = (message: { buttons?: { text: string }[][] }) => message.buttons?.flat().map((button) => button.text)
+
+  it('has a table for each of its two groups, the limit of the first, and no line of a minimum spend', async () => {
+    const chat = openChat()
+    expect(await chat.say('/addcard ocbc 1234 calendar ocbc-rewards')).toBe(
+      'Added ocbc ••••1234: calendar month, OCBC Rewards Card.',
+    )
+    const id = await buy(await chat.userId())
+
+    expect(linesOf(await chat.rich('/spend ocbc'))).toEqual([
+      'ocbc ••••1234: 1 Oct to 31 Oct',
+      SHOPPING,
+      'ID | Date | SGD | Merchant',
+      `${id} | 5 Oct | 12.40 | COFFEE PLACE`,
+      'Total | 12.40',
+      'Cap | 1,110.00',
+      'Left | 1,097.60',
+      OTHER,
+      'Total | 0.00',
+      'Total: SGD 12.40 in 1 purchase, resets 1 Nov',
+      'The total counts purchases made from 29 Sep to 29 Oct. The bank counts a purchase by the day it is posted, ' +
+        'so one made in the last 2 days of a month is counted in the next month.',
+      // The terms of the product set no minimum spend, so no line tells of one.
+      "Limits are from the bank's terms for the OCBC Rewards Card, as of 5 October 2026.",
+    ])
+  })
+
+  it('takes a purchase for Shopping Spend until its user marks it as Other Spend', async () => {
+    const chat = openChat()
+    await chat.say('/addcard ocbc 1234 calendar ocbc-rewards')
+    const userId = await chat.userId()
+    const id = await buy(userId)
+
+    expect(await chat.say('/sort ocbc')).toBe(
+      'Every purchase on ocbc ••••1234 counts as Shopping Spend unless it is marked otherwise. ' +
+        'Shopping Spend is spend at department, clothing, shoe, bag, sports and duty-free shops, and at Shopee, ' +
+        'Lazada, Taobao, TikTok Shop, Amazon, AliExpress, Alibaba, Ezbuy, Watsons, Guardian, Mustafa Centre and ' +
+        'NTUC Unity. Anything else is Other Spend, and so are groceries and Shopee Pay. ' +
+        'To mark one, send /sort <purchase id>. /spend ocbc shows the ids.',
+    )
+    const [message] = await chat.ask(`/sort ${id}`)
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${SHOPPING}`)
+    expect(labels(message)).toEqual([`Mark as ${OTHER}`])
+    // Nothing is stored for it: it is where the product takes a purchase to be.
+    expect(await categoriesOf(userId)).toEqual({ 'COFFEE PLACE': null })
+
+    expect((await chat.press(message, `Mark as ${OTHER}`)).answer).toBe(`ID ${id}: ${OTHER}`)
+
+    expect(await categoriesOf(userId)).toEqual({ 'COFFEE PLACE': 'other' })
+    expect(labels(message)).toEqual([`Mark as ${SHOPPING}`])
+    // It is in the table of the other spend now, and nothing is held against the limit.
+    expect(linesOf(await chat.rich('/spend ocbc')).slice(1, 9)).toEqual([
+      SHOPPING,
+      'Total | 0.00',
+      'Cap | 1,110.00',
+      'Left | 1,110.00',
+      OTHER,
+      'ID | Date | SGD | Merchant',
+      `${id} | 5 Oct | 12.40 | COFFEE PLACE`,
+      'Total | 12.40',
+    ])
+  })
+
+  it('starts a purchase described as Shopee Pay in Other Spend, and one at Shopee in Shopping Spend', async () => {
+    const chat = openChat()
+    await chat.say('/addcard ocbc 1234 calendar ocbc-rewards')
+    const userId = await chat.userId()
+
+    const wallet = []
+    for (const merchant of ['SHOPEE PAY', 'ShopeePay', 'SHOPEEPAY SG']) {
+      const [reply] = await chat.ask(`/add ocbc 10 ${merchant}`)
+      // The terms name that description as earning nothing. Its user can say that the purchase earned all the same.
+      expect(reply.text).toMatch(/\nID \d+: Other Spend$/)
+      expect(labels(reply)).toEqual([`Mark as ${SHOPPING}`])
+      wallet.push(reply)
+    }
+    const [marketplace] = await chat.ask('/add ocbc 10 SHOPEE SINGAPORE MP')
+    expect(marketplace.text).toMatch(/\nID \d+: Shopping Spend$/)
+    expect(labels(marketplace)).toEqual([`Mark as ${OTHER}`])
+
+    // The rule stores where the first three are. Nothing is stored for the last, as at any other merchant.
+    expect(await categoriesOf(userId)).toEqual({
+      'SHOPEE PAY': 'other',
+      ShopeePay: 'other',
+      'SHOPEEPAY SG': 'other',
+      'SHOPEE SINGAPORE MP': null,
+    })
+
+    expect((await chat.press(wallet[0], `Mark as ${SHOPPING}`)).answer).toMatch(/^ID \d+: Shopping Spend$/)
+    expect((await categoriesOf(userId))['SHOPEE PAY']).toBe('shopping')
   })
 })
 
