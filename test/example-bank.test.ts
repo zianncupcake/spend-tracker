@@ -81,7 +81,12 @@ describe('Example Bank alerts', () => {
 
   it("sends its alerts from one address, and mail is looked for from the banks' senders and from no other", () => {
     expect(exampleBank.senders).toEqual(['alerts@examplebank.test'])
-    expect(alertSenders()).toEqual(['alerts@examplebank.test', 'noreply@notify.ocbc.com', 'unialerts@uobgroup.com'])
+    expect(alertSenders()).toEqual([
+      'alerts@examplebank.test',
+      'noreply@notify.ocbc.com',
+      'unialerts@uobgroup.com',
+      'hsbc.bank.singapore.limited@notification.hsbc.com.hk',
+    ])
   })
 
   it('only reads the first 20,000 characters', () => {

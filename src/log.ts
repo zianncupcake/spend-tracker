@@ -47,7 +47,7 @@ export interface Events {
     user: number | null
   }
   access_lost: { user: number; told: boolean }
-  alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | null }
+  alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | null }
   connect_link: { user: number }
   connect_callback: {
     outcome:

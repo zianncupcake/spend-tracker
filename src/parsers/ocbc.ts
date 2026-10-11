@@ -1,4 +1,4 @@
-import { hundredths, MAX_FROM_EMAIL, merchantIn, singaporeTime, singleSpaced } from './shared'
+import { hundredths, MAX_FROM_EMAIL, merchantIn, MONTHS, singaporeTime, singleSpaced } from './shared'
 import type { Parser } from './types'
 
 // OCBC Bank (Singapore) tells of a purchase made with one of its cards in one sentence of an email. The values in
@@ -18,8 +18,6 @@ const CHARGE =
 
 // What the bank puts after the sentence. It tells where the merchant's name ends.
 const FOLLOWING = 'Did not make this transaction'
-
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
 export const ocbc: Parser = {
   name: 'ocbc',

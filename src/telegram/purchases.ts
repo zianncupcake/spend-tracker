@@ -451,15 +451,17 @@ function fitted(text: string, width: number): string {
 
 /**
  * What comes after the tables of a card with a product: how far the spend of the window is towards the product's
- * minimum, and whose terms the limits in the tables are from.
+ * minimum, when it has one, and whose terms the limits in the tables are from.
  */
 export function breakdownLines(product: Product, breakdown: Breakdown): string[] {
   const { name, homeCurrency, minimumSpendMinor, termsAsOf } = product
+  const terms = `Limits are from the bank's terms for the ${name}, as of ${termsAsOf}.`
+  if (minimumSpendMinor === undefined) return [terms]
   const counted = formatMoney(breakdown.countedMinor, homeCurrency)
   const minimum = `Minimum spend: ${counted} of ${formatMoney(minimumSpendMinor, homeCurrency)}`
   return [
     // What a purchase in another currency comes to in the product's own is not known here.
     breakdown.foreignLeftOut ? `${minimum}, not counting purchases in other currencies` : minimum,
-    `Limits are from the bank's terms for the ${name}, as of ${termsAsOf}.`,
+    terms,
   ]
 }

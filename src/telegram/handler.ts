@@ -2740,8 +2740,8 @@ function spendLine(each: CardTotals, timeZone: string): string {
  * A card's current window in full: its purchases from the earliest on, in tables that end with what they come to,
  * and after the tables what the whole window comes to. A card with a product has a table for each group of the
  * product, which ends with the group's limit where it has one, and then how far the spend is towards the product's
- * minimum. A card with no product has one table, of all its purchases. It is one rich message. As text, it can come
- * to more than one message takes.
+ * minimum, when it has one. A card with no product has one table, of all its purchases. It is one rich message. As
+ * text, it can come to more than one message takes.
  *
  * The purchases are those that the window counts, which begin some days before the window does: see currentWindow.
  * The heading has the window as its bank has it, each purchase has its own day, and the line under the total says

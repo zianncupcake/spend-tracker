@@ -16,9 +16,10 @@ then counts the purchases of its own days, and nothing is said of it. The window
 every total follows, and nothing that is stored changes. The user is told: the message about a purchase that is
 counted in the next window says so and why, `/spend` says under each card which days its total counts and why, and
 `get_spending_summary` gives the card `countedFrom`. The rule is from UOB's terms for the EVOL card, which count
-spend that is "successfully charged and posted to the Card account in each Statement Month". It is taken to hold
-for other cards, and has not been checked for them. The two days are the owner's choice: how long a posting really
-takes was not measured.
+spend that is "successfully charged and posted to the Card account in each Statement Month". HSBC's terms for the
+Revolution card count by the day of posting too: "the total amount of Eligible Transactions posted into HSBC's
+credit card system within each qualifying calendar month". It is taken to hold for other cards, and has not been
+checked for them. The two days are the owner's choice: how long a posting really takes was not measured.
 
 It runs on Cloudflare Workers with a D1 database.
 
@@ -31,8 +32,8 @@ into, an endpoint through which a user's AI assistant can read their totals and 
 bot's own that answers questions asked in plain language and does what it is asked to do in the same way, and the
 adding of the purchases in a photo that a user sends the bot.
 
-Two banks are supported so far: OCBC and UOB, both of Singapore, each for its card transaction alerts. A third
-parser is for an invented example bank, which the tests use.
+Three banks are supported so far: OCBC, UOB and HSBC, all of Singapore, each for its card transaction alerts. A
+fourth parser is for an invented example bank, which the tests use.
 
 ## Connecting Gmail
 
@@ -70,6 +71,15 @@ decided on a message's headers, which are fetched by themselves: a message is fe
 passed. A run fetches the headers of at most ten messages (`HEADER_CHECKS_PER_RUN`), so it is through mail that
 only looks like an alert sooner than it could read it. A message that is looked at but not stored is remembered by
 its id, and is not fetched again.
+
+An alert that has passed is read by the parser of its bank (`src/parsers/`). OCBC and UOB tell of a purchase in one
+sentence of an email. HSBC tells of one in a sentence and a table under it, with a row to each thing that it says
+of the purchase, in an email that is HTML and nothing else. So its parser reads the text that is made of the HTML,
+where every cell of the table is on a line of its own, and takes the whole of the line under Description for the
+merchant. The table does not say what came of a transaction, so an HSBC email is a purchase only when it says
+"there was a transaction made on your HSBC credit card" before the table. Under any other words it gives no
+purchase: a decline or a refund that came with the same table would show as an alert that could not be read, and
+would not be stored.
 
 The user is told of a purchase whose alert came less than six hours ago. Older alerts are stored without a message,
 so that a new connection catching up does not flood the chat. It is the time the email came that counts, and not
@@ -144,9 +154,10 @@ counts as known and is never stored again. Whatever totals, lists or counts purc
 ## Card products and reward categories
 
 The service knows the reward rules of some card products. They are data, in `src/catalogue/`: a file for each
-product, which also says where the bank publishes its terms and what date those terms are as of. So far there is
-one, the UOB EVOL Card (`uob-evol`). `/products` lists them, `/product <nickname> <product key>` links a card to one
-(`none` in place of the key unlinks it), and `/addcard` takes the key as a last word.
+product, which also says where the bank publishes its terms and what date those terms are as of. So far there are
+two, the UOB EVOL Card (`uob-evol`) and the HSBC Revolution Credit Card (`hsbc-revolution`). `/products` lists
+them, `/product <nickname> <product key>` links a card to one (`none` in place of the key unlinks it), and
+`/addcard` takes the key as a last word.
 
 A purchase on a linked card is in one of the product's categories. A product can name one of them as its default:
 the category that a purchase is in unless something says otherwise. Two things say otherwise with nobody choosing,
@@ -161,13 +172,37 @@ streaming service that the bank names goes under Selected Gym, Telco and Streami
 thing to do by hand. Other Spend is all other local spend, which is where a purchase made with the physical card
 belongs: so the user marks such a purchase as Other Spend, or takes the mark off again.
 
+The two groups of the HSBC Revolution Credit Card are called what the bank's terms call them, as nearly as a button
+allows: Eligible Transactions and Other Transactions. An Eligible Transaction is an online or contactless purchase
+at a merchant whose category code is one of those that the terms list, under travel, department and retail stores,
+dining, taxis and membership clubs. It earns 1 Base Point and 9 Bonus Points for every SGD 1, and the bank caps the
+Bonus Points at 9,000 a calendar month, which SGD 1,000 of spend earns: that is the limit of the group. Every other
+purchase that earns points earns 1 for every SGD 1, and Other Transactions has no limit. The terms set no minimum
+spend. Whether a purchase is an Eligible Transaction goes by how it was made and by the category code of its
+merchant, and an alert says neither. So a purchase is an Eligible Transaction by default, and the user marks the
+ones that are not as Other Transactions, or takes the mark off again.
+
+One rule of that product places a purchase with nobody choosing: a purchase at a travel agency starts in Other
+Transactions. The travel codes of the terms are those of airlines, car rental, lodging and cruise lines, and the
+code of travel agencies and tour operators, 4722, is not among them. The product lists the agencies by name:
+Trip.com, Agoda, Booking.com, Expedia, Hotels.com, Kayak, Klook, KKday, Pelago, Traveloka and Airbnb. A purchase
+whose merchant's name holds one of those is stored as Other Transactions, and has the button that marks it as
+Eligible Transactions: the code is the merchant's bank's to set, and can differ from one charge to another. A name
+that other names hold counts only where it begins a word, as Agoda does not in "pagoda", and Kayak only as a word
+of its own. A booking that an airline or a hotel charges itself is under that airline's or hotel's name, so the
+rule does not cover it. The HSBC Singapore app shows the code of a transaction once it is posted, which is how a
+cardholder can check, and then move the purchase. The names are not the bank's: see Known limits.
+
 The bot's message about a purchase has a button for each category that the purchase can be moved to by hand and is
 not in already. On the UOB EVOL Card that is "Mark as Other Spend" under a purchase that is Online / Mobile
 Contactless Spend, "Mark as Online / Mobile Contactless Spend" under one that is Other Spend, and both under a
-purchase that a rule placed. A press moves the purchase, and the message then says where it is and has the buttons
-for where it is now. `/sort <purchase id>` shows a purchase with its buttons again. `/sort <nickname>` says how the
-card's purchases are sorted and, for this card, that Other Spend is where a purchase made with the physical card
-goes: a product can have such a note (`sortingNote`) for what the names of its categories do not say.
+purchase that a rule placed. On the HSBC Revolution Credit Card it is "Mark as Other Transactions" under an
+Eligible Transaction, and "Mark as Eligible Transactions" under any other. A press moves the purchase, and the
+message then says where it is and has the buttons for where it is now. `/sort <purchase id>` shows a purchase with
+its buttons again. `/sort <nickname>` says how the card's purchases are sorted and, for the UOB EVOL Card, that
+Other Spend is where a purchase made with the physical card goes: a product can have such a note (`sortingNote`)
+for what the names of its categories do not say. The note of the HSBC Revolution Credit Card says which purchases
+are Eligible Transactions, and that one at a travel agency is not.
 
 Moving one purchase changes no other, and nothing is kept of it for the purchases that come after: a later purchase
 at the same merchant starts where the product puts it, as any other does. So a purchase is Other Spend only when its
@@ -186,9 +221,11 @@ left of the limit or, once nothing is, an `Over` row for how far past it the spe
 what was spent in the card's own currency, and a group that holds another currency too has a `Total` row for each.
 On a product with no default category, what is not sorted has a table of its own after the groups.
 
-After the tables comes how far the spend is towards the product's minimum. Every purchase in the card's own currency
-counts towards the minimum. Purchases in other currencies are left out of it, as what they come to in the card's own
-currency is not known.
+After the tables comes how far the spend is towards the product's minimum, as a line that begins "Minimum spend".
+Every purchase in the card's own currency counts towards the minimum. Purchases in other currencies are left out of
+it, as what they come to in the card's own currency is not known. A product whose terms set no minimum has no such
+line: the UOB EVOL Card has one, and the HSBC Revolution Credit Card has none. Last comes the line that says whose
+terms the limits are from, and what date those terms are as of.
 
 A press of a button reaches the bot as a `callback_query` update, and a message as it stands after an edit as an
 `edited_message` update. A webhook that was set with a list of `allowed_updates` has to have both in that list, as
@@ -682,9 +719,9 @@ The mail checker:
   is left as it is, and the mailbox's next turn finds the access lost again.
 - `alert`: a message that was fetched whole and given to the parser of its bank. `outcome`: `stored`, `duplicate`
   for a purchase that was stored already, or `unparsed` for an email that the parser read no purchase from.
-  `parser`: `ocbc` or `uob`, or `example-bank` in the tests. An `unparsed` under the name of a bank's parser is
-  what a bank that has changed the wording of its alerts looks like. The parser would be null for an email from no
-  bank, and the checker fetches none of those whole.
+  `parser`: `ocbc`, `uob` or `hsbc`, or `example-bank` in the tests. An `unparsed` under the name of a bank's parser
+  is what a bank that has changed the wording of its alerts looks like. The parser would be null for an email from
+  no bank, and the checker fetches none of those whole.
 
 Connecting Gmail:
 
@@ -1022,6 +1059,26 @@ its CPU limit ended `exceededCpu`: that is from the documentation, as no such ru
   after Telegram failed the first. The purchase is moved once.
 - A category that only a rule gives has no button. So a purchase that its user has moved out of one cannot be moved
   back into it by hand.
+- The limit of the HSBC Revolution Credit Card is that of a cardholder who does not keep SGD 50,000 in an HSBC
+  Everyday Global Account: SGD 1,000 of Eligible Transactions in a month. For one who does, the bank's cap comes to
+  SGD 1,200 of spend, and the product has the one limit.
+- The terms of the HSBC Revolution Credit Card count by the calendar month. So a card of that product has to be
+  added with `calendar` for its limit to be counted as the bank counts it, and nothing checks that it was: on a card
+  that was added with a statement day, the limit is held against the statement month.
+- Which of the two groups of the HSBC Revolution Credit Card a purchase belongs in is its user's to say, but for a
+  purchase at one of the travel agencies that the product names. An Eligible Transaction is known by how it was
+  made and by the category code of its merchant, and an alert says neither. So any other purchase is taken for one
+  until its user marks it as Other Transactions: it is the limit that a user watches, and to count too much against
+  it is the safer mistake.
+- The travel agencies whose purchases start in Other Transactions on the HSBC Revolution Credit Card are named by
+  card blogs, which reported in March and April 2026 that their charges carry the code of a travel agency. They are
+  not named by the bank, which goes by a merchant's category code and names no merchant. So the list can fall
+  behind: an agency that it does not name starts as an Eligible Transaction, and a purchase at one that it names
+  starts in Other Transactions even when that charge carried another code. Either is for its user to move.
+- The merchant of an HSBC alert is the first line under Description that holds anything. Where the cell of the
+  merchant is empty, that line is the bank's own sentence after the table, which the parser knows by how it begins
+  ("You can also log on"), and the purchase is stored with no merchant. Should the bank word that sentence another
+  way, it would be stored as the merchant of such a purchase.
 - A purchase that has been taken out cannot be put back. It can be added again by hand.
 - The rich message of `/spend <nickname>` has not been looked at in Telegram's apps: how its tables are drawn there,
   and what an app from before rich messages shows of one. The text is sent in its place only when Telegram answers

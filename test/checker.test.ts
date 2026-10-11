@@ -651,7 +651,12 @@ describe('what a run asks of Gmail', () => {
 
     const connected = NOW.getTime() / 1000
     const fullyChecked = connected + 90 * 60
-    const senders = 'alerts@examplebank.test OR noreply@notify.ocbc.com OR unialerts@uobgroup.com'
+    const senders = [
+      'alerts@examplebank.test',
+      'noreply@notify.ocbc.com',
+      'unialerts@uobgroup.com',
+      'hsbc.bank.singapore.limited@notification.hsbc.com.hk',
+    ].join(' OR ')
     const since = (time: number) => `from:(${senders}) after:${time} smaller:1M`
     // The second run makes the search that the first made, an hour and a half after it. Only a full check moves
     // the search on, and so the token of a page stays good from one run to the next.

@@ -8,8 +8,11 @@ export interface Product {
   /** Where the bank publishes the terms that the rules were taken from, and the date that those terms are as of. */
   termsUrl: string
   termsAsOf: string
-  /** What has to be spent in a statement month before the groups with a limit earn their rate. */
-  minimumSpendMinor: number
+  /**
+   * What has to be spent in a month, as the terms count one, before the groups with a limit earn their rate. Missing
+   * when the terms set no minimum.
+   */
+  minimumSpendMinor?: number
   /**
    * How many days at the end of a window a card of the product counts in the next one: the day that the window
    * closes on, and as many before it as make up the number. A bank counts a purchase by the day that it is posted,
@@ -34,7 +37,10 @@ export interface Product {
 /** Categories that earn at one rate and, when the rate is paid on no more than so much spend, share that limit. */
 export interface Group {
   name: string
-  /** The spend in a statement month that the rate is paid on. Missing when the terms set no limit. */
+  /**
+   * The spend that the rate is paid on in a month, as the terms count one: a statement month, or the calendar month.
+   * Missing when the terms set no limit.
+   */
   limitMinor?: number
   categories: Category[]
 }

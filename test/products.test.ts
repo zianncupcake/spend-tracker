@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { spendingSummary } from '../src/mcp/tools'
 import { storeFor } from '../src/store'
 import { clock, NOW, openChat } from './connect-helpers'
-import { BY_PURCHASE_DAY, inCatalogue, linesOf, userCount } from './helpers'
+import { BY_PURCHASE_DAY, buy, inCatalogue, linesOf, userCount } from './helpers'
 import { record } from './mcp-helpers'
 
 // Linking a card to a product of the catalogue. The clock stands at 12:00 on 9 October 2026 in Singapore.
@@ -26,6 +26,7 @@ describe('/products', () => {
       [
         'The card products whose reward rules are known:',
         'uob-evol - UOB EVOL Card',
+        'hsbc-revolution - HSBC Revolution Credit Card',
         '',
         'To link a card to one, send /product <nickname> <product key>. Or add the key to the end of /addcard.',
       ].join('\n'),
@@ -184,6 +185,103 @@ describe('/addcard with the key of a product', () => {
     await chat.say('/addcard evol 1234 calendar uob-evol')
 
     expect(await categoriesOf(userId)).toEqual({ SPOTIFY: 'selected', RAMEN: 'fx', 'COFFEE PLACE': null })
+  })
+})
+
+describe('a card that is linked to the HSBC Revolution Credit Card', () => {
+  /** What the terms of the product call its two groups. A purchase is in the first until it is marked otherwise. */
+  const ELIGIBLE = 'Eligible Transactions'
+  const OTHER = 'Other Transactions'
+
+  it('has a table for each of its two groups, the limit of the first, and no line of a minimum spend', async () => {
+    const chat = openChat()
+    expect(await chat.say('/addcard hsbc 1234 calendar hsbc-revolution')).toBe(
+      'Added hsbc ••••1234: calendar month, HSBC Revolution Credit Card.',
+    )
+    const id = await buy(await chat.userId())
+
+    expect(linesOf(await chat.rich('/spend hsbc'))).toEqual([
+      'hsbc ••••1234: 1 Oct to 31 Oct',
+      ELIGIBLE,
+      'ID | Date | SGD | Merchant',
+      `${id} | 5 Oct | 12.40 | COFFEE PLACE`,
+      'Total | 12.40',
+      'Cap | 1,000.00',
+      'Left | 987.60',
+      OTHER,
+      'Total | 0.00',
+      'Total: SGD 12.40 in 1 purchase, resets 1 Nov',
+      'The total counts purchases made from 29 Sep to 29 Oct. The bank counts a purchase by the day it is posted, ' +
+        'so one made in the last 2 days of a month is counted in the next month.',
+      // The terms of the product set no minimum spend, so no line tells of one.
+      "Limits are from the bank's terms for the HSBC Revolution Credit Card, as of 1 April 2026.",
+    ])
+
+    // The UOB EVOL Card has a minimum spend, and its line as before.
+    await chat.say('/addcard evol 5678 calendar uob-evol')
+    expect(linesOf(await chat.rich('/spend evol')).slice(-2)).toEqual([
+      'Minimum spend: SGD 0.00 of SGD 800.00',
+      "Limits are from the bank's terms for the UOB EVOL Card, as of 10 June 2026.",
+    ])
+  })
+
+  it('takes a purchase for an Eligible Transaction until its user marks it as one of the others', async () => {
+    const chat = openChat()
+    await chat.say('/addcard hsbc 1234 calendar hsbc-revolution')
+    const userId = await chat.userId()
+    const id = await buy(userId)
+
+    expect(await chat.say('/sort hsbc')).toBe(
+      'Every purchase on hsbc ••••1234 counts as Eligible Transactions unless it is marked otherwise. ' +
+        'Eligible Transactions are online and contactless purchases in travel, department and retail stores, ' +
+        'dining, taxis and membership clubs. Anything else is Other Transactions. ' +
+        'A travel agency such as Trip.com, Agoda or Klook is not travel to the bank, so a purchase there starts in ' +
+        'Other Transactions. To mark one, send /sort <purchase id>. /spend hsbc shows the ids.',
+    )
+    const [message] = await chat.ask(`/sort ${id}`)
+    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${ELIGIBLE}`)
+    expect(message.buttons).toEqual([[{ text: `Mark as ${OTHER}`, data: `${id}:other` }]])
+    // Nothing is stored for it: it is where the product takes a purchase to be.
+    expect(await categoriesOf(userId)).toEqual({ 'COFFEE PLACE': null })
+
+    expect((await chat.press(message, `Mark as ${OTHER}`)).answer).toBe(`ID ${id}: ${OTHER}`)
+
+    expect(await categoriesOf(userId)).toEqual({ 'COFFEE PLACE': 'other' })
+    expect(message.buttons).toEqual([[{ text: `Mark as ${ELIGIBLE}`, data: `${id}:eligible` }]])
+    // It is in the table of the others now, and nothing is held against the limit.
+    expect(linesOf(await chat.rich('/spend hsbc')).slice(1, 9)).toEqual([
+      ELIGIBLE,
+      'Total | 0.00',
+      'Cap | 1,000.00',
+      'Left | 1,000.00',
+      OTHER,
+      'ID | Date | SGD | Merchant',
+      `${id} | 5 Oct | 12.40 | COFFEE PLACE`,
+      'Total | 12.40',
+    ])
+  })
+
+  it('starts a purchase at a travel agency in Other Transactions, where its user can mark it as eligible', async () => {
+    const chat = openChat()
+    await chat.say('/addcard hsbc 1234 calendar hsbc-revolution')
+    const userId = await chat.userId()
+    const labels = (message: { buttons?: { text: string }[][] }) => message.buttons?.flat().map((button) => button.text)
+
+    const [agency] = await chat.ask('/add hsbc 250 Trip.com')
+    const [cafe] = await chat.ask('/add hsbc 4.50 COFFEE PLACE')
+
+    // The rule stores where the first one is. Nothing is stored for the second, as at any other merchant.
+    expect(await categoriesOf(userId)).toEqual({ 'Trip.com': 'other', 'COFFEE PLACE': null })
+    expect(agency.text).toMatch(/\nID \d+: Other Transactions$/)
+    expect(labels(agency)).toEqual([`Mark as ${ELIGIBLE}`])
+    expect(cafe.text).toMatch(/\nID \d+: Eligible Transactions$/)
+    expect(labels(cafe)).toEqual([`Mark as ${OTHER}`])
+
+    // The code is the merchant's bank's to set, so its user can say that this purchase was one after all.
+    expect((await chat.press(agency, `Mark as ${ELIGIBLE}`)).answer).toMatch(/^ID \d+: Eligible Transactions$/)
+
+    expect(await categoriesOf(userId)).toEqual({ 'Trip.com': 'eligible', 'COFFEE PLACE': null })
+    expect(labels(agency)).toEqual([`Mark as ${OTHER}`])
   })
 })
 
