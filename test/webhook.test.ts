@@ -2,10 +2,40 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from '../src/index'
+import { findUser } from '../src/store'
 import { AI_URL, calling, refusing, saying } from './ai-helpers'
 import { newTelegramId, userCount } from './helpers'
+import { catchConsole } from './log-helpers'
 
 const SECRET = env.TELEGRAM_WEBHOOK_SECRET
+
+/**
+ * What a chat is sent when the handling of its message fails, what it is sent in the place of that when the message
+ * is an /add whose purchase is stored by then, and what a press is answered with when the handling of it fails.
+ */
+const FAILED = "Something went wrong on the bot's side. Please try again in a moment."
+const STORED_NO_REPLY =
+  'Your purchase was stored, but the bot could not reply to it. Check it with /spend before adding it again.'
+const PRESS_FAILED = 'Something went wrong. Please try again in a moment.'
+
+/** How long the handling of an update took, which is whatever it took: the Worker goes by the real clock. */
+const took = expect.any(Number)
+
+/**
+ * The line that the log has of an update whose handling failed: what the update was, whether what it asked for had
+ * been done by then, and whether whoever sent it was told. A test says what its line has of the failure besides.
+ */
+function failedUpdate(as: object, handled: boolean, told: boolean) {
+  return { event: 'update', ...as, outcome: 'failed', handled, told, ms: took }
+}
+
+/** The line that the log has of a request that Telegram answered with an error: its method, and the status. */
+function refusedCall(method: string, status: number) {
+  return { event: 'telegram_failed', method, status, error: 'Error', reason: 'http_error' }
+}
+
+/** What a line has of the failure, when Telegram will have the chat sent nothing. */
+const BLOCKED = { error: 'ChatBlockedError', reason: 'chat_blocked' }
 
 // The Worker sends its replies with the global fetch. It is replaced here, so
 // these tests see what would be sent to Telegram without sending anything.
@@ -15,9 +45,22 @@ const telegramApi = vi.fn<(url: string, init: RequestInit) => Promise<Response>>
 // `telegramApi`. A test that has a question answered says what the provider answers with.
 const provider = vi.fn<(url: string, init: RequestInit) => Promise<Response>>()
 
+/** How many messages the stand-in for Telegram has sent in a test. The number of a message is its id. */
+let messagesSent = 0
+
+/**
+ * Telegram's answer to a request that it takes, as far as the Worker reads one: to a request that sends a message,
+ * the message with the id that Telegram gave it, which is what the Worker edits or deletes the message by.
+ */
+function taken(url: string): Response {
+  const sends = url.endsWith('/sendMessage') || url.endsWith('/sendRichMessage')
+  return Response.json({ ok: true, result: sends ? { message_id: ++messagesSent, date: 1 } : true })
+}
+
 beforeEach(() => {
+  messagesSent = 0
   telegramApi.mockReset()
-  telegramApi.mockImplementation(async () => Response.json({ ok: true }))
+  telegramApi.mockImplementation(async (url) => taken(url))
   provider.mockReset()
   provider.mockImplementation(async () => {
     throw new Error('A test made a request it should not have')
@@ -109,20 +152,24 @@ function press(telegramId: number, { text, entities }: Pick<Sent, 'text' | 'enti
 
 describe('POST /telegram', () => {
   it.each([
-    ['no secret', undefined],
-    ['an empty secret', ''],
-    ['a wrong secret', 'not-the-secret'],
-    ['a wrong secret of the right length', SECRET.replace(/.$/, '!')],
-    ['the start of the secret', SECRET.slice(0, -1)],
-    ['the secret with more after it', `${SECRET}!`],
-  ])('answers 401 to %s and handles nothing', async (_, secret) => {
+    ['no secret', undefined, 'no_secret'],
+    ['an empty secret', '', 'no_secret'],
+    ['a wrong secret', 'not-the-secret', 'wrong_secret'],
+    ['a wrong secret of the right length', SECRET.replace(/.$/, '!'), 'wrong_secret'],
+    ['the start of the secret', SECRET.slice(0, -1), 'wrong_secret'],
+    ['the secret with more after it', `${SECRET}!`, 'wrong_secret'],
+  ])('answers 401 to %s and handles nothing, which it logs with nothing of a secret', async (_, secret, why) => {
     const telegramId = newTelegramId()
+    const logged = catchConsole()
 
     const response = await request('POST', '/telegram', { secret, body: startMessage(telegramId) })
 
     expect(response.status).toBe(401)
     expect(telegramApi).not.toHaveBeenCalled()
     expect(await userCount(telegramId)).toBe(0)
+    // Whether a secret came with the request, and nothing of the one that did or of the one that it was to be.
+    expect(logged.events()).toEqual([{ event: 'webhook_refused', why }])
+    for (const text of [SECRET, secret || SECRET, String(telegramId)]) expect(logged.text()).not.toContain(text)
   })
 
   it('answers 200 to the right secret and replies through the Telegram API', async () => {
@@ -167,24 +214,252 @@ describe('POST /telegram', () => {
     expect(again).toEqual(first)
   })
 
-  it('still answers 200 when handling fails, and logs no message content', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('still answers 200 when Telegram takes no reply, not even that something went wrong, and logs no message content', async () => {
+    const logged = catchConsole()
+    const telegramId = newTelegramId()
     telegramApi.mockImplementation(async () => new Response('Internal Server Error', { status: 500 }))
 
-    const response = await request('POST', '/telegram', { secret: SECRET, body: startMessage(newTelegramId()) })
+    const response = await request('POST', '/telegram', { secret: SECRET, body: startMessage(telegramId) })
 
     expect(response.status).toBe(200)
-    expect(logged.mock.calls).toEqual([['telegram update failed:', 'Error']])
+    // The welcome, and then one line to say that it failed, which Telegram takes no more than it took the welcome.
+    expect(asked()).toEqual([
+      ['sendMessage', expect.objectContaining({ text: expect.stringContaining('Welcome to Spend Tracker') })],
+      ['sendMessage', { chat_id: telegramId, text: FAILED, link_preview_options: { is_disabled: true } }],
+    ])
+    // Both requests are logged. The update is logged as one that failed when all that was left of it was the
+    // sending of its reply, with nobody told.
+    const failure = { error: 'Error', reason: 'http_error', status: 500 }
+    expect(logged.events()).toEqual([
+      refusedCall('sendMessage', 500),
+      refusedCall('sendMessage', 500),
+      { ...failedUpdate({ kind: 'command', command: 'start' }, true, false), ...failure },
+    ])
+    for (const text of ['Welcome', 'Something went wrong', 'Internal Server Error', String(telegramId)]) {
+      expect(logged.text()).not.toContain(text)
+    }
   })
 
   it('still answers 200 to a body that is not JSON, and logs none of it', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
 
     const response = await request('POST', '/telegram', { secret: SECRET, body: 'private words that are not JSON' })
 
     expect(response.status).toBe(200)
     expect(telegramApi).not.toHaveBeenCalled()
-    expect(logged.mock.calls).toEqual([['telegram update failed:', 'SyntaxError']])
+    // An update that could not be read, which there is nobody to tell of. Only the name of the error is logged.
+    expect(logged.events()).toEqual([
+      { ...failedUpdate({ kind: 'unreadable' }, false, false), error: 'SyntaxError' },
+    ])
+    expect(logged.text()).not.toContain('private')
+  })
+})
+
+describe('POST /telegram, in the log', () => {
+  /** A photo as Telegram posts one: the picture in each of the sizes that it is kept in. */
+  const photo = [{ file_id: 'made-up-file-id', file_unique_id: 'made-up-id', width: 90, height: 51, file_size: 1234 }]
+
+  /** Posts the Worker an update, whole, as Telegram does. */
+  function post(update: object) {
+    return request('POST', '/telegram', { secret: SECRET, body: JSON.stringify({ update_id: 4, ...update }) })
+  }
+
+  it('has an update that the bot answers at once in one line: what it was, what came of it and how long it took', async () => {
+    const telegramId = newTelegramId()
+    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId, is_bot: false, first_name: 'Jane' }]
+    const logged = catchConsole()
+
+    // A photo with a question under it, a command, and a command that there is not.
+    await post({ message: { message_id: 9101, date: 1, chat, from, photo, caption: 'How much have I spent?' } })
+    await post({ message: { message_id: 9102, date: 1, chat, from, text: '/addcard visa 1234 calendar' } })
+    await post({ message: { message_id: 9103, date: 1, chat, from, text: '/nosuchcommand visa' } })
+
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'not_text', outcome: 'replied', ms: took },
+      { event: 'update', kind: 'command', command: 'addcard', outcome: 'replied', ms: took },
+      { event: 'update', kind: 'command', command: 'unknown', outcome: 'replied', ms: took },
+    ])
+    // As it is written, the line of the photo is this.
+    const [photoLine] = logged.text().split('\n')
+    expect(photoLine).toMatch(/^\{"event":"update","kind":"not_text","outcome":"replied","ms":\d+\}$/)
+    // Each is the line of no failure.
+    expect(logged.failures()).toEqual([])
+    // Nothing of what was sent is in a line, and nothing that Telegram knows the user, the chat or a message by.
+    const never = ['How much', 'visa', '1234', 'calendar', 'nosuch', 'Jane', 'made-up', '9101', '9102', '9103']
+    for (const text of [...never, String(telegramId)]) expect(logged.text()).not.toContain(text)
+  })
+
+  it('has an update that the bot ignores in one line too, with why', async () => {
+    const telegramId = newTelegramId()
+    const from = { id: telegramId, is_bot: false, first_name: 'Jane' }
+    const group = { id: -5001, type: 'group', title: 'A made-up chat' }
+    const logged = catchConsole()
+
+    // A message in a group, an update of a kind that the bot reads nothing of, and what Telegram writes in the
+    // user's own chat with the bot when a message is pinned there.
+    const pinned = { message_id: 9101, date: 1, chat: { id: telegramId, type: 'private' }, from, text: '/start' }
+    await post({ message: { message_id: 9104, date: 1, chat: group, from, text: '/start' } })
+    await post({ my_chat_member: { chat: group, from, date: 1 } })
+    await post({ message: { message_id: 9105, date: 1, chat: pinned.chat, from, pinned_message: pinned } })
+
+    expect(telegramApi).not.toHaveBeenCalled()
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'message', outcome: 'ignored', why: 'not_private', ms: took },
+      { event: 'update', kind: 'other', outcome: 'ignored', why: 'nothing_read', ms: took },
+      { event: 'update', kind: 'message', outcome: 'ignored', why: 'service_message', ms: took },
+    ])
+  })
+})
+
+describe('POST /telegram when the handling of a message fails', () => {
+  /** Has the database fail at every statement that reads a user's cards, with an error that quotes a card. */
+  function failAtCards() {
+    const prepare = env.DB.prepare.bind(env.DB)
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes('FROM cards')) throw new Error('a made-up failure that quotes a card: visa 1234')
+      return prepare(query)
+    })
+  }
+
+  it('answers 200, and tells the chat in one line that something went wrong', async () => {
+    const telegramId = newTelegramId()
+    await say(telegramId, '/addcard visa 1234 calendar')
+    telegramApi.mockClear()
+    failAtCards()
+    const logged = catchConsole()
+
+    const response = await say(telegramId, '/cards')
+
+    expect(response.status).toBe(200)
+    expect(asked()).toEqual([
+      ['sendMessage', { chat_id: telegramId, text: FAILED, link_preview_options: { is_disabled: true } }],
+    ])
+    // The update is logged as one that failed before what it asked for was done, with its user told, and with the
+    // name of the error and no more.
+    expect(logged.events()).toEqual([
+      { ...failedUpdate({ kind: 'command', command: 'cards' }, false, true), error: 'Error' },
+    ])
+    expect(logged.text()).toMatch(
+      /^\{"event":"update","kind":"command","command":"cards","outcome":"failed","handled":false,"told":true,"ms":\d+,"error":"Error"\}$/,
+    )
+    expect(logged.failures()).toEqual(logged.events())
+    for (const text of ['visa', '1234', 'made-up', String(telegramId)]) expect(logged.text()).not.toContain(text)
+  })
+
+  it('does not say to try again when /add stored its purchase and it is the reply that Telegram refuses', async () => {
+    const telegramId = newTelegramId()
+    await say(telegramId, '/addcard visa 1234 calendar')
+    telegramApi.mockClear()
+    // Telegram refuses the reply, and takes whatever comes after it.
+    telegramApi.mockImplementationOnce(async () => new Response('Bad Gateway', { status: 502 }))
+    const logged = catchConsole()
+
+    const response = await say(telegramId, '/add visa 12.50 Lunch')
+
+    expect(response.status).toBe(200)
+    // The purchase as it was stored, which is the reply that Telegram refused, and then that it was stored.
+    const reply = expect.objectContaining({ text: expect.stringMatching(/^ID \d+ · \d+ \w+ · SGD 12\.50 · Lunch/) })
+    expect(asked()).toEqual([
+      ['sendMessage', reply],
+      ['sendMessage', { chat_id: telegramId, text: STORED_NO_REPLY, link_preview_options: { is_disabled: true } }],
+    ])
+    const failure = { error: 'Error', reason: 'http_error', status: 502 }
+    expect(logged.events()).toEqual([
+      refusedCall('sendMessage', 502),
+      { ...failedUpdate({ kind: 'command', command: 'add' }, true, true), ...failure },
+    ])
+    // The purchase is stored. Sent again, the command would be a message with a new id, and would store another.
+    expect((await replyTo(telegramId, '/spend')).text).toMatch(/^visa ••••1234: SGD 12\.50 in 1 purchase, /)
+  })
+
+  it('does not say to try again when /add stored its purchase and failed at what its card then comes to', async () => {
+    const telegramId = newTelegramId()
+    await say(telegramId, '/addcard visa 1234 calendar')
+    telegramApi.mockClear()
+    // The purchase goes in, and the database fails at the statement after that, which adds up the card.
+    const prepare = env.DB.prepare.bind(env.DB)
+    const failing = vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes('SUM(amount_minor)')) throw new Error('a made-up failure that quotes: Lunch')
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    const response = await say(telegramId, '/add visa 12.50 Lunch')
+    failing.mockRestore()
+
+    expect(response.status).toBe(200)
+    expect(asked()).toEqual([
+      ['sendMessage', { chat_id: telegramId, text: STORED_NO_REPLY, link_preview_options: { is_disabled: true } }],
+    ])
+    // The log has that it failed after what it asked for was done. No request to Telegram failed on the way.
+    expect(logged.events()).toEqual([
+      { ...failedUpdate({ kind: 'command', command: 'add' }, true, true), error: 'Error' },
+    ])
+    expect(logged.text()).not.toContain('Lunch')
+    // The purchase is stored, once.
+    expect((await replyTo(telegramId, '/spend')).text).toMatch(/^visa ••••1234: SGD 12\.50 in 1 purchase, /)
+  })
+
+  it.each([
+    ['/mcp, whose token is nowhere but in its reply', '/mcp', 'mcp'],
+    ['/timezone, which changed a setting', '/timezone Asia/Tokyo', 'timezone'],
+  ])('says to try again when it is the reply to %s that Telegram refuses', async (_, text, command) => {
+    const telegramId = newTelegramId()
+    telegramApi.mockImplementationOnce(async () => new Response('Bad Gateway', { status: 502 }))
+    const logged = catchConsole()
+
+    const response = await say(telegramId, text)
+
+    // Sent again, the command does no harm, and for a token it is the only way to one that its user has seen.
+    expect(response.status).toBe(200)
+    expect(asked().map(([method, body]) => [method, body.text])).toEqual([
+      ['sendMessage', expect.any(String)],
+      ['sendMessage', FAILED],
+    ])
+    const failure = { error: 'Error', reason: 'http_error', status: 502 }
+    expect(logged.events()).toEqual([
+      refusedCall('sendMessage', 502),
+      { ...failedUpdate({ kind: 'command', command }, true, true), ...failure },
+    ])
+    // Nothing of the token that was made and lost is in the log.
+    expect(logged.text()).not.toContain('stmcp_')
+  })
+
+  it('tells nothing to a chat that Telegram will send nothing to', async () => {
+    const telegramId = newTelegramId()
+    const refusal = { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }
+    telegramApi.mockImplementation(async () => Response.json(refusal, { status: 403 }))
+    const logged = catchConsole()
+
+    const response = await say(telegramId, '/cards')
+
+    expect(response.status).toBe(200)
+    // The reply is all that is tried.
+    expect(asked().map(([method]) => method)).toEqual(['sendMessage'])
+    expect(logged.events()).toEqual([
+      { event: 'telegram_failed', method: 'sendMessage', status: 403, ...BLOCKED },
+      { ...failedUpdate({ kind: 'command', command: 'cards' }, true, false), ...BLOCKED },
+    ])
+  })
+
+  it('answers 200 all the same when the chat cannot be told that something went wrong, which is logged', async () => {
+    const telegramId = newTelegramId()
+    failAtCards()
+    telegramApi.mockImplementation(async () => new Response('Bad Gateway', { status: 502 }))
+    const logged = catchConsole()
+
+    const response = await say(telegramId, '/spend')
+
+    expect(response.status).toBe(200)
+    expect(asked()).toEqual([
+      ['sendMessage', { chat_id: telegramId, text: FAILED, link_preview_options: { is_disabled: true } }],
+    ])
+    // What the update failed with is the database's error, and the telling that failed has its own line before it.
+    // That line does not make the command one that had been handled: `handled` says that it was not.
+    expect(logged.events()).toEqual([
+      refusedCall('sendMessage', 502),
+      { ...failedUpdate({ kind: 'command', command: 'spend' }, false, false), error: 'Error' },
+    ])
   })
 })
 
@@ -279,14 +554,84 @@ describe('POST /telegram with buttons', () => {
   })
 
   it('still answers 200 when Telegram will not take the answer to a press, and logs nothing of the press', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { telegramId, message, id } = await onlinePurchase()
     telegramApi.mockImplementation(async () => Response.json({ ok: false, error_code: 400 }, { status: 400 }))
+    const logged = catchConsole()
 
     const response = await press(telegramId, message, `${id}:other`)
 
     expect(response.status).toBe(200)
-    expect(logged.mock.calls).toEqual([['telegram update failed:', 'Error']])
+    // The press was not answered, so it is answered once more: with that something went wrong. The message is left.
+    expect(asked()).toEqual([
+      ['answerCallbackQuery', { callback_query_id: 'press-1', text: `ID ${id}: Other Spend` }],
+      ['answerCallbackQuery', { callback_query_id: 'press-1', text: PRESS_FAILED }],
+    ])
+    // The purchase was moved before the answer failed: the press had been handled, and nobody was told.
+    const failure = { error: 'Error', reason: 'http_error', status: 400 }
+    expect(logged.events()).toEqual([
+      refusedCall('answerCallbackQuery', 400),
+      refusedCall('answerCallbackQuery', 400),
+      { ...failedUpdate({ kind: 'press' }, true, false), ...failure },
+    ])
+    for (const text of ['press-1', ':other', 'Lunch', String(telegramId)]) expect(logged.text()).not.toContain(text)
+  })
+
+  it('answers a press with that something went wrong, when what it was to do fails before it is answered', async () => {
+    const { telegramId, message, id } = await onlinePurchase()
+    const prepare = env.DB.prepare.bind(env.DB)
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes('UPDATE transactions')) throw new Error(`a made-up failure that quotes: ${MERCHANT}`)
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    const response = await press(telegramId, message, `${id}:other`)
+
+    // The button stops waiting, and its message is left as it was. The purchase was not moved, which is what the
+    // log has of the press: it had not been handled.
+    expect(response.status).toBe(200)
+    expect(asked()).toEqual([['answerCallbackQuery', { callback_query_id: 'press-1', text: PRESS_FAILED }]])
+    expect(logged.events()).toEqual([{ ...failedUpdate({ kind: 'press' }, false, true), error: 'Error' }])
+    expect(logged.text()).not.toContain('Lunch')
+  })
+
+  it('does not answer a press a second time, when it is the edit of its message that fails', async () => {
+    const { telegramId, message, id } = await onlinePurchase()
+    telegramApi.mockImplementation(async (url) =>
+      url.endsWith('/editMessageText') ? Response.json({ ok: false, error_code: 400 }, { status: 400 }) : taken(url),
+    )
+    const logged = catchConsole()
+
+    const response = await press(telegramId, message, `${id}:other`)
+
+    // Telegram takes one answer to a press, and this one has had its own: where the purchase now is.
+    expect(response.status).toBe(200)
+    expect(asked().map(([method, body]) => [method, body.text])).toEqual([
+      ['answerCallbackQuery', `ID ${id}: Other Spend`],
+      ['editMessageText', expect.stringContaining(`\nID ${id}: Other Spend`)],
+    ])
+    const failure = { error: 'Error', reason: 'http_error', status: 400 }
+    expect(logged.events()).toEqual([
+      refusedCall('editMessageText', 400),
+      { ...failedUpdate({ kind: 'press' }, true, false), ...failure },
+    ])
+  })
+
+  it('logs a press that is carried through as an update that was replied to, with nothing of the press', async () => {
+    const { telegramId, message, id } = await onlinePurchase()
+    const logged = catchConsole()
+
+    await press(telegramId, message, `${id}:other`)
+    await press(telegramId, message, 'DROP TABLE transactions')
+
+    // A press that brings what no button holds is answered too, with that the button no longer works.
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'press', outcome: 'replied', ms: took },
+      { event: 'update', kind: 'press', outcome: 'replied', ms: took },
+    ])
+    for (const text of ['press-1', ':other', 'DROP', 'made-up', String(telegramId)]) {
+      expect(logged.text()).not.toContain(text)
+    }
   })
 })
 
@@ -350,13 +695,13 @@ describe('POST /telegram with /spend and a card', () => {
   })
 
   it('sends text instead when Telegram answers the rich message with an error, and logs only the status', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { telegramId, id } = await purchaseOnCard()
     // An answer can quote what it was sent.
     const refusal = { ok: false, error_code: 400, description: `Bad Request: can't parse ${MERCHANT}` }
     telegramApi.mockImplementation(async (url) =>
       url.endsWith('/sendRichMessage') ? Response.json(refusal, { status: 400 }) : Response.json({ ok: true }),
     )
+    const logged = catchConsole()
 
     const response = await say(telegramId, '/spend visa')
 
@@ -375,20 +720,30 @@ describe('POST /telegram with /spend and a card', () => {
     expect(rows[0]).toMatch(/^ID +Date +SGD  Merchant$/)
     expect(rows[1]).toMatch(new RegExp(`^${id}\\* +\\d+ \\w+  12\\.50  Lunch /start.*…$`))
     expect(rows[2]).toMatch(/^ +Total +12\.50$/)
-    expect(logged.mock.calls).toEqual([['rich message failed, sent as text:', 400]])
+    // The request that Telegram refused is logged by its method and by the status of the answer, and the update
+    // as one that was replied to all the same. Nothing of what the answer said is logged, or of the command.
+    expect(logged.events()).toEqual([
+      refusedCall('sendRichMessage', 400),
+      { event: 'update', kind: 'command', command: 'spend', outcome: 'replied', ms: took },
+    ])
+    for (const text of ['Lunch', 'attacker', 'parse', 'visa', '12.50']) expect(logged.text()).not.toContain(text)
   })
 
   it('sends nothing more to a chat that Telegram will send nothing to, as with any other message', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { telegramId } = await purchaseOnCard()
     const refusal = { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }
     telegramApi.mockImplementation(async () => Response.json(refusal, { status: 403 }))
+    const logged = catchConsole()
 
     const response = await say(telegramId, '/spend visa')
 
+    // Not the same as text, and not that something went wrong either: Telegram would take neither.
     expect(response.status).toBe(200)
     expect(asked().map(([method]) => method)).toEqual(['sendRichMessage'])
-    expect(logged.mock.calls).toEqual([['telegram update failed:', 'ChatBlockedError']])
+    expect(logged.events()).toEqual([
+      { event: 'telegram_failed', method: 'sendRichMessage', status: 403, ...BLOCKED },
+      { ...failedUpdate({ kind: 'command', command: 'spend' }, true, false), ...BLOCKED },
+    ])
   })
 })
 
@@ -425,7 +780,33 @@ describe('POST /telegram with a question', () => {
     return ['sendRichMessage', { chat_id: telegramId, rich_message: { skip_entity_detection: true, blocks } }]
   }
 
-  it('answers 200 at once, and has the model asked and the answer sent in what it leaves for after that', async () => {
+  /** The placeholder that a question is answered with at once: a message of plain text. */
+  function placeholder(telegramId: number) {
+    const text =
+      'Working on it… If this message is still here in half a minute, something went wrong. Please ask again.'
+    return ['sendMessage', { chat_id: telegramId, text, link_preview_options: { is_disabled: true } }]
+  }
+
+  /** The showing of the chat that the bot is writing. */
+  function typing(telegramId: number) {
+    return ['sendChatAction', { chat_id: telegramId, action: 'typing' }]
+  }
+
+  /** What is said in the place of a placeholder: the message with its id is edited to say it. It has no buttons. */
+  function inPlaceOf(telegramId: number, messageId: number, text: string) {
+    return [
+      'editMessageText',
+      {
+        chat_id: telegramId,
+        message_id: messageId,
+        text,
+        link_preview_options: { is_disabled: true },
+        reply_markup: { inline_keyboard: [] },
+      },
+    ]
+  }
+
+  it('answers 200 at once, and has the placeholder and the answer sent in what it leaves for after that', async () => {
     const telegramId = newTelegramId()
     // The model's answer comes when the test lets it.
     let answer = (_: Response) => {}
@@ -440,13 +821,20 @@ describe('POST /telegram with a question', () => {
     expect(await response.text()).toBe('ok\n')
     expect(waitUntil).toHaveBeenCalledTimes(1)
     await vi.waitFor(() => expect(provider).toHaveBeenCalledTimes(1))
-    const typing = ['sendChatAction', { chat_id: telegramId, action: 'typing' }]
-    expect(asked()).toEqual([typing])
+    // Until the model answers, the chat has the placeholder, and is shown that the bot is writing.
+    expect(asked()).toEqual([placeholder(telegramId), typing(telegramId)])
 
     answer(Response.json(saying('You have spent nothing yet.')))
     await waitOnExecutionContext(ctx)
 
-    expect(asked()).toEqual([typing, richAnswer(telegramId, 'You have spent nothing yet.')])
+    // The answer is a message of its own. The placeholder, which is the first message that Telegram sent here, is
+    // deleted once the answer is there.
+    expect(asked()).toEqual([
+      placeholder(telegramId),
+      typing(telegramId),
+      richAnswer(telegramId, 'You have spent nothing yet.'),
+      ['deleteMessage', { chat_id: telegramId, message_id: 1 }],
+    ])
     // The provider was asked once, with the key of the service, and with a time in which it has to answer.
     const [[url, init], ...more] = provider.mock.calls
     expect(more).toEqual([])
@@ -471,6 +859,7 @@ describe('POST /telegram with a question', () => {
     provider
       .mockImplementationOnce(async () => Response.json(calling(['call_1', 'list_transactions', { card: 'visa' }])))
       .mockImplementationOnce(async () => Response.json(saying(`You spent SGD 12.50 at ${MERCHANT}`)))
+    const logged = catchConsole()
 
     const response = await tell(telegramId, 'What did I buy?')
 
@@ -486,30 +875,61 @@ describe('POST /telegram with a question', () => {
       { cardLast4: '1234', amount: '12.50', currency: 'SGD', merchant: MERCHANT },
     ])
     // The name comes back as a string, which is plain text, in a message in which Telegram is to detect nothing.
+    // The placeholder is the third message that Telegram sent here, after the replies to the two commands.
     expect(asked()).toEqual([
-      ['sendChatAction', { chat_id: telegramId, action: 'typing' }],
+      placeholder(telegramId),
+      typing(telegramId),
       richAnswer(telegramId, `You spent SGD 12.50 at ${MERCHANT}`),
+      ['deleteMessage', { chat_id: telegramId, message_id: 3 }],
     ])
+    // The log has the update as one that was left to be answered, each request to the model and each call of a tool,
+    // and then the question: who asked, what came of it, how it was sent, and what it took.
+    const user = (await findUser(env.DB, telegramId))?.id
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'question', outcome: 'deferred', ms: took },
+      expect.objectContaining({ event: 'ai_call', status: 200, finish: 'tool_calls', tool_calls: 1 }),
+      { event: 'assistant_tool', user, tool: 'list_transactions', outcome: 'ok', ms: took },
+      expect.objectContaining({ event: 'ai_call', status: 200, finish: 'stop', tool_calls: 0 }),
+      {
+        event: 'question',
+        user,
+        outcome: 'answered',
+        sent: 'rich',
+        placeholder: true,
+        requests: 2,
+        tool_calls: 1,
+        ms: took,
+      },
+    ])
+    // As it is written, the line of the question is this.
+    expect(logged.text().split('\n').at(-1)).toMatch(
+      /^\{"event":"question","user":\d+,"outcome":"answered","sent":"rich","placeholder":true,"requests":2,"tool_calls":1,"ms":\d+\}$/,
+    )
+    expect(logged.failures()).toEqual([])
+    for (const text of ['What did I buy', 'Lunch', 'attacker', 'visa', '12.50', 'call_1', String(telegramId)]) {
+      expect(logged.text()).not.toContain(text)
+    }
   })
 
   it('sends the answer as text, all of it marked as code, when Telegram answers the rich message with an error', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const telegramId = newTelegramId()
     const answer = `You spent SGD 12.50 at ${MERCHANT}\n\nNothing else.`
     provider.mockImplementation(async () => Response.json(saying(answer)))
     // An answer can quote what it was sent.
     const refusal = { ok: false, error_code: 400, description: `Bad Request: can't parse ${MERCHANT}` }
     telegramApi.mockImplementation(async (url) =>
-      url.endsWith('/sendRichMessage') ? Response.json(refusal, { status: 400 }) : Response.json({ ok: true }),
+      url.endsWith('/sendRichMessage') ? Response.json(refusal, { status: 400 }) : taken(url),
     )
 
     const response = await tell(telegramId, 'What did I buy?')
 
     expect(response.status).toBe(200)
     const text = `You spent SGD 12.50 at ${MERCHANT}\nNothing else.`
-    // Three requests, which is the most that a question comes to at Telegram.
+    // Five requests: the placeholder goes once the answer is there as text, as it does after a rich message.
     expect(asked()).toEqual([
-      ['sendChatAction', { chat_id: telegramId, action: 'typing' }],
+      placeholder(telegramId),
+      typing(telegramId),
       richAnswer(telegramId, `You spent SGD 12.50 at ${MERCHANT}`, 'Nothing else.'),
       [
         'sendMessage',
@@ -521,29 +941,47 @@ describe('POST /telegram with a question', () => {
           link_preview_options: { is_disabled: true },
         },
       ],
+      ['deleteMessage', { chat_id: telegramId, message_id: 1 }],
     ])
-    expect(logged.mock.calls).toEqual([['rich message failed, sent as text:', 400]])
+    // The request that Telegram refused is logged with its status, and the question as one that was answered in text.
+    expect(logged.events('telegram_failed')).toEqual([refusedCall('sendRichMessage', 400)])
+    expect(logged.events('question')).toMatchObject([{ outcome: 'answered', sent: 'text', placeholder: true }])
+    for (const text of ['Lunch', 'attacker', 'parse', 'Nothing else']) expect(logged.text()).not.toContain(text)
   })
 
-  it('sends nothing more to a chat that Telegram will send nothing to, and logs only the names of the errors', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('sends nothing more to a chat that Telegram will send nothing to, and asks the model nothing for it', async () => {
+    const logged = catchConsole()
     const telegramId = newTelegramId()
-    provider.mockImplementation(async () => Response.json(saying(`You spent SGD 12.50 at ${MERCHANT}`)))
     const refusal = { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }
     telegramApi.mockImplementation(async () => Response.json(refusal, { status: 403 }))
 
     const response = await tell(telegramId, 'What did I buy?')
 
+    // The placeholder is all that is tried. What is left for after the response does not fail for that: it logs
+    // the request that Telegram refused, and the question as one of a chat that is to be sent nothing.
     expect(response.status).toBe(200)
-    expect(asked().map(([method]) => method)).toEqual(['sendChatAction', 'sendRichMessage'])
-    expect(logged.mock.calls).toEqual([
-      ['typing action failed:', 'ChatBlockedError'],
-      ['telegram update failed:', 'ChatBlockedError'],
+    expect(asked()).toEqual([placeholder(telegramId)])
+    expect(provider).not.toHaveBeenCalled()
+    expect(await userCount(telegramId)).toBe(0)
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'question', outcome: 'deferred', ms: took },
+      { event: 'telegram_failed', method: 'sendMessage', status: 403, ...BLOCKED },
+      {
+        event: 'question',
+        user: null,
+        outcome: 'blocked',
+        sent: 'none',
+        placeholder: false,
+        requests: 0,
+        tool_calls: 0,
+        ms: took,
+        ...BLOCKED,
+      },
     ])
   })
 
   it('says that the assistant has reached its limit when the provider answers 429, and logs only that status', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const telegramId = newTelegramId()
     provider.mockImplementation(async () => refusing(429, 'Rate limit reached for: What did I buy?')())
 
@@ -551,22 +989,21 @@ describe('POST /telegram with a question', () => {
 
     expect(response.status).toBe(200)
     expect(provider).toHaveBeenCalledTimes(1)
+    // It is said in the place of the placeholder, which is the first message that Telegram sent here.
     expect(asked()).toEqual([
-      ['sendChatAction', { chat_id: telegramId, action: 'typing' }],
-      [
-        'sendMessage',
-        {
-          chat_id: telegramId,
-          text: 'The assistant has reached its limit for now. Try again later.',
-          link_preview_options: { is_disabled: true },
-        },
-      ],
+      placeholder(telegramId),
+      typing(telegramId),
+      inPlaceOf(telegramId, 1, 'The assistant has reached its limit for now. Try again later.'),
     ])
-    expect(logged.mock.calls).toEqual([['assistant failed:', 429]])
+    const refused = { error: 'Error', reason: 'http_error', status: 429 }
+    expect(logged.events('question')).toMatchObject([{ outcome: 'busy', sent: 'edit', requests: 1, ...refused }])
+    // Both the request and the question are failures, and neither line has what the provider said of the request.
+    expect(logged.failures().map((event) => event.event)).toEqual(['ai_call', 'question'])
+    for (const text of ['What did I buy', 'Rate limit']) expect(logged.text()).not.toContain(text)
   })
 
   it('says when to try again when the 429 says how long to wait, and still logs only that status', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const telegramId = newTelegramId()
     // The header is in seconds: these are twelve minutes.
     const refusal = refusing(429, 'Rate limit reached for: What did I buy?', { 'retry-after': '720' })
@@ -577,17 +1014,51 @@ describe('POST /telegram with a question', () => {
     expect(response.status).toBe(200)
     expect(provider).toHaveBeenCalledTimes(1)
     expect(asked()).toEqual([
-      ['sendChatAction', { chat_id: telegramId, action: 'typing' }],
-      [
-        'sendMessage',
-        {
-          chat_id: telegramId,
-          text: 'The assistant has reached its limit for now. Try again in about 12 minutes.',
-          link_preview_options: { is_disabled: true },
-        },
-      ],
+      placeholder(telegramId),
+      typing(telegramId),
+      inPlaceOf(telegramId, 1, 'The assistant has reached its limit for now. Try again in about 12 minutes.'),
     ])
-    expect(logged.mock.calls).toEqual([['assistant failed:', 429]])
+    // How long the provider said to wait is in the line of the request to it, and not in the line of the question.
+    expect(logged.events('ai_call')).toMatchObject([{ status: 429, retry_after: 720 }])
+    expect(logged.events('question')).toMatchObject([{ outcome: 'busy', error: 'Error', status: 429 }])
+    expect(logged.events('question')[0]).not.toHaveProperty('retry_after')
+  })
+
+  it('says that the question could not be answered when the answering fails, and logs only the name of the error', async () => {
+    const logged = catchConsole()
+    const telegramId = newTelegramId()
+    // The database fails as soon as the answering reads from it, with an error that quotes the question.
+    const prepare = env.DB.prepare.bind(env.DB)
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes('users')) throw new Error('a made-up failure that quotes: What did I buy?')
+      return prepare(query)
+    })
+
+    const response = await tell(telegramId, 'What did I buy?')
+
+    expect(response.status).toBe(200)
+    expect(provider).not.toHaveBeenCalled()
+    expect(asked()).toEqual([
+      placeholder(telegramId),
+      typing(telegramId),
+      inPlaceOf(telegramId, 1, 'That question could not be answered. Try again later, or ask it another way.'),
+    ])
+    // The question is logged as one that failed before its user's row was read, so it names none.
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'question', outcome: 'deferred', ms: took },
+      {
+        event: 'question',
+        user: null,
+        outcome: 'failed',
+        sent: 'edit',
+        placeholder: true,
+        requests: 0,
+        tool_calls: 0,
+        ms: took,
+        error: 'Error',
+      },
+    ])
+    expect(logged.text()).not.toContain('What did I buy')
   })
 
   it('leaves nothing for after its answer of a command, which is answered before it', async () => {
@@ -639,6 +1110,84 @@ describe('POST /telegram with a question', () => {
       expect(await userCount(telegramId)).toBe(0)
     },
   )
+})
+
+describe('POST /telegram with a message that the bot does not read', () => {
+  const NOT_TEXT =
+    'The bot only reads text messages. It cannot read an attachment, such as a photo, a file or a voice message, or ' +
+    'the caption under one. Please send your question or command as text.'
+  const EDITED = 'The bot does not read a message again after it has been edited. Please send it as a new message.'
+
+  /** A photo as Telegram posts one: the picture in each of the sizes that it is kept in. */
+  const photo = [{ file_id: 'made-up-file-id', file_unique_id: 'made-up-id', width: 90, height: 51, file_size: 1234 }]
+  const sticker = {
+    file_id: 'made-up-file-id',
+    file_unique_id: 'made-up-id',
+    type: 'regular',
+    width: 512,
+    height: 512,
+    is_animated: false,
+    is_video: false,
+    emoji: '👍',
+  }
+
+  /**
+   * What Telegram posts of each: a photo with a question under it, which is the caption of a message that has no
+   * text, a sticker, and a message of text as it stands after it was edited, which is no `message` of the update.
+   * With each is what the bot replies to it, and what the log has it as.
+   */
+  const kinds: [what: string, kind: 'message' | 'edited_message', content: object, reply: string, as: string][] = [
+    ['a photo with words under it', 'message', { photo, caption: 'How much have I spent?' }, NOT_TEXT, 'not_text'],
+    ['a sticker', 'message', { sticker }, NOT_TEXT, 'not_text'],
+    ['an edited message', 'edited_message', { edit_date: 2, text: 'How much have I spent?' }, EDITED, 'edited'],
+  ]
+
+  /** Posts the Worker an update with a message of a user's, in their private chat with the bot or in another chat. */
+  function post(telegramId: number, kind: string, content: object, chat: object = { id: telegramId, type: 'private' }) {
+    const from = { id: telegramId, is_bot: false, first_name: 'Jane' }
+    const message = { message_id: ++lastMessage, date: 1, chat, from, ...content }
+    return request('POST', '/telegram', { secret: SECRET, body: JSON.stringify({ update_id: 3, [kind]: message }) })
+  }
+
+  it.each(kinds)(
+    'answers %s with what the bot does not read of it, and asks the model nothing',
+    async (_, kind, content, reply, as) => {
+      const telegramId = newTelegramId()
+      const logged = catchConsole()
+
+      const response = await post(telegramId, kind, content)
+
+      expect(response.status).toBe(200)
+      expect(asked()).toEqual([
+        ['sendMessage', { chat_id: telegramId, text: reply, link_preview_options: { is_disabled: true } }],
+      ])
+      // Its words are no question, and no command: nobody is asked, and nothing is stored.
+      expect(provider).not.toHaveBeenCalled()
+      expect(await userCount(telegramId)).toBe(0)
+      // The log has that it came, what it was and that it was replied to, and nothing of the words.
+      expect(logged.events()).toEqual([{ event: 'update', kind: as, outcome: 'replied', ms: took }])
+      expect(logged.text()).not.toContain('How much')
+    },
+  )
+
+  describe.each(['group', 'supergroup'])('in a %s', (type) => {
+    it.each(kinds)('ignores %s, as it does a message of text there', async (_, kind, content) => {
+      const telegramId = newTelegramId()
+      const logged = catchConsole()
+
+      const response = await post(telegramId, kind, content, { id: -5001, type, title: 'A made-up chat' })
+
+      expect(response.status).toBe(200)
+      expect(telegramApi).not.toHaveBeenCalled()
+      expect(provider).not.toHaveBeenCalled()
+      expect(await userCount(telegramId)).toBe(0)
+      // The chat is looked at before anything else, so the log has only whether it was a message or an edit of one.
+      const as = kind === 'message' ? 'message' : 'edited'
+      expect(logged.events()).toEqual([
+        { event: 'update', kind: as, outcome: 'ignored', why: 'not_private', ms: took },
+      ])
+    })
+  })
 })
 
 describe('other requests', () => {

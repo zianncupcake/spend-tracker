@@ -2,6 +2,8 @@
 // key that only the Worker holds. The stored form is base64 of a random 12-byte
 // IV followed by the ciphertext, which ends with the tag that GCM checks.
 
+import { Failure } from '../log'
+
 const IV_BYTES = 12
 
 export async function encryptToken(keyBase64: string, plaintext: string): Promise<string> {
@@ -23,6 +25,6 @@ export async function decryptToken(keyBase64: string, encoded: string): Promise<
 async function importKey(keyBase64: string): Promise<CryptoKey> {
   const raw = Uint8Array.fromBase64(keyBase64)
   // A 16-byte key would be accepted too, and would quietly mean AES-128.
-  if (raw.byteLength !== 32) throw new Error('TOKEN_ENCRYPTION_KEY must be base64 of 32 bytes')
+  if (raw.byteLength !== 32) throw new Failure('bad_key', 'TOKEN_ENCRYPTION_KEY must be base64 of 32 bytes')
   return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'])
 }

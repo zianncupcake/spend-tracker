@@ -1,7 +1,8 @@
 // Reading a connected mailbox through the Gmail API:
 // https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages
 
-import type { GoogleClient } from './oauth'
+import { Failure } from '../log'
+import { GoogleError, type GoogleClient } from './oauth'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const MESSAGES_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages'
@@ -19,13 +20,21 @@ const MAX_BODY_BASE64 = 200_000
 const MAX_PART_DEPTH = 10
 
 /** Google no longer honours a refresh token: the user's grant is gone, and only signing in again brings it back. */
-export class GrantLostError extends Error {
+export class GrantLostError extends Failure {
   name = 'GrantLostError'
+
+  constructor() {
+    super('grant_lost')
+  }
 }
 
 /** Gmail does not take a page token: the listing it belongs to has to be asked for again, from its first page. */
-export class PageTokenError extends Error {
+export class PageTokenError extends Failure {
   name = 'PageTokenError'
+
+  constructor() {
+    super('page_token')
+  }
 }
 
 export interface MessagePage {
@@ -97,10 +106,12 @@ export async function refreshAccessToken(client: GoogleClient, refreshToken: str
   if (!response.ok) {
     const refusal = await response.json<{ error?: string }>().catch(() => null)
     if (response.status === 400 && refusal?.error === 'invalid_grant') throw new GrantLostError()
-    throw new Error(`Google token refresh failed with status ${response.status}`)
+    throw new GoogleError('Google token refresh', response.status)
   }
   const { access_token } = await response.json<{ access_token?: string }>()
-  if (typeof access_token !== 'string') throw new Error('Google token refresh returned no access token')
+  if (typeof access_token !== 'string') {
+    throw new Failure('no_access_token', 'Google token refresh returned no access token')
+  }
   return access_token
 }
 
@@ -112,7 +123,7 @@ export async function listMessageIds(accessToken: string, query: string, pageTok
   // 400 is what Gmail answers to a page token that it does not take. It is also what a search that Gmail cannot
   // make sense of gets, so this is only to be gone by once the first page of the same search has been listed.
   if (response.status === 400 && pageToken) throw new PageTokenError()
-  if (!response.ok) throw new Error(`Gmail list request failed with status ${response.status}`)
+  if (!response.ok) throw new GoogleError('Gmail list request', response.status)
   const { messages, nextPageToken } = await response.json<ListResponse>()
   return {
     ids: (messages ?? []).map(({ id }) => id).filter((id) => typeof id === 'string'),
@@ -132,7 +143,7 @@ export async function getMessageHeaders(accessToken: string, id: string): Promis
 export async function getMessage(accessToken: string, id: string): Promise<GmailMessage> {
   const { internalDate, payload } = await fetchMessage(accessToken, id, new URLSearchParams({ format: 'full' }))
   const receivedAt = Math.floor(Number(internalDate) / 1000)
-  if (!Number.isFinite(receivedAt)) throw new Error('Gmail message held no date')
+  if (!Number.isFinite(receivedAt)) throw new Failure('no_date', 'Gmail message held no date')
   return { ...readHeaders(payload), receivedAt, text: () => readableText(payload) }
 }
 
@@ -140,7 +151,7 @@ async function fetchMessage(accessToken: string, id: string, params: URLSearchPa
   const response = await fetch(`${MESSAGES_URL}/${encodeURIComponent(id)}?${params}`, {
     headers: { authorization: `Bearer ${accessToken}` },
   })
-  if (!response.ok) throw new Error(`Gmail message request failed with status ${response.status}`)
+  if (!response.ok) throw new GoogleError('Gmail message request', response.status)
   return response.json<MessageResponse>()
 }
 

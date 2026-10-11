@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import { decryptToken, encryptToken } from '../src/google/crypto'
+import { Failure } from '../src/log'
 
 const KEY = env.TOKEN_ENCRYPTION_KEY
 const OTHER_KEY = new Uint8Array(32).fill(7).toBase64()
@@ -73,6 +74,8 @@ it.each([
 ])('refuses %s, to encrypt or to decrypt', async (_, key) => {
   const encrypted = await encryptToken(KEY, TOKEN)
 
-  await expect(encryptToken(key, TOKEN)).rejects.toThrow('TOKEN_ENCRYPTION_KEY must be base64 of 32 bytes')
-  await expect(decryptToken(key, encrypted)).rejects.toThrow('TOKEN_ENCRYPTION_KEY must be base64 of 32 bytes')
+  // The error says which setting is wrong, and gives the log its reason. Neither holds anything of the key.
+  const badKey = new Failure('bad_key', 'TOKEN_ENCRYPTION_KEY must be base64 of 32 bytes')
+  await expect(encryptToken(key, TOKEN)).rejects.toEqual(badKey)
+  await expect(decryptToken(key, encrypted)).rejects.toEqual(badKey)
 })

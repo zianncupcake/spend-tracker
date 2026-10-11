@@ -1,6 +1,7 @@
 // SQL is run only here and in store-connect.ts, store-mail.ts and store-mcp.ts.
 
 import type { WindowRule } from './domain/window'
+import { Failure } from './log'
 import type { ParsedTransaction } from './parsers/types'
 
 export interface User {
@@ -62,7 +63,7 @@ export async function findOrCreateUser(db: D1Database, telegramId: number): Prom
 
   // The insert returns no row when another request created the user first, so look again.
   const user = (await find()) ?? (await create()) ?? (await find())
-  if (!user) throw new Error('user row missing after insert')
+  if (!user) throw new Failure('no_user_row', 'user row missing after insert')
   return user
 }
 

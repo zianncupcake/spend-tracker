@@ -12,12 +12,14 @@ import {
   NOW,
   open,
   openChat,
+  otherThan,
   outside,
   sha256,
   signIn,
   tokenIn,
 } from './connect-helpers'
 import { newTelegramId } from './helpers'
+import { catchConsole } from './log-helpers'
 
 describe('/connect', () => {
   it("replies with a heads-up and then a link, and keeps only a hash of the link's state", async () => {
@@ -101,6 +103,81 @@ describe('/connect', () => {
     expect(await tokenIn(connection)).toBe(outside.issued[1])
     // Revoking the old token would end the grant that the new one belongs to.
     expect(outside.revoked).toEqual([])
+  })
+})
+
+describe('what the log has of a sign-in', () => {
+  /** The line of a message that the bot replied to: a command, by its name, or the six digits of a code. */
+  const came = (what: object) => ({ event: 'update', ...what, outcome: 'replied', ms: 0 })
+  const CONNECT = came({ kind: 'command', command: 'connect' })
+
+  it('is that a link was given, and to which user: nothing of the link', async () => {
+    const chat = openChat()
+    const userId = await chat.userId()
+    const logged = catchConsole()
+
+    const link = linkIn(await chat.say('/connect'))
+
+    // And after it, that the command which asked for the link was replied to.
+    expect(logged.events()).toEqual([{ event: 'connect_link', user: userId }, CONNECT])
+    expect(logged.text()).not.toContain(link.searchParams.get('state'))
+  })
+
+  it('is that a token was revoked, when a new link takes the place of a sign-in that held a mailbox', async () => {
+    const chat = openChat()
+    await signIn(chat, 'jane@example.test')
+    const logged = catchConsole()
+
+    await chat.say('/connect')
+
+    expect(logged.events()).toEqual([
+      { event: 'token_revoke', outcome: 'revoked' },
+      { event: 'connect_link', user: await chat.userId() },
+      CONNECT,
+    ])
+  })
+
+  it('is nothing for a link that is only opened, however often', async () => {
+    const link = linkIn(await openChat().say('/connect'))
+    const logged = catchConsole()
+
+    await open(link)
+    await open(new URL('https://spend-tracker.test/oauth/start?state=made-up-state'))
+
+    expect(logged.events()).toEqual([])
+  })
+
+  it('is every step from the link to the disconnection, and nothing that lets anyone in or names a mailbox', async () => {
+    const logged = catchConsole()
+    const chat = openChat()
+    const userId = await chat.userId()
+    const link = linkIn(await chat.say('/connect'))
+    const state = link.searchParams.get('state') ?? ''
+    const verifier = (await attemptOf(userId))?.code_verifier ?? ''
+
+    await open(link)
+    const code = await codeOn(await approve(link, 'jane@example.test'))
+    await chat.say(otherThan(code))
+    await chat.say(code)
+    await chat.say('/disconnect')
+
+    // Each message that was sent to the bot on the way has its line too, after the lines of what it did.
+    expect(logged.events()).toEqual([
+      { event: 'connect_link', user: userId },
+      CONNECT,
+      { event: 'connect_callback', outcome: 'code_shown', user: userId },
+      { event: 'connect_code', user: userId, outcome: 'wrong', tries_left: 4 },
+      came({ kind: 'code' }),
+      { event: 'connect_code', user: userId, outcome: 'connected' },
+      came({ kind: 'code' }),
+      { event: 'token_revoke', outcome: 'revoked' },
+      { event: 'disconnect', user: userId, outcome: 'disconnected' },
+      came({ kind: 'command', command: 'disconnect' }),
+    ])
+    const never = [state, verifier, code, 'code-for-', 'jane', 'example.test', 'refresh-token', 'access-token']
+    for (const text of [...never, outside.issued[0], String(chat.telegramId), env.GOOGLE_CLIENT_SECRET]) {
+      expect(logged.text()).not.toContain(text)
+    }
   })
 })
 

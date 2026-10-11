@@ -3,7 +3,21 @@
 // https://core.telegram.org/bots/api#sendrichmessage
 // https://core.telegram.org/bots/api#answercallbackquery
 // https://core.telegram.org/bots/api#editmessagetext
+// https://core.telegram.org/bots/api#deletemessage
 // https://core.telegram.org/bots/api#sendchataction
+
+import { Failure, logFailure, type Events } from '../log'
+
+/** The methods of Telegram's API that the bot calls. A method is what the log knows a request that failed by. */
+type Method = Events['telegram_failed']['method']
+
+/**
+ * How long Telegram is given to answer one request, in milliseconds. A request that it never answers would
+ * otherwise be waited for until Cloudflare ends the Worker, and nothing that was to come after it would be done, or
+ * logged: the answering of a question waits for its placeholder to be sent, and the telling that an answer could not
+ * be sent waits for the answer.
+ */
+const REQUEST_TIMEOUT = 5_000
 
 /**
  * A stretch of a message's text that is shown in a way of its own: Telegram's MessageEntity, of the two types that
@@ -75,25 +89,34 @@ export interface RichMessage {
 }
 
 /** Telegram will not have the chat sent anything: its user has blocked the bot, or their account is gone. */
-export class ChatBlockedError extends Error {
+export class ChatBlockedError extends Failure {
   name = 'ChatBlockedError'
+
+  constructor() {
+    super('chat_blocked')
+  }
 }
 
 /**
  * Telegram answered a request with any other error: `status` is the HTTP status of its answer. It has the name of a
  * plain Error, which is what the logs know a failed request by.
  */
-export class TelegramError extends Error {
+export class TelegramError extends Failure {
   constructor(
     method: string,
     readonly status: number,
   ) {
-    super(`Telegram ${method} failed with status ${status}`)
+    super('http_error', `Telegram ${method} failed with status ${status}`)
   }
 }
 
 export interface Messenger {
   send(chatId: number, text: string, entities?: MessageEntity[], buttons?: Button[][]): Promise<void>
+  /**
+   * Sends a message of plain text, as `send` does, and returns the id that Telegram gave it: what the message is
+   * edited or deleted by.
+   */
+  post(chatId: number, text: string): Promise<number>
   /**
    * Sends a rich message. Rich messages are new to Telegram, so it may answer one with an error where it would
    * take text: that is a TelegramError, and the caller can then send the same as text.
@@ -103,6 +126,8 @@ export interface Messenger {
   answer(pressId: string, text: string): Promise<void>
   /** Puts new text in the place of a message's, with new buttons under it or none. */
   edit(chatId: number, messageId: number, text: string, entities?: MessageEntity[], buttons?: Button[][]): Promise<void>
+  /** Takes a message of the bot's out of its chat. Telegram lets a bot do that for 48 hours after it sent one. */
+  delete(chatId: number, messageId: number): Promise<void>
   /**
    * Shows the chat that the bot is writing. Telegram shows it for five seconds at most, or until the bot's next
    * message comes.
@@ -111,15 +136,41 @@ export interface Messenger {
 }
 
 export function telegramMessenger(token: string): Messenger {
-  async function call(method: string, body: Record<string, unknown>): Promise<void> {
-    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    // The URL holds the bot token and the body holds the message, so neither goes into the error.
-    if (response.status === 403) throw new ChatBlockedError()
-    if (!response.ok) throw new TelegramError(method, response.status)
+  /**
+   * Posts Telegram a request, and returns what `read` makes of its answer to it, which is no error. A request that
+   * Telegram has not answered in REQUEST_TIMEOUT is given up on, and fails with what fetch throws then, which is a
+   * TimeoutError. A request that fails is logged, whoever made it and whatever they then do about it: with its
+   * method, and with the status of the answer when there was one. A request that Telegram takes is not logged: one
+   * question makes up to twelve.
+   */
+  async function request<Read>(
+    method: Method,
+    body: Record<string, unknown>,
+    read: (answer: Response) => Read | Promise<Read>,
+  ): Promise<Read> {
+    let status: number | undefined
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+      })
+      status = response.status
+      // The URL holds the bot token and the body holds the message, so neither goes into the error.
+      if (response.status === 403) throw new ChatBlockedError()
+      if (!response.ok) throw new TelegramError(method, response.status)
+      return await read(response)
+    } catch (error) {
+      // Nothing of the error's message is logged: what fetch throws could quote the URL, which holds the bot token.
+      logFailure('telegram_failed', error, { method, status })
+      throw error
+    }
+  }
+
+  /** Posts Telegram a request whose answer holds nothing that the bot reads. */
+  function call(method: Method, body: Record<string, unknown>): Promise<void> {
+    return request(method, body, () => {})
   }
 
   // Plain text, with no parse mode. No message of the bot's has a use for the preview of a link.
@@ -137,6 +188,16 @@ export function telegramMessenger(token: string): Messenger {
       const markup = buttons && keyboard(buttons)
       return call('sendMessage', { chat_id: chatId, ...plain(text, entities), reply_markup: markup })
     },
+    post(chatId, text) {
+      return request('sendMessage', { chat_id: chatId, ...plain(text) }, async (answer) => {
+        // Telegram answers with the message as it sent it. Only its id is read.
+        const { result } = await answer.json<{ result?: { message_id?: unknown } }>()
+        if (typeof result?.message_id !== 'number') {
+          throw new Failure('no_message_id', 'Telegram sendMessage returned no message id')
+        }
+        return result.message_id
+      })
+    },
     sendRich(chatId, message) {
       return call('sendRichMessage', { chat_id: chatId, rich_message: message })
     },
@@ -151,6 +212,9 @@ export function telegramMessenger(token: string): Messenger {
         ...plain(text, entities),
         reply_markup: keyboard(buttons),
       })
+    },
+    delete(chatId, messageId) {
+      return call('deleteMessage', { chat_id: chatId, message_id: messageId })
     },
     typing(chatId) {
       return call('sendChatAction', { chat_id: chatId, action: 'typing' })

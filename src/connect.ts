@@ -11,6 +11,7 @@
 import type { Deps } from './deps'
 import { decryptToken, encryptToken } from './google/crypto'
 import { authorizationUrl, exchangeCode, fetchEmailAddress, GMAIL_READONLY, revokeToken } from './google/oauth'
+import { log, logFailure, type Events } from './log'
 import { codePage, problemPage } from './pages'
 import { telegramIdOf } from './store'
 import { claimAttempt, connectStoreFor, findAttemptByState, isMailboxHeld, type HeldMailbox } from './store-connect'
@@ -25,6 +26,21 @@ export type ConfirmResult =
   | { status: 'wrong'; triesLeft: number }
   | { status: 'none' }
 
+/** What the log has of a redirect back from Google. */
+type Callback = Events['connect_callback']
+
+/**
+ * The page that a browser is shown when its redirect back connects nothing, by what the log says came of the
+ * redirect. A link that was replaced while its owner was at Google is shown the page of one that has expired.
+ */
+const TURNED_AWAY = {
+  not_completed: 'not-completed',
+  expired: 'expired',
+  replaced: 'expired',
+  no_gmail_access: 'no-gmail-access',
+  no_lasting_access: 'no-lasting-access',
+} as const
+
 /** Starts a sign-in for the user, in place of any they had in progress, and returns the link that opens it. */
 export async function startConnect(deps: Deps, userId: number): Promise<string> {
   const store = connectStoreFor(deps.db, userId)
@@ -34,6 +50,7 @@ export async function startConnect(deps: Deps, userId: number): Promise<string> 
 
   const state = randomToken()
   await store.startAttempt(await sha256(state), randomToken(), seconds(deps.now()) + ATTEMPT_MINUTES * 60)
+  log('connect_link', { user: userId })
   return `${deps.baseUrl}/oauth/start?state=${state}`
 }
 
@@ -51,21 +68,28 @@ export async function oauthStart(deps: Deps, params: URLSearchParams): Promise<R
 /** GET /oauth/callback: where Google sends the browser back to, with a code if the user approved. */
 export async function oauthCallback(deps: Deps, params: URLSearchParams): Promise<Response> {
   const authCode = params.get('code')
-  if (!authCode || params.has('error')) return problemPage('not-completed')
+  if (!authCode || params.has('error')) return turnedAway('not_completed')
 
+  // What a failure is logged with: what was being done when it came, and whose sign-in it was, once that is known.
+  let stage: Callback['stage'] = 'claim'
+  let user: number | undefined
   try {
     const now = seconds(deps.now())
     const stateHash = await sha256(params.get('state') ?? '')
     // The attempt is claimed before Google is asked anything, so a state is taken to its token endpoint once at
     // most. Whatever comes of that, the link shows the expired page from here on.
     const attempt = await claimAttempt(deps.db, stateHash, now)
-    if (!attempt) return problemPage('expired')
+    if (!attempt) return turnedAway('expired')
+    user = attempt.ownerId
 
+    stage = 'exchange'
     const tokens = await exchangeCode(deps.google, authCode, attempt.codeVerifier)
-    if (!tokens.scopes.includes(GMAIL_READONLY)) return problemPage('no-gmail-access')
-    if (!tokens.refreshToken) return problemPage('no-lasting-access')
+    if (!tokens.scopes.includes(GMAIL_READONLY)) return turnedAway('no_gmail_access', user)
+    if (!tokens.refreshToken) return turnedAway('no_lasting_access', user)
 
+    stage = 'profile'
     const email = await fetchEmailAddress(tokens.accessToken)
+    stage = 'hold'
     const confirmation = randomCode()
     // The state finds no attempt once it is claimed, so the code is shown this once and never again.
     const held = await connectStoreFor(deps.db, attempt.ownerId).holdForCode(stateHash, {
@@ -74,8 +98,9 @@ export async function oauthCallback(deps: Deps, params: URLSearchParams): Promis
       confirmCodeHash: await sha256(confirmation),
       expiresAt: now + ATTEMPT_MINUTES * 60,
     })
-    if (!held) return problemPage('expired')
+    if (!held) return turnedAway('replaced', user)
 
+    stage = 'notify'
     const chatId = await telegramIdOf(deps.db, attempt.ownerId)
     if (chatId !== null) {
       // This is the chat that asked for the link, and whoever opened the link and signed in may be somebody else.
@@ -88,12 +113,19 @@ export async function oauthCallback(deps: Deps, params: URLSearchParams): Promis
           'connected without the code.',
       )
     }
+    log('connect_callback', { outcome: 'code_shown', user })
     return codePage(confirmation)
   } catch (error) {
-    // Only the error's name is logged: its message could quote what Google sent.
-    console.error('google sign-in failed:', error instanceof Error ? error.name : typeof error)
+    // Nothing of the error's message is logged: it could quote what Google sent.
+    logFailure('connect_callback', error, { outcome: 'failed', user, stage })
     return problemPage('failed')
   }
+}
+
+/** Answers a redirect back that connects nothing: logs what came of it, and shows the browser the page for that. */
+function turnedAway(outcome: keyof typeof TURNED_AWAY, user?: number): Response {
+  log('connect_callback', { outcome, user })
+  return problemPage(TURNED_AWAY[outcome])
 }
 
 /** Checks a confirmation code sent in the user's chat, and makes the connection if it is the right one. */
@@ -101,7 +133,10 @@ export async function confirmCode(deps: Deps, userId: number, code: string): Pro
   const store = connectStoreFor(deps.db, userId)
   // The try is counted before the code is looked at, so codes sent at the same moment share the limit too.
   const pending = await store.countTry(MAX_TRIES)
-  if (!pending) return { status: 'none' }
+  if (!pending) {
+    log('connect_code', { user: userId, outcome: 'no_attempt' })
+    return { status: 'none' }
+  }
 
   const now = seconds(deps.now())
   const expired = pending.expiresAt <= now
@@ -109,13 +144,17 @@ export async function confirmCode(deps: Deps, userId: number, code: string): Pro
     // A connection this replaces is one that needed reconnecting. Its token is not
     // revoked: for the same Google account, that would end the grant just made.
     await store.saveConnection(pending.email, pending.refreshTokenEnc, now)
+    log('connect_code', { user: userId, outcome: 'connected' })
     return { status: 'connected', email: pending.email }
   }
   if (!expired && pending.confirmTries < MAX_TRIES) {
-    return { status: 'wrong', triesLeft: MAX_TRIES - pending.confirmTries }
+    const triesLeft = MAX_TRIES - pending.confirmTries
+    log('connect_code', { user: userId, outcome: 'wrong', tries_left: triesLeft })
+    return { status: 'wrong', triesLeft }
   }
   // Out of time or out of tries, so the mailbox is let go.
   await revokeStored(deps, await store.removeAttempt())
+  log('connect_code', { user: userId, outcome: expired ? 'expired' : 'out_of_tries' })
   return { status: 'none' }
 }
 
@@ -128,6 +167,7 @@ export async function disconnect(deps: Deps, userId: number): Promise<string | n
   await revokeStored(deps, await store.removeAttempt())
   const connection = await store.removeConnection()
   await revokeStored(deps, connection)
+  log('disconnect', { user: userId, outcome: connection ? 'disconnected' : 'not_connected' })
   return connection?.email ?? null
 }
 
@@ -138,11 +178,13 @@ export async function disconnect(deps: Deps, userId: number): Promise<string | n
  * a connection that works. Best effort: the token is gone from here whatever Google answers.
  */
 export async function revokeStored(deps: Deps, discarded: HeldMailbox | null): Promise<void> {
-  if (!discarded || (await isMailboxHeld(deps.db, discarded.email))) return
+  if (!discarded) return
+  if (await isMailboxHeld(deps.db, discarded.email)) return log('token_revoke', { outcome: 'kept' })
   try {
     await revokeToken(await decryptToken(deps.tokenKey, discarded.refreshTokenEnc))
+    log('token_revoke', { outcome: 'revoked' })
   } catch (error) {
-    console.error('token revocation failed:', error instanceof Error ? error.name : typeof error)
+    logFailure('token_revoke', error, { outcome: 'failed' })
   }
 }
 

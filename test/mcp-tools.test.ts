@@ -1,8 +1,9 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
 import { serveMcp } from '../src/mcp/server'
-import { deps, openChat } from './connect-helpers'
+import { clock, deps, openChat } from './connect-helpers'
 import { buy } from './helpers'
+import { catchConsole } from './log-helpers'
 import { dataIn, mcpRequest, messageIn, record, toolCall, type Purchase } from './mcp-helpers'
 
 // The two tools, as an assistant is given their answers. The clock stands at
@@ -403,11 +404,11 @@ describe('a purchase that its user has taken out', () => {
 
 describe('a tool that fails', () => {
   it('says only that it could not answer, and has only the name of the error logged', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const userId = await shopper()
     vi.spyOn(env.DB, 'prepare').mockImplementation(() => {
       throw new Error('a made-up failure that quotes a merchant: COFFEE PLACE')
     })
+    const logged = catchConsole()
 
     const results = [await call(userId, 'get_spending_summary'), await call(userId, 'list_transactions')]
 
@@ -415,9 +416,83 @@ describe('a tool that fails', () => {
       refusal('The request could not be answered. Try again later.'),
       refusal('The request could not be answered. Try again later.'),
     ])
-    expect(logged.mock.calls).toEqual([
-      ['mcp tool failed:', 'Error'],
-      ['mcp tool failed:', 'Error'],
+    expect(logged.events()).toEqual([
+      { event: 'mcp_tool', user: userId, tool: 'get_spending_summary', outcome: 'failed', ms: 0, error: 'Error' },
+      { event: 'mcp_tool', user: userId, tool: 'list_transactions', outcome: 'failed', ms: 0, error: 'Error' },
     ])
+    expect(logged.text()).not.toContain('COFFEE PLACE')
+  })
+})
+
+describe('what the log has of a call of a tool', () => {
+  it('is whose call it was, of which tool, that it was answered, and how long that took', async () => {
+    const userId = await shopper()
+    // The clock moves on by 15 milliseconds whenever the database is asked something.
+    const prepare = env.DB.prepare.bind(env.DB)
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      clock.now = new Date(clock.now.getTime() + 15)
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    await call(userId, 'get_spending_summary')
+    await call(userId, 'list_transactions', { card: 'visa' })
+
+    // The summary asks for the cards, and for the total of each of the two. A listing asks for the cards, and for
+    // the purchases.
+    expect(logged.events()).toEqual([
+      { event: 'mcp_tool', user: userId, tool: 'get_spending_summary', outcome: 'ok', ms: 45 },
+      { event: 'mcp_tool', user: userId, tool: 'list_transactions', outcome: 'ok', ms: 30 },
+    ])
+  })
+
+  it('is that the call was invalid, when what it asked for was wrong, and nothing of what was wrong', async () => {
+    const userId = await shopper()
+    const logged = catchConsole()
+
+    const results = [
+      await call(userId, 'list_transactions', { card: 'travel' }),
+      await call(userId, 'list_transactions', { from: 'yesterday' }),
+    ]
+
+    // The assistant is told what was wrong, in words that name the user's cards. The log is told that it was.
+    expect(results).toEqual([
+      refusal("No card has that nickname. The user's cards are: visa, amex."),
+      refusal(`\`from\` ${BAD_DATE}`),
+    ])
+    expect(logged.events()).toEqual([
+      { event: 'mcp_tool', user: userId, tool: 'list_transactions', outcome: 'invalid', ms: 0 },
+      { event: 'mcp_tool', user: userId, tool: 'list_transactions', outcome: 'invalid', ms: 0 },
+    ])
+    for (const text of ['travel', 'visa', 'amex', 'yesterday', 'nickname']) expect(logged.text()).not.toContain(text)
+  })
+
+  it('is nothing of what a tool was asked for, or of what it answered with', async () => {
+    const logged = catchConsole()
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 statement 15')
+    await chat.say('/addcard amex 0005 calendar')
+    const userId = await chat.userId()
+    await record(userId, PURCHASES)
+
+    const summary = dataIn(await call(userId, 'get_spending_summary'))
+    const listed = dataIn(await call(userId, 'list_transactions', { card: 'visa', from: '2026-09-30', limit: 3 }))
+
+    // The answers hold the user's cards and purchases, and the log holds none of either.
+    expect(summary.cards).toMatchObject([
+      { nickname: 'visa', last4: '1234' },
+      { nickname: 'amex', last4: '0005' },
+    ])
+    expect(listed.transactions).toMatchObject([
+      { merchant: 'AN HOUR AGO', amount: '12.40' },
+      { merchant: 'EARLY ON 1 OCTOBER' },
+      { merchant: 'LATE ON 30 SEPTEMBER' },
+    ])
+    expect(logged.events('mcp_tool').map((event) => [event.event, event.user, event.outcome])).toEqual([
+      ['mcp_tool', userId, 'ok'],
+      ['mcp_tool', userId, 'ok'],
+    ])
+    const never = ['visa', 'amex', '1234', '0005', 'AN HOUR AGO', 'OCTOBER', 'SGD', '12.40', '2026-09-30', 'Singapore']
+    for (const text of [...never, String(chat.telegramId)]) expect(logged.text()).not.toContain(text)
   })
 })

@@ -1,6 +1,8 @@
 // Google sign-in as a web server, with PKCE:
 // https://developers.google.com/identity/protocols/oauth2/web-server
 
+import { Failure } from '../log'
+
 const AUTHORIZATION_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
@@ -28,6 +30,20 @@ interface TokenResponse {
   access_token?: string
   refresh_token?: string
   scope?: string
+}
+
+/**
+ * Google answered a request with an error: `status` is the HTTP status of its answer, and `what` is the request, as
+ * the error's message names it. Nothing of the request or of the answer goes into the error: the one holds a secret
+ * or a token, and the other can. It has the name of a plain Error, which is what the logs know a failed request by.
+ */
+export class GoogleError extends Failure {
+  constructor(
+    what: string,
+    readonly status: number,
+  ) {
+    super('http_error', `${what} failed with status ${status}`)
+  }
 }
 
 /** Where to send a browser for the user to sign in and approve. */
@@ -63,9 +79,11 @@ export async function exchangeCode(client: GoogleClient, code: string, codeVerif
     }),
   })
   // The request holds the client secret and the response can hold tokens, so neither goes into an error.
-  if (!response.ok) throw new Error(`Google token exchange failed with status ${response.status}`)
+  if (!response.ok) throw new GoogleError('Google token exchange', response.status)
   const { access_token, refresh_token, scope } = await response.json<TokenResponse>()
-  if (typeof access_token !== 'string') throw new Error('Google token exchange returned no access token')
+  if (typeof access_token !== 'string') {
+    throw new Failure('no_access_token', 'Google token exchange returned no access token')
+  }
   return {
     accessToken: access_token,
     refreshToken: typeof refresh_token === 'string' ? refresh_token : undefined,
@@ -76,9 +94,9 @@ export async function exchangeCode(client: GoogleClient, code: string, codeVerif
 /** The address of the mailbox that an access token is for. */
 export async function fetchEmailAddress(accessToken: string): Promise<string> {
   const response = await fetch(PROFILE_URL, { headers: { authorization: `Bearer ${accessToken}` } })
-  if (!response.ok) throw new Error(`Gmail profile request failed with status ${response.status}`)
+  if (!response.ok) throw new GoogleError('Gmail profile request', response.status)
   const { emailAddress } = await response.json<{ emailAddress?: string }>()
-  if (typeof emailAddress !== 'string') throw new Error('Gmail profile held no address')
+  if (typeof emailAddress !== 'string') throw new Failure('no_address', 'Gmail profile held no address')
   return emailAddress
 }
 
@@ -89,5 +107,5 @@ export async function fetchEmailAddress(accessToken: string): Promise<string> {
 export async function revokeToken(token: string): Promise<void> {
   // The token goes in the body. A URL can end up in logs.
   const response = await fetch(REVOKE_URL, { method: 'POST', body: new URLSearchParams({ token }) })
-  if (!response.ok) throw new Error(`Google token revocation failed with status ${response.status}`)
+  if (!response.ok) throw new GoogleError('Google token revocation', response.status)
 }

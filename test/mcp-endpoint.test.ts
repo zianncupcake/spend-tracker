@@ -1,6 +1,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
 import { openChat } from './connect-helpers'
+import { catchConsole } from './log-helpers'
 import { callTool, dataIn, mcpRequest, messageIn, post, record, tokenFrom, toolCall } from './mcp-helpers'
 
 // The MCP endpoint, through the Worker: who is let in, and that an assistant
@@ -62,6 +63,7 @@ describe('who is let in', () => {
     ["a token that is nobody's", { Authorization: `Bearer stmcp_${'A'.repeat(43)}` }, 1],
   ])('answers 401 to %s, and asks for a bearer token', async (_, headers, lookups) => {
     const queried = vi.spyOn(env.DB, 'prepare')
+    const logged = catchConsole()
 
     const response = await exports.default.fetch(mcpRequest(INITIALIZE, headers))
 
@@ -70,11 +72,15 @@ describe('who is let in', () => {
     expect(await response.text()).toBe('Unauthorized\n')
     // The database is asked whose a token is, and nothing else. With no token to ask about, it is not asked at all.
     expect(queried).toHaveBeenCalledTimes(lookups)
+    // The log has that the request was refused, and whether a token came with it: nothing of what did come.
+    expect(logged.events()).toEqual([{ event: 'mcp_refused', why: lookups === 0 ? 'no_token' : 'unknown_token' }])
+    for (const text of ['Bearer', 'Basic', 'bWFkZS', 'stmcp_', 'AAAA']) expect(logged.text()).not.toContain(text)
   })
 
   it('answers 401 to anything but the whole of a token', async () => {
     const { token } = await chatWithToken()
     const last = token.at(-1) === 'A' ? 'B' : 'A'
+    const logged = catchConsole()
 
     const wrong = [
       `Bearer ${token.slice(0, -1)}`,
@@ -95,9 +101,19 @@ describe('who is let in', () => {
       expect(response.headers.get('WWW-Authenticate')).toBe('Bearer')
       expect(await response.text()).toBe('Unauthorized\n')
     }
+    // The first four bring a token that is nobody's. The rest bring nothing that is read as a bearer token.
+    expect(logged.events()).toEqual([
+      ...Array.from({ length: 4 }, () => ({ event: 'mcp_refused', why: 'unknown_token' })),
+      ...Array.from({ length: 4 }, () => ({ event: 'mcp_refused', why: 'no_token' })),
+    ])
+    for (const text of [token, token.slice(0, 12), 'stmcp_', 'STMCP_', 'and more']) {
+      expect(logged.text()).not.toContain(text)
+    }
     // The scheme's name may be in any case. The token may not.
     const response = await exports.default.fetch(mcpRequest(INITIALIZE, { Authorization: `bearer ${token}` }))
     expect(response.status).toBe(200)
+    // A request that is let in is not logged for that.
+    expect(logged.events()).toHaveLength(wrong.length)
   })
 
   it.each(['https://attacker.test', 'http://spend-tracker.test', 'https://spend-tracker.test.attacker.test', 'null'])(
@@ -105,12 +121,16 @@ describe('who is let in', () => {
     async (origin) => {
       const { token } = await chatWithToken()
       const queried = vi.spyOn(env.DB, 'prepare')
+      const logged = catchConsole()
 
       const response = await post(token, INITIALIZE, { Origin: origin })
 
       expect(response.status).toBe(403)
       expect(await response.text()).toBe('Forbidden\n')
       expect(queried).not.toHaveBeenCalled()
+      // The log has why the request was refused, and nothing of where it said it came from or of its token.
+      expect(logged.events()).toEqual([{ event: 'mcp_refused', why: 'wrong_origin' }])
+      for (const text of ['attacker', 'spend-tracker.test', 'stmcp_']) expect(logged.text()).not.toContain(text)
     },
   )
 
@@ -258,6 +278,52 @@ describe('a client of a revision that opens with initialize', () => {
   })
 })
 
+describe('a call of a tool, in the log', () => {
+  it("is under its user's own id, with how long it took, and with nothing of the token that let it in", async () => {
+    const { chat, token } = await chatWithToken()
+    await chat.say('/addcard visa 1234 calendar')
+    const userId = await chat.userId()
+    const logged = catchConsole()
+
+    await callTool(token, 'get_spending_summary')
+    await callTool(token, 'list_transactions', { card: 'no-such-card' })
+
+    // The Worker goes by the real clock, so how long a call took is whatever it took.
+    const took = expect.any(Number)
+    expect(logged.events()).toEqual([
+      { event: 'mcp_tool', user: userId, tool: 'get_spending_summary', outcome: 'ok', ms: took },
+      { event: 'mcp_tool', user: userId, tool: 'list_transactions', outcome: 'invalid', ms: took },
+    ])
+    for (const text of [token, 'stmcp_', 'Bearer', 'visa', '1234', String(chat.telegramId)]) {
+      expect(logged.text()).not.toContain(text)
+    }
+  })
+
+  it('is not there for what is no call of a tool: the other messages of the protocol are not logged', async () => {
+    const { token } = await chatWithToken()
+    const logged = catchConsole()
+
+    await post(token, INITIALIZE)
+    await post(token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
+    await post(token, { jsonrpc: '2.0', id: 7, method: 'ping' })
+
+    expect(logged.events()).toEqual([])
+  })
+
+  it('is not there for a call that the protocol turns away before it gets to a tool', async () => {
+    const { token } = await chatWithToken()
+    const logged = catchConsole()
+
+    const noSuchTool = await messageIn(await post(token, toolCall('delete_everything')))
+    const badArguments = await messageIn(await post(token, toolCall('list_transactions', { limit: 'ten' })))
+
+    // The SDK answers both itself: a tool that there is not, and arguments that are not what the tool's schema has.
+    expect(noSuchTool.error).toMatchObject({ code: -32602 })
+    expect(badArguments.result).toMatchObject({ isError: true })
+    expect(logged.events()).toEqual([])
+  })
+})
+
 describe('a client of the 2026-07-28 revision, which has no initialize', () => {
   it('is told what the server supports when it asks with server/discover', async () => {
     const { token } = await chatWithToken()
@@ -313,6 +379,7 @@ describe('a request that is not a POST', () => {
     const { token } = await chatWithToken()
     const eitherWay: Record<string, string>[] = [{}, { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' }]
     const queried = vi.spyOn(env.DB, 'prepare')
+    const logged = catchConsole()
 
     for (const headers of eitherWay) {
       const response = await exports.default.fetch(ENDPOINT, { method, headers })
@@ -321,14 +388,22 @@ describe('a request that is not a POST', () => {
       expect(response.headers.get('Allow')).toBe('POST')
     }
     expect(queried).not.toHaveBeenCalled()
+    // Each is logged as a request that was refused for its method, with nothing of the method or of a token.
+    const refused = { event: 'mcp_refused', why: 'wrong_method' }
+    expect(logged.events()).toEqual([refused, refused])
+    for (const text of [method, 'stmcp_']) expect(logged.text()).not.toContain(text)
   })
 
   it.each(['/mcp/', '/mcp/sse', '/mcps'])('is answered 404 at %s, which is not the endpoint', async (path) => {
+    const logged = catchConsole()
+
     for (const method of ['GET', 'POST']) {
       const response = await exports.default.fetch(`https://spend-tracker.test${path}`, { method })
 
       expect(response.status).toBe(404)
     }
+    // What is not a request to the endpoint is not logged as one that the endpoint refused.
+    expect(logged.events()).toEqual([])
   })
 })
 

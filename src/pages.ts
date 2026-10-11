@@ -118,6 +118,14 @@ again.</li>
 <li>A hash of your assistant access token, if you create one.</li>
 </ul>
 <p>The text of an email is never stored.</p>
+<p>The service also keeps a log of what it did, for finding faults. A line of the log holds the service's own
+number for a user, the kind of thing that happened, counts, durations and error codes. It never holds a message, a
+question, an answer, an email, a merchant, a card number, a Telegram id or a token. Cloudflare keeps the log for a
+few days.</p>
+<p>Cloudflare also keeps, for the same few days, its own record of each request to the service. For a request that
+comes from you, which is a page that you open in a browser, such as the sign-in link, or a request from an AI
+assistant that you connect, that record holds the address that was asked for, your IP address, the rough location
+and the network that Cloudflare works out from it, and what your browser or assistant sends about itself.</p>
 ${assistant ? questions : ''}
 <h2>Who else handles your data</h2>
 <ul>

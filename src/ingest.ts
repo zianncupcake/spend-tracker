@@ -1,5 +1,6 @@
 import { startingCategoryOn } from './domain/sorting'
-import { parseAlert } from './parsers'
+import { log } from './log'
+import { parseAlert, parserOf } from './parsers'
 import type { AlertEmail } from './parsers/types'
 import type { Card, Store, Transaction } from './store'
 
@@ -16,6 +17,14 @@ export type IngestResult =
  * the card's product gives it.
  */
 export async function ingestAlert(store: Store, email: AlertEmail): Promise<IngestResult> {
+  const result = await ingest(store, email)
+  // What came of the alert is logged with the parser of the bank that sent it, whether or not that parser could
+  // read it: an alert that its bank's parser cannot read is what a bank that has changed its wording looks like.
+  log('alert', { outcome: result.status, parser: parserOf(email)?.name ?? null })
+  return result
+}
+
+async function ingest(store: Store, email: AlertEmail): Promise<IngestResult> {
   const transaction = parseAlert(email)
   if (!transaction) return { status: 'unparsed' }
   const card = (await store.listCards()).find((each) => each.last4 === transaction.cardLast4)

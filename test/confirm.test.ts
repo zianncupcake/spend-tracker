@@ -22,6 +22,7 @@ import {
   tokenIn,
 } from './connect-helpers'
 import { linesOf } from './helpers'
+import { catchConsole } from './log-helpers'
 
 const NOTHING_WAITING =
   'No sign-in is waiting for a code. It may have expired, or had too many wrong codes. Send /connect to start again.'
@@ -179,6 +180,76 @@ describe('the confirmation code', () => {
     expect(await chat.say(digits(code))).toContain(reply)
 
     expect(outside.completions).toEqual([])
+  })
+})
+
+describe('what the log has of a code', () => {
+  /** The line of the message that brought a code, which comes after the line of what came of the code. */
+  const CAME = { event: 'update', kind: 'code', outcome: 'replied', ms: 0 }
+
+  it('is that it connected a mailbox, and for which user: nothing of the code or of the mailbox', async () => {
+    const chat = openChat()
+    const code = await signIn(chat, 'jane@example.test')
+    const logged = catchConsole()
+
+    await chat.say(code)
+
+    expect(logged.events()).toEqual([
+      { event: 'connect_code', user: await chat.userId(), outcome: 'connected' },
+      CAME,
+    ])
+    for (const text of [code, 'jane', 'example.test', String(chat.telegramId)]) {
+      expect(logged.text()).not.toContain(text)
+    }
+  })
+
+  it('is each wrong code with the tries that are left, and then that the mailbox was let go', async () => {
+    const chat = openChat()
+    const wrong = otherThan(await signIn(chat, 'jane@example.test'))
+    const userId = await chat.userId()
+    const logged = catchConsole()
+
+    for (let tries = 1; tries <= 6; tries++) await chat.say(wrong)
+
+    const code = (fields: object) => ({ event: 'connect_code', user: userId, ...fields })
+    // Besides the line of each of the six messages that brought a code.
+    expect(logged.events().filter((each) => each.event !== 'update')).toEqual([
+      code({ outcome: 'wrong', tries_left: 4 }),
+      code({ outcome: 'wrong', tries_left: 3 }),
+      code({ outcome: 'wrong', tries_left: 2 }),
+      code({ outcome: 'wrong', tries_left: 1 }),
+      // The fifth gives the mailbox up, at Google too. For the sixth, no sign-in is waiting.
+      { event: 'token_revoke', outcome: 'revoked' },
+      code({ outcome: 'out_of_tries' }),
+      code({ outcome: 'no_attempt' }),
+    ])
+    expect(logged.events('update')).toEqual([CAME, CAME, CAME, CAME, CAME, CAME])
+    expect(logged.text()).not.toContain(wrong)
+  })
+
+  it('is that the sign-in had expired, when the code came too late, with its mailbox let go', async () => {
+    const chat = openChat()
+    const code = await signIn(chat, 'jane@example.test')
+    clock.now = new Date(NOW.getTime() + 10 * MINUTE)
+    const logged = catchConsole()
+
+    await chat.say(code)
+
+    expect(logged.events()).toEqual([
+      { event: 'token_revoke', outcome: 'revoked' },
+      { event: 'connect_code', user: await chat.userId(), outcome: 'expired' },
+      CAME,
+    ])
+  })
+
+  it('is that no sign-in was waiting, for six digits that are sent when none is', async () => {
+    const chat = openChat()
+    const userId = await chat.userId()
+    const logged = catchConsole()
+
+    await chat.say('123456')
+
+    expect(logged.events()).toEqual([{ event: 'connect_code', user: userId, outcome: 'no_attempt' }, CAME])
   })
 })
 

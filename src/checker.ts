@@ -20,6 +20,7 @@ import {
   type MessageHeaders,
 } from './google/gmail'
 import { ingestAlert } from './ingest'
+import { log, logFailure, type Events } from './log'
 import { alertSenders } from './parsers'
 import { storeFor, type Card, type Transaction } from './store'
 import { mailStoreFor, removeExpiredAttempts, takeNextMailbox, type Mailbox } from './store-mail'
@@ -75,26 +76,55 @@ interface Unread {
   last: boolean
 }
 
+/**
+ * What a run has done so far, which is what its line in the log says when it ends, and the stage that it is at,
+ * which is where it failed when it fails. The README says what each count is of.
+ */
+type Run = Omit<Events['check'], 'ms'> & Pick<Events['check_failed'], 'stage'>
+
 /** One scheduled run. It does not throw: a failure is logged, and a later run tries again. */
 export async function runCheck(deps: Deps): Promise<void> {
-  try {
-    const now = Math.floor(deps.now().getTime() / 1000)
-    // A sign-in is deleted when its user comes back to it. These are the ones that nobody came back to.
-    for (const abandoned of await removeExpiredAttempts(deps.db, now, ATTEMPTS_PER_RUN)) {
-      await revokeStored(deps, abandoned)
-    }
-
-    const mailbox = await takeNextMailbox(deps.db, now)
-    if (mailbox) await checkMailbox(deps, mailbox, now)
-  } catch (error) {
-    // Only the error's name is logged: its message could quote what Google sent.
-    console.error('mail check failed:', error instanceof Error ? error.name : typeof error)
+  const began = deps.now().getTime()
+  const run: Run = {
+    stage: 'sweep',
+    mailbox: false,
+    user: null,
+    listed: 0,
+    unknown: 0,
+    headers: 0,
+    read: 0,
+    stored: 0,
+    unparsed: 0,
+    rejected: 0,
+    notified: 0,
+    checked: false,
+    swept: 0,
   }
+  try {
+    const now = Math.floor(began / 1000)
+    // A sign-in is deleted when its user comes back to it. These are the ones that nobody came back to.
+    const abandoned = await removeExpiredAttempts(deps.db, now, ATTEMPTS_PER_RUN)
+    run.swept = abandoned.length
+    for (const held of abandoned) await revokeStored(deps, held)
+
+    run.stage = 'take'
+    const mailbox = await takeNextMailbox(deps.db, now)
+    if (mailbox) await checkMailbox(deps, mailbox, now, run)
+  } catch (error) {
+    // Nothing of the error's message is logged: it could quote what Google sent.
+    logFailure('check_failed', error, { stage: run.stage, user: run.user })
+  }
+  // The run's own line, which a run that failed has too: it says what the run had done by then.
+  const { stage, ...done } = run
+  log('check', { ...done, ms: deps.now().getTime() - began })
 }
 
-async function checkMailbox(deps: Deps, mailbox: Mailbox, now: number): Promise<void> {
+async function checkMailbox(deps: Deps, mailbox: Mailbox, now: number, run: Run): Promise<void> {
   const mail = mailStoreFor(deps.db, mailbox.ownerId)
-  const accessToken = await accessTokenFor(deps, mailbox)
+  run.mailbox = true
+  run.user = mailbox.ownerId
+  run.stage = 'token'
+  const accessToken = await accessTokenFor(deps, mailbox, run)
   if (!accessToken) return
 
   // A new connection is read from 35 days before it was made, and a checked one from a day before its last full
@@ -105,27 +135,32 @@ async function checkMailbox(deps: Deps, mailbox: Mailbox, now: number): Promise<
   const since = lastCheckedAt === null ? connectedAt - CATCH_UP_DAYS * DAY : lastCheckedAt - DAY
   const query = `from:(${alertSenders().join(' OR ')}) after:${since} smaller:${MAX_MESSAGE_SIZE}`
 
-  const { unknown, last } = await findUnread(deps, mailbox, accessToken, query)
+  run.stage = 'list'
+  const { unknown, last } = await findUnread(deps, mailbox, accessToken, query, run)
+  run.unknown = unknown.length
 
   let left = unknown.length
-  let read = 0
   for (const id of unknown.slice(0, HEADER_CHECKS_PER_RUN)) {
-    if (read === MESSAGES_PER_RUN) break
-    if (await readAlert(deps, mailbox, accessToken, id, now)) read++
+    if (run.read === MESSAGES_PER_RUN) break
+    await readAlert(deps, mailbox, accessToken, id, now, run)
     left--
   }
 
   // Nothing is left when the listing ended with that page, and all that was unknown on it has now been looked at.
-  if (last && left === 0) await mail.markChecked(now)
+  if (last && left === 0) {
+    run.stage = 'store'
+    await mail.markChecked(now)
+    run.checked = true
+  }
 }
 
 /** An access token for the mailbox. Null, with its user told, when Google has ended the access. */
-async function accessTokenFor(deps: Deps, mailbox: Mailbox): Promise<string | null> {
+async function accessTokenFor(deps: Deps, mailbox: Mailbox, run: Run): Promise<string | null> {
   try {
     return await refreshAccessToken(deps.google, await decryptToken(deps.tokenKey, mailbox.refreshTokenEnc))
   } catch (error) {
     if (!(error instanceof GrantLostError)) throw error
-    await tellOfLostAccess(deps, mailbox)
+    await tellOfLostAccess(deps, mailbox, run)
     return null
   }
 }
@@ -135,7 +170,9 @@ async function accessTokenFor(deps: Deps, mailbox: Mailbox): Promise<string | nu
  * that order: a marked connection has no more turns, so were it marked first and the message then failed, its user
  * would never be told. This way a message that fails is sent again on the mailbox's next turn.
  */
-async function tellOfLostAccess(deps: Deps, mailbox: Mailbox): Promise<void> {
+async function tellOfLostAccess(deps: Deps, mailbox: Mailbox, run: Run): Promise<void> {
+  run.stage = 'notify'
+  let told = false
   try {
     await deps.messenger.send(
       mailbox.chatId,
@@ -143,10 +180,15 @@ async function tellOfLostAccess(deps: Deps, mailbox: Mailbox): Promise<void> {
         'bank alerts. This happens when you change your Google password, or remove the access in your Google ' +
         'Account. Send /connect to reconnect it.',
     )
+    told = true
   } catch (error) {
     // No turn would get the message to a user who has blocked the bot, so their connection is marked all the same.
     if (!(error instanceof ChatBlockedError)) throw error
+  } finally {
+    // Logged however the telling went. When it failed, the run fails with it, and the next turn finds the same.
+    log('access_lost', { user: mailbox.ownerId, told })
   }
+  run.stage = 'store'
   await mailStoreFor(deps.db, mailbox.ownerId).markNeedsReconnect()
 }
 
@@ -159,9 +201,10 @@ async function tellOfLostAccess(deps: Deps, mailbox: Mailbox): Promise<void> {
  * known alerts than a run has pages for, ahead of alerts that are still to be read. So the connection keeps the
  * token of the page that the runs have got to, and each run goes on from there.
  */
-async function findUnread(deps: Deps, mailbox: Mailbox, accessToken: string, query: string): Promise<Unread> {
+async function findUnread(deps: Deps, mailbox: Mailbox, accessToken: string, query: string, run: Run): Promise<Unread> {
   const mail = mailStoreFor(deps.db, mailbox.ownerId)
   let listed = await listMessageIds(accessToken, query)
+  run.listed += listed.ids.length
   let unknown = await mail.unknownIds(listed.ids)
   if (unknown.length > 0 || !listed.nextPageToken) return { unknown, last: !listed.nextPageToken }
 
@@ -169,6 +212,7 @@ async function findUnread(deps: Deps, mailbox: Mailbox, accessToken: string, que
   try {
     for (let page = 2; page <= PAGES_PER_RUN; page++) {
       listed = await listMessageIds(accessToken, query, pageToken)
+      run.listed += listed.ids.length
       unknown = await mail.unknownIds(listed.ids)
       if (unknown.length > 0 || !listed.nextPageToken) break
       pageToken = listed.nextPageToken
@@ -189,31 +233,51 @@ async function findUnread(deps: Deps, mailbox: Mailbox, accessToken: string, que
 
 /**
  * Looks at one message and, when it is a bank's alert, reads it: stores the purchase in it, or notes why none was
- * stored. Returns whether the message was fetched whole.
+ * stored. What it does is counted in `run`: a message that it fetches whole is one that the run has read.
  */
-async function readAlert(deps: Deps, mailbox: Mailbox, accessToken: string, id: string, now: number): Promise<boolean> {
+async function readAlert(
+  deps: Deps,
+  mailbox: Mailbox,
+  accessToken: string,
+  id: string,
+  now: number,
+  run: Run,
+): Promise<void> {
   const mail = mailStoreFor(deps.db, mailbox.ownerId)
-  // Decided on the headers, which are fetched by themselves: mail from anyone else is never fetched whole.
-  if (!isFromBank(await getMessageHeaders(accessToken, id))) {
+  /** Notes the message as one that is not believed to be from a bank, so that it is not fetched again. */
+  const reject = async () => {
+    run.stage = 'store'
     await mail.markSeen(id, 'rejected')
-    return false
+    run.rejected++
   }
+
+  run.stage = 'read'
+  // Decided on the headers, which are fetched by themselves: mail from anyone else is never fetched whole.
+  const headers = await getMessageHeaders(accessToken, id)
+  run.headers++
+  if (!isFromBank(headers)) return reject()
 
   const message = await getMessage(accessToken, id)
+  run.read++
   // And decided again on the headers that came with the text, as it is this copy of the message that is read.
-  if (!isFromBank(message)) {
-    await mail.markSeen(id, 'rejected')
-    return true
-  }
+  if (!isFromBank(message)) return reject()
 
+  run.stage = 'store'
   const { from, subject, receivedAt } = message
   const store = storeFor(deps.db, mailbox.ownerId)
   const result = await ingestAlert(store, { sourceId: id, from, subject, receivedAt, text: message.text() })
-  if (result.status === 'unparsed') await mail.markSeen(id, 'unparsed')
-  if (result.status === 'stored' && now - receivedAt < NEWS_HOURS * HOUR) {
-    await tellOfPurchase(deps, mailbox, result.transaction, result.card)
+  if (result.status === 'unparsed') {
+    await mail.markSeen(id, 'unparsed')
+    run.unparsed++
   }
-  return true
+  if (result.status === 'stored') {
+    run.stored++
+    if (now - receivedAt < NEWS_HOURS * HOUR) {
+      run.stage = 'notify'
+      await tellOfPurchase(deps, mailbox, result.transaction, result.card)
+      run.notified++
+    }
+  }
 }
 
 /**

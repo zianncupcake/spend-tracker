@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
 import { oauthCallback } from '../src/connect'
 import { GMAIL_READONLY } from '../src/google/oauth'
+import { TelegramError } from '../src/telegram/api'
 import {
   approve,
   attemptOf,
@@ -22,6 +23,7 @@ import {
   TOKEN_URL,
   tokenIn,
 } from './connect-helpers'
+import { catchConsole } from './log-helpers'
 
 // GET /oauth/callback: where Google sends the browser back to.
 
@@ -196,7 +198,6 @@ it('lets only the first of two redirects that arrive together take its code to G
 })
 
 it('takes a state to Google once and no more, though Google refused the code that came with it', async () => {
-  vi.spyOn(console, 'error').mockImplementation(() => {})
   const asked = vi.spyOn(globalThis, 'fetch')
   const chat = openChat()
   const link = linkIn(await chat.say('/connect'))
@@ -262,19 +263,137 @@ it('shows the expired page for a link that is ten minutes old, and asks Google n
 })
 
 it.each([
-  ['refuses the code', TOKEN_URL],
-  ['will not give the address', PROFILE_URL],
-])('shows a failure page when Google %s, stores nothing and logs only that it failed', async (_, endpoint) => {
-  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  ['refuses the code', TOKEN_URL, 'exchange'],
+  ['will not give the address', PROFILE_URL, 'profile'],
+])('shows a failure page when Google %s, stores nothing and logs only where it failed', async (_, endpoint, stage) => {
   const chat = openChat()
   const link = linkIn(await chat.say('/connect'))
+  const userId = await chat.userId()
   outside.failing.add(endpoint)
+  const logged = catchConsole()
 
   const page = await approve(link, 'jane@example.test')
 
   expect(page.status).toBe(500)
   expect(await page.text()).toContain('Sign-in could not be completed')
-  expect(logged.mock.calls).toEqual([['google sign-in failed:', 'Error']])
+  // What was being done, why it failed and the status of Google's answer: nothing of what the answer said.
+  const failure = { error: 'Error', reason: 'http_error', status: 400 }
+  expect(logged.events()).toEqual([{ event: 'connect_callback', outcome: 'failed', user: userId, stage, ...failure }])
+  expect(logged.text()).not.toContain('made_up_error')
   expect(sent).toEqual([])
-  expect(await attemptOf(await chat.userId())).toMatchObject({ email: null, refresh_token_enc: null })
+  expect(await attemptOf(userId)).toMatchObject({ email: null, refresh_token_enc: null })
+})
+
+it.each<[stage: string, when: string, statement: string, whose: 'known' | 'not known']>([
+  ['claim', 'the sign-in cannot be claimed', 'SET claimed = 1', 'not known'],
+  ['hold', 'the mailbox cannot be kept for its code', 'SET email = ?', 'known'],
+])('shows a failure page and logs that it failed at "%s", when %s', async (stage, _, statement, whose) => {
+  const chat = openChat()
+  const link = linkIn(await chat.say('/connect'))
+  const userId = await chat.userId()
+  const prepare = env.DB.prepare.bind(env.DB)
+  vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+    if (query.includes(statement)) throw new Error('A made-up failure of the database that quotes jane@example.test')
+    return prepare(query)
+  })
+  const logged = catchConsole()
+
+  const page = await approve(link, 'jane@example.test')
+
+  expect(page.status).toBe(500)
+  expect(await page.text()).toContain('Sign-in could not be completed')
+  // Whose sign-in it was is known once the sign-in has been claimed, and not before.
+  const user = whose === 'known' ? { user: userId } : {}
+  expect(logged.events()).toEqual([{ event: 'connect_callback', outcome: 'failed', ...user, stage, error: 'Error' }])
+  expect(logged.text()).not.toContain('jane')
+  expect(sent).toEqual([])
+})
+
+it('logs a redirect that the chat could not be told of as one that failed, with where and the status', async () => {
+  const chat = openChat()
+  const link = linkIn(await chat.say('/connect'))
+  vi.spyOn(deps.messenger, 'send').mockRejectedValue(new TelegramError('sendMessage', 502))
+  const logged = catchConsole()
+
+  const page = await approve(link, 'jane@example.test')
+
+  expect(page.status).toBe(500)
+  const failure = { stage: 'notify', error: 'Error', reason: 'http_error', status: 502 }
+  expect(logged.events()).toEqual([
+    { event: 'connect_callback', outcome: 'failed', user: await chat.userId(), ...failure },
+  ])
+})
+
+type Chat = ReturnType<typeof openChat>
+
+/** Google sending a browser back with something else than a code that it gave for the link. */
+function sentBack(link: URL, params: Record<string, string>): Promise<Response> {
+  return oauthCallback(deps, new URLSearchParams({ state: link.searchParams.get('state') ?? '', ...params }))
+}
+
+it.each<[outcome: string, when: string, whose: 'known' | 'unknown', redirect: (link: URL, chat: Chat) => unknown]>([
+  ['code_shown', 'Google gave lasting access to a mailbox', 'known', (link) => approve(link, 'jane@example.test')],
+  ['not_completed', 'the user did not approve', 'unknown', (link) => sentBack(link, { error: 'access_denied' })],
+  ['expired', 'the state is of no link that works', 'unknown', (link) => sentBack(link, { state: 'x', code: 'y' })],
+  [
+    'no_gmail_access',
+    'Google gave another permission',
+    'known',
+    (link) => {
+      outside.grant = { scope: 'openid' }
+      return approve(link, 'jane@example.test')
+    },
+  ],
+  [
+    'no_lasting_access',
+    'Google gave no refresh token',
+    'known',
+    (link) => {
+      outside.grant = { refresh_token: undefined }
+      return approve(link, 'jane@example.test')
+    },
+  ],
+  [
+    'replaced',
+    'the link was replaced while its owner was at Google',
+    'known',
+    (link, chat) => {
+      outside.meanwhile = () => chat.say('/connect')
+      return approve(link, 'jane@example.test')
+    },
+  ],
+])('logs %s for a redirect when %s, with whose sign-in it was %s', async (outcome, _, whose, redirect) => {
+  const chat = openChat()
+  const link = linkIn(await chat.say('/connect'))
+  const logged = catchConsole()
+
+  await redirect(link, chat)
+
+  // A sign-in is known by its state. A redirect that brings none that works is nobody's.
+  const user = whose === 'known' ? { user: await chat.userId() } : {}
+  expect(logged.events('connect_callback')).toEqual([{ event: 'connect_callback', outcome, ...user }])
+})
+
+it('logs nothing of a redirect that lets anyone in, or that says whose mailbox it was', async () => {
+  const logged = catchConsole()
+  const chat = openChat()
+  const link = linkIn(await chat.say('/connect'))
+  const state = link.searchParams.get('state') ?? ''
+  const verifier = (await attemptOf(await chat.userId()))?.code_verifier ?? ''
+
+  const code = await codeOn(await approve(link, 'jane@example.test'))
+  await approve(link, 'sam@example.test')
+  await sentBack(link, { error: 'access_denied', error_description: 'A made-up description' })
+
+  expect(logged.events().map((event) => [event.event, event.outcome])).toEqual([
+    ['connect_link', undefined],
+    // The command that asked for the link.
+    ['update', 'replied'],
+    ['connect_callback', 'code_shown'],
+    ['connect_callback', 'expired'],
+    ['connect_callback', 'not_completed'],
+  ])
+  const never = [state, verifier, code, 'code-for-', 'jane', 'sam', 'example.test', 'access_denied', 'description']
+  const secrets = [outside.issued[0], 'refresh-token', 'access-token', env.GOOGLE_CLIENT_SECRET]
+  for (const text of [...never, ...secrets, String(chat.telegramId)]) expect(logged.text()).not.toContain(text)
 })

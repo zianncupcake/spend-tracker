@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { alertSenders, parseAlert } from '../src/parsers'
+import { alertSenders, parseAlert, parserOf } from '../src/parsers'
 import { exampleBank } from '../src/parsers/example-bank'
 import { alertEmail, alertText } from './helpers'
 
@@ -68,6 +68,15 @@ describe('Example Bank alerts', () => {
     expect(parseAlert(alertEmail({ from: 'alerts@examplebank.test.attacker.test' }))).toBeNull()
     expect(parseAlert(alertEmail({ from: 'offers@examplebank.test' }))).toBeNull()
     expect(parseAlert(alertEmail({ from: 'Alerts@ExampleBank.test' }))).not.toBeNull()
+  })
+
+  it('is the bank whose parser an email from its address goes to, whether or not that parser can read it', () => {
+    const unreadable = alertEmail({ from: ' Alerts@ExampleBank.test ', text: 'Your statement is ready.' })
+
+    expect(parserOf(alertEmail())?.name).toBe('example-bank')
+    expect(parserOf(unreadable)).toBe(exampleBank)
+    expect(parserOf(alertEmail({ from: 'alerts@otherbank.test' }))).toBeUndefined()
+    expect(parserOf(alertEmail({ from: 'offers@examplebank.test' }))).toBeUndefined()
   })
 
   it("sends its alerts from one address, and mail is looked for from the banks' senders and from no other", () => {

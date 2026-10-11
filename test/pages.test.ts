@@ -85,8 +85,11 @@ describe('the privacy policy', () => {
     expect(questions).toBeLessThan(others)
     expect(text.indexOf('An AI provider chosen by Example Operator answers')).toBeGreaterThan(others)
     expect(text.indexOf('An AI provider chosen by Example Operator answers')).toBeLessThan(google)
-    // Nothing is kept of a question, so nothing is said of one with what is stored.
-    expect(text.slice(stored, questions)).not.toMatch(/question/i)
+    // Nothing is kept of a question. So all that is said of one with what is stored is that the log never holds it.
+    expect(text.slice(stored, questions).match(/[^.]*question[^.]*\./gi)).toEqual([
+      ' It never holds a message, a question, an answer, an email, a merchant, a card number, a Telegram id or a ' +
+        'token.',
+    ])
   })
 
   it('says nothing of questions that are asked, or of an AI provider, where the bot has no assistant', async () => {
@@ -98,6 +101,48 @@ describe('the privacy policy', () => {
     expect(text).toContain('Last updated: 11 October 2026')
     // The assistant that a user connects with a token of their own is another thing, and is still there.
     expect(text).toContain('An AI assistant that you connect with your assistant access token')
+  })
+
+  it.each([
+    ['with an assistant', true],
+    ['with none', false],
+  ])('says that a log is kept, what a line of it holds and what one never does, %s', async (_, assistant) => {
+    const text = await policy(assistant)
+
+    const said =
+      'The service also keeps a log of what it did, for finding faults. ' +
+      "A line of the log holds the service's own number for a user, the kind of thing that happened, counts, " +
+      'durations and error codes. ' +
+      'It never holds a message, a question, an answer, an email, a merchant, a card number, a Telegram id or a ' +
+      'token. ' +
+      'Cloudflare keeps the log for a few days.'
+    // It is said once, as a paragraph of its own, with what is stored: after the list, and before whatever follows.
+    expect(text.split(`<p>${said}</p>`)).toHaveLength(2)
+    const next = assistant ? '<h2>Questions that you ask the bot</h2>' : '<h2>Who else handles your data</h2>'
+    expect(text.indexOf(said)).toBeGreaterThan(text.indexOf('<h2>What is stored</h2>'))
+    expect(text.indexOf(said)).toBeGreaterThan(text.indexOf('The text of an email is never stored.'))
+    expect(text.indexOf(next)).toBeGreaterThan(text.indexOf(said))
+    // The page is dated as it was.
+    expect(text).toContain('Last updated: 11 October 2026')
+  })
+
+  it.each([
+    ['with an assistant', true],
+    ['with none', false],
+  ])('says what Cloudflare keeps of each request besides, after what it says of the log, %s', async (_, assistant) => {
+    const text = await policy(assistant)
+
+    const said =
+      'Cloudflare also keeps, for the same few days, its own record of each request to the service. ' +
+      'For a request that comes from you, which is a page that you open in a browser, such as the sign-in link, ' +
+      'or a request from an AI assistant that you connect, that record holds the address that was asked for, ' +
+      'your IP address, the rough location and the network that Cloudflare works out from it, ' +
+      'and what your browser or assistant sends about itself.'
+    // It is said once, in a paragraph of its own: the one that follows what is said of the log.
+    expect(text.split(`<p>${said}</p>`)).toHaveLength(2)
+    expect(text).toContain(`Cloudflare keeps the log for a few days.</p> <p>${said}</p>`)
+    const next = assistant ? '<h2>Questions that you ask the bot</h2>' : '<h2>Who else handles your data</h2>'
+    expect(text.indexOf(next)).toBeGreaterThan(text.indexOf(said))
   })
 
   it.each([

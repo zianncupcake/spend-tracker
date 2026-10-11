@@ -26,6 +26,7 @@ import {
 } from './connect-helpers'
 import { gmailMessage, gmailResults, htmlPart, textPart, type Message, type MessageOptions } from './gmail-helpers'
 import { alertText, seconds } from './helpers'
+import { catchConsole } from './log-helpers'
 
 const JANE = 'jane@example.test'
 const SAM = 'sam@example.test'
@@ -38,6 +39,26 @@ const ADD_CARD_HINT = [
   '/addcard <nickname> 1234 statement <day>',
   '/addcard <nickname> 1234 calendar',
 ].join('\n')
+
+/**
+ * What the line that a run logs of itself says of a run that did nothing, in no time: there was no mailbox to
+ * check. A test says what a run did by what its line has besides.
+ */
+const NOTHING_DONE = {
+  mailbox: false,
+  user: null,
+  listed: 0,
+  unknown: 0,
+  headers: 0,
+  read: 0,
+  stored: 0,
+  unparsed: 0,
+  rejected: 0,
+  notified: 0,
+  checked: false,
+  swept: 0,
+  ms: 0,
+}
 
 /**
  * The service with the messenger that posts to Telegram. The stand-in for Telegram keeps the whole of what it is
@@ -562,7 +583,7 @@ describe('an alert that is not stored', () => {
   })
 
   it('is rejected on the headers that come with the whole message too, with its body left undecoded', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
     const unreadable = { mimeType: 'text/plain', body: { size: 11, data: 'not base64!' } }
@@ -583,7 +604,9 @@ describe('an alert that is not stored', () => {
     expect(outside.fetched).toEqual(['msg-1'])
     expect(await seenOf(userId)).toEqual([{ source_id: 'msg-1', status: 'rejected' }])
     expect(await purchasesOf(userId)).toEqual([])
-    expect(logged).not.toHaveBeenCalled()
+    // Nothing failed, as nothing tried to decode the body: the run read one message, and turned that one away.
+    expect(logged.events('check_failed')).toEqual([])
+    expect(logged.events('check')).toMatchObject([{ headers: 1, read: 1, rejected: 1, stored: 0, unparsed: 0 }])
   })
 })
 
@@ -808,19 +831,22 @@ describe('what a run asks of Gmail', () => {
   })
 
   it('starts again from the first page when Gmail does not take the page token that was kept', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
     outside.pageSize = 1
     outside.mailboxes[JANE] = [alert('msg-2', 400), alert('msg-1', 500)]
     await markKnown(userId, [outside.mailboxes[JANE][0]])
     await mailStoreFor(env.DB, userId).setBacklogPageToken('made-up-page-token')
+    const logged = catchConsole()
 
     await runCheck(deps)
 
-    // The run ends there, with the token let go of. The failure is logged by its name alone.
+    // The run ends there, with the token let go of. The failure is logged by where it came, its name and its reason.
     expect(outside.listings.map((listing) => listing.pageToken)).toEqual([undefined, 'made-up-page-token'])
-    expect(logged.mock.calls).toEqual([['mail check failed:', 'PageTokenError']])
+    expect(logged.events('check_failed')).toEqual([
+      { event: 'check_failed', stage: 'list', user: userId, error: 'PageTokenError', reason: 'page_token' },
+    ])
+    expect(logged.text()).not.toContain('made-up-page-token')
     expect(await connectionOf(userId)).toMatchObject({ last_checked_at: null, backlog_page_token: null })
     expect(outside.fetched).toEqual([])
 
@@ -877,17 +903,25 @@ describe('a mailbox that Google no longer lets the service read', () => {
   })
 
   it('is told of again on its next turn when the message could not be sent, and is not marked until it is', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
     outside.ended.add(outside.issued[0])
     outside.failing.add(TELEGRAM_URL)
+    const logged = catchConsole()
 
     await runCheck(posting)
 
-    // Marked now, it would have no more turns, and its user would never be told.
+    // Marked now, it would have no more turns, and its user would never be told. The log has the request that
+    // Telegram refused, that the access was found lost and its user not told, and that the run failed at the
+    // telling, with the status of Telegram's answer.
+    const refused = { error: 'Error', reason: 'http_error', status: 400 }
     expect(outside.telegrams).toEqual([])
-    expect(logged.mock.calls).toEqual([['mail check failed:', 'Error']])
+    expect(logged.events()).toMatchObject([
+      { event: 'telegram_failed', method: 'sendMessage', ...refused },
+      { event: 'access_lost', user: userId, told: false },
+      { event: 'check_failed', stage: 'notify', user: userId, ...refused },
+      { event: 'check', user: userId, notified: 0 },
+    ])
     expect(await connectionOf(userId)).toMatchObject({ status: 'active' })
 
     outside.failing.clear()
@@ -897,19 +931,31 @@ describe('a mailbox that Google no longer lets the service read', () => {
     const notice = expect.stringContaining('has lost its access to your Gmail jane@example.test')
     expect(outside.telegrams).toMatchObject([{ chat_id: chat.telegramId, text: notice }])
     expect(await connectionOf(userId)).toMatchObject({ status: 'needs_reconnect' })
+    // The next turn finds the access lost again, and this time its user is told.
+    expect(logged.events('access_lost')).toEqual([
+      { event: 'access_lost', user: userId, told: false },
+      { event: 'access_lost', user: userId, told: true },
+    ])
   })
 
   it('is marked all the same when its user has blocked the bot, as no turn would get the message to them', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
     outside.ended.add(outside.issued[0])
     outside.blocked.add(chat.telegramId)
+    const logged = catchConsole()
 
     await runCheck(posting)
 
+    // The run did not fail. Its log says that Telegram will send the chat nothing, that the access is lost, and that
+    // the user could not be told.
     expect(outside.telegrams).toEqual([])
-    expect(logged).not.toHaveBeenCalled()
+    expect(logged.events().map((event) => event.event)).toEqual(['telegram_failed', 'access_lost', 'check'])
+    const blocked = { error: 'ChatBlockedError', reason: 'chat_blocked' }
+    expect(logged.events('telegram_failed')).toEqual([
+      { event: 'telegram_failed', method: 'sendMessage', status: 403, ...blocked },
+    ])
+    expect(logged.events('access_lost')).toEqual([{ event: 'access_lost', user: userId, told: false }])
     expect(await connectionOf(userId)).toMatchObject({ status: 'needs_reconnect' })
 
     clock.now = later(1)
@@ -992,14 +1038,19 @@ describe('taking turns', () => {
     expect(await purchasesOf(await sam.userId())).toMatchObject([{ source_id: 'msg-1', amount_minor: 9900 }])
   })
 
-  it('does nothing when no mailbox is connected', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('does nothing when no mailbox is connected, and logs that it did nothing', async () => {
+    const logged = catchConsole()
     const asked = vi.spyOn(globalThis, 'fetch')
 
     await runCheck(deps)
 
     expect(asked).not.toHaveBeenCalled()
-    expect(logged).not.toHaveBeenCalled()
+    expect(logged.events()).toEqual([{ event: 'check', ...NOTHING_DONE }])
+    // The line as it is written: the fields of a run are always all there, and in this order.
+    expect(logged.text()).toBe(
+      '{"event":"check","mailbox":false,"user":null,"listed":0,"unknown":0,"headers":0,"read":0,"stored":0,' +
+        '"unparsed":0,"rejected":0,"notified":0,"checked":false,"swept":0,"ms":0}',
+    )
   })
 })
 
@@ -1055,42 +1106,50 @@ describe('sign-ins that nobody came back to', () => {
   })
 
   it('are deleted even when Google cannot be told, and the run goes on to check a mailbox', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const abandoned = openChat()
     await signIn(abandoned, SAM)
     clock.now = later(10)
     const chat = await connectedChat(JANE)
     outside.mailboxes[JANE] = [alert('msg-1', 5)]
     outside.failing.add(REVOKE_URL)
+    const logged = catchConsole()
 
     await runCheck(deps)
 
     expect(await attemptOf(await abandoned.userId())).toBeNull()
-    expect(logged.mock.calls).toEqual([['token revocation failed:', 'Error']])
+    // The revocation is logged as having failed, with the status of Google's answer, and the run as having gone on.
+    expect(logged.events('token_revoke')).toEqual([
+      { event: 'token_revoke', outcome: 'failed', error: 'Error', reason: 'http_error', status: 400 },
+    ])
+    expect(logged.events('check_failed')).toEqual([])
+    expect(logged.events('check')).toMatchObject([{ swept: 1, stored: 1, notified: 1 }])
     expect(sent.map((message) => message.chatId)).toEqual([chat.telegramId])
   })
 })
 
 describe('when Google fails for a while', () => {
   it.each([
-    ['the token endpoint', TOKEN_URL],
-    ['the listing', MESSAGES_URL],
-    ['the message', `${MESSAGES_URL}/msg-1`],
-  ])('nothing changes when %s fails, and the next run reads the mail', async (_, endpoint) => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    ['the token endpoint', TOKEN_URL, 'token'],
+    ['the listing', MESSAGES_URL, 'list'],
+    ['the message', `${MESSAGES_URL}/msg-1`, 'read'],
+  ])('nothing changes when %s fails, and the next run reads the mail', async (_, endpoint, stage) => {
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
     outside.mailboxes[JANE] = [alert('msg-1', 5)]
     outside.failing.add(endpoint)
+    const logged = catchConsole()
 
     await runCheck(deps)
 
-    // Only the turn is used up. The failure is logged by its name alone.
+    // Only the turn is used up. The failure is logged by where it came and by the status of Google's answer.
     expect(await connectionOf(userId)).toMatchObject({ status: 'active', last_checked_at: null, last_run_at: now() })
     expect(await purchasesOf(userId)).toEqual([])
     expect(await seenOf(userId)).toEqual([])
     expect(sent).toEqual([])
-    expect(logged.mock.calls).toEqual([['mail check failed:', 'Error']])
+    expect(logged.events('check_failed')).toEqual([
+      { event: 'check_failed', stage, user: userId, error: 'Error', reason: 'http_error', status: 400 },
+    ])
+    expect(logged.text()).not.toContain('made_up_error')
 
     outside.failing.clear()
     await runCheck(deps)
@@ -1099,19 +1158,24 @@ describe('when Google fails for a while', () => {
     expect(await connectionOf(userId)).toMatchObject({ status: 'active', last_checked_at: now() })
   })
 
-  it('keeps what a run had noted before the failure', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('keeps what a run had noted before the failure, and logs what it had done', async () => {
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
     // A run reads one alert. So what it has done before it fails on one is to turn other mail away.
     outside.mailboxes[JANE] = [lookalike('lookalike-1'), alert('msg-1', 500)]
     outside.failing.add(`${MESSAGES_URL}/msg-1`)
+    const logged = catchConsole()
 
     await runCheck(deps)
 
     expect(await seenOf(userId)).toEqual([{ source_id: 'lookalike-1', status: 'rejected' }])
     expect(await purchasesOf(userId)).toEqual([])
     expect(await connectionOf(userId)).toMatchObject({ last_checked_at: null })
+    // The line of the failure, and then the run's own line, which a run that fails has too.
+    expect(logged.events()).toEqual([
+      { event: 'check_failed', stage: 'read', user: userId, error: 'Error', reason: 'http_error', status: 400 },
+      { event: 'check', ...NOTHING_DONE, mailbox: true, user: userId, listed: 2, unknown: 2, headers: 1, rejected: 1 },
+    ])
 
     outside.failing.clear()
     outside.fetchedHeaders.length = 0
@@ -1169,6 +1233,240 @@ describe('the cost of a run', () => {
   })
 })
 
+describe('the line that a run logs of itself', () => {
+  it('says what the run did with a new alert, after the line of the alert', async () => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
+    expect(logged.events()).toEqual([
+      { event: 'alert', outcome: 'stored', parser: 'example-bank' },
+      { event: 'check', ...NOTHING_DONE, ...found, stored: 1, notified: 1, checked: true },
+    ])
+  })
+
+  it('counts the mail that was listed, looked at, read, stored, not understood, turned away and told of', async () => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.mailboxes[JANE] = [
+      lookalike('lookalike-2'),
+      lookalike('lookalike-1'),
+      alert('msg-3', 5, 'Your statement is ready.'),
+      alert('msg-2', 7 * 60),
+      alert('msg-1', 5),
+    ]
+    const logged = catchConsole()
+
+    for (let run = 1; run <= 3; run++) await runCheck(deps)
+
+    const found = { ...NOTHING_DONE, mailbox: true, user: userId, listed: 5 }
+    expect(logged.events('check')).toEqual([
+      // Two are turned away on their headers. The third is read, and is no alert that a parser can read.
+      { event: 'check', ...found, unknown: 5, headers: 3, read: 1, rejected: 2, unparsed: 1 },
+      // The next is stored, and came too long ago for its user to be told of it.
+      { event: 'check', ...found, unknown: 2, headers: 1, read: 1, stored: 1 },
+      // The last is stored and told of, and with it the mailbox is fully checked.
+      { event: 'check', ...found, unknown: 1, headers: 1, read: 1, stored: 1, notified: 1, checked: true },
+    ])
+    expect(logged.events('alert').map((event) => event.outcome)).toEqual(['unparsed', 'stored', 'stored'])
+  })
+
+  it('says how long the run took, by the clock that the run goes by', async () => {
+    await connectedChat(JANE)
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+    // Google takes 30 milliseconds over each answer: a token, a listing, the headers of a message, and the message.
+    const standIn = globalThis.fetch
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      clock.now = new Date(clock.now.getTime() + 30)
+      return standIn(url, init)
+    })
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    expect(logged.events('check')).toMatchObject([{ stored: 1, ms: 120 }])
+  })
+
+  it('counts the expired sign-ins that the run cleared away, whether or not one held a mailbox', async () => {
+    await signIn(openChat(), SAM)
+    await openChat().say('/connect')
+    clock.now = later(10)
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    expect(logged.events()).toEqual([
+      { event: 'token_revoke', outcome: 'revoked' },
+      { event: 'check', ...NOTHING_DONE, swept: 2 },
+    ])
+  })
+
+  it('comes after a line that says so, when the run finds that Google has ended the access', async () => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.ended.add(outside.issued[0])
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    expect(logged.events()).toEqual([
+      { event: 'access_lost', user: userId, told: true },
+      { event: 'check', ...NOTHING_DONE, mailbox: true, user: userId },
+    ])
+  })
+
+  it.each<[stage: string, when: string, statement: string, whose: 'known' | 'not known']>([
+    ['sweep', 'the expired sign-ins cannot be deleted', 'DELETE FROM connect_attempts', 'not known'],
+    ['take', 'no mailbox can be given its turn', 'UPDATE google_connections', 'not known'],
+    ['list', 'the ids on a page cannot be looked up', 'FROM json_each', 'known'],
+    ['store', 'the purchase cannot be stored', 'INSERT INTO transactions', 'known'],
+  ])('comes after one that says the run failed at "%s", when %s', async (stage, _, statement, whose) => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+    const prepare = env.DB.prepare.bind(env.DB)
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes(statement)) throw new Error(`A made-up failure of the database that quotes ${JANE}`)
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    // The user is the one whose mailbox was being checked, once a mailbox has been given its turn.
+    const user = whose === 'known' ? userId : null
+    expect(logged.events()).toMatchObject([
+      { event: 'check_failed', stage, user, error: 'Error' },
+      { event: 'check', user, checked: false },
+    ])
+    // The failure has its stage, the name of its error and nothing that the error said.
+    expect(Object.keys(logged.events('check_failed')[0])).toEqual(['event', 'stage', 'user', 'error'])
+    expect(logged.text()).not.toContain(JANE)
+  })
+
+  // The other things that a run notes in the database, each of which it does at "store". With each is what is in
+  // the mailbox, or what has become of its access, for the run to get there, and what the run logs on the way.
+  it.each<[when: string, statement: string, arrange: () => unknown, before: string[]]>([
+    [
+      'a message that was turned away cannot be noted',
+      'INSERT INTO seen_alerts',
+      () => (outside.mailboxes[JANE] = [lookalike('lookalike-1')]),
+      [],
+    ],
+    [
+      'the mailbox cannot be marked as fully checked',
+      'SET last_checked_at',
+      () => (outside.mailboxes[JANE] = [alert('msg-1', 5)]),
+      ['alert'],
+    ],
+    [
+      'the connection cannot be marked as needing to be reconnected',
+      "SET status = 'needs_reconnect'",
+      () => outside.ended.add(outside.issued[0]),
+      ['access_lost'],
+    ],
+  ])('comes after one that says the run failed at "store", when %s', async (_, statement, arrange, before) => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    arrange()
+    const prepare = env.DB.prepare.bind(env.DB)
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes(statement)) throw new Error(`A made-up failure of the database that quotes ${JANE}`)
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    expect(logged.events().map((event) => event.event)).toEqual([...before, 'check_failed', 'check'])
+    expect(logged.events('check_failed')).toEqual([
+      { event: 'check_failed', stage: 'store', user: userId, error: 'Error' },
+    ])
+    expect(logged.text()).not.toContain(JANE)
+  })
+
+  it('comes after one that says the run failed at "notify", when the user cannot be told of a purchase', async () => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+    outside.blocked.add(chat.telegramId)
+    const logged = catchConsole()
+
+    await runCheck(posting)
+
+    // The purchase is stored all the same, and the run's line says that nobody was told of it. The request that
+    // Telegram refused has its own line, before the line of the run that failed with it.
+    const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
+    const blocked = { error: 'ChatBlockedError', reason: 'chat_blocked' }
+    expect(logged.events()).toEqual([
+      { event: 'alert', outcome: 'stored', parser: 'example-bank' },
+      { event: 'telegram_failed', method: 'sendMessage', status: 403, ...blocked },
+      { event: 'check_failed', stage: 'notify', user: userId, ...blocked },
+      { event: 'check', ...NOTHING_DONE, ...found, stored: 1 },
+    ])
+    expect(await purchasesOf(userId)).toHaveLength(1)
+  })
+
+  it('comes after one that says the run failed at "notify", when Telegram does not answer and is given up on', async () => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+    outside.stalled.add(TELEGRAM_URL)
+    // The 5 seconds that a request to Telegram is given are cut to a few milliseconds here, and are otherwise as
+    // they are: the time runs out as it does for fetch, which then fails with why.
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    const timeouts = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => timeout(5))
+    const logged = catchConsole()
+
+    // The run ends, where it would have waited for Telegram for as long as Cloudflare let it.
+    await runCheck(posting)
+
+    expect(timeouts.mock.calls).toEqual([[5_000]])
+    // The purchase is stored. The request has its own line, with no status, as it got no answer.
+    const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
+    expect(logged.events()).toEqual([
+      { event: 'alert', outcome: 'stored', parser: 'example-bank' },
+      { event: 'telegram_failed', method: 'sendMessage', error: 'TimeoutError' },
+      { event: 'check_failed', stage: 'notify', user: userId, error: 'TimeoutError' },
+      { event: 'check', ...NOTHING_DONE, ...found, stored: 1 },
+    ])
+    expect(await purchasesOf(userId)).toHaveLength(1)
+  })
+
+  it('has nothing of the mail or of its owner: no address, merchant, card, amount, token or Telegram id', async () => {
+    const logged = catchConsole()
+    const chat = await connectedChat(JANE)
+    await chat.say('/addcard visa 4321 calendar uob-evol')
+    const [subject, receivedAt] = ['A made-up subject', now() - 60]
+    const purchase = textPart(alertText('SGD 98.76', '4321', 'PRIVATE CLINIC'))
+    outside.mailboxes[JANE] = [
+      lookalike('made-up-id-3'),
+      gmailMessage({ id: 'made-up-id-2', subject, receivedAt, content: textPart('A made-up notice.') }),
+      gmailMessage({ id: 'made-up-id-1', subject, receivedAt, content: purchase }),
+    ]
+
+    await runCheck(posting)
+    await runCheck(posting)
+
+    // The user was told of the purchase, with its merchant and its card. The log was told that there was one.
+    expect(outside.telegrams.map((message) => message.text.split('\n')[0])).toEqual([
+      'visa ••••4321: SGD 98.76 at PRIVATE CLINIC',
+    ])
+    expect(logged.events('check')).toMatchObject([
+      { rejected: 1, unparsed: 1 },
+      { stored: 1, notified: 1 },
+    ])
+    const mail = [JANE, 'example.test', 'examplebank.test', 'made-up', 'subject', 'notice', 'PRIVATE CLINIC', 'visa']
+    const numbers = ['4321', '98.76', '9876', 'SGD', String(chat.telegramId)]
+    const tokens = [outside.issued[0], 'refresh-token', 'access-token', env.TELEGRAM_BOT_TOKEN]
+    for (const text of [...mail, ...numbers, ...tokens]) expect(logged.text()).not.toContain(text)
+  })
+})
+
 describe('through the Worker', () => {
   it('runs the checker when the cron trigger fires', async () => {
     const chat = await connectedChat(JANE)
@@ -1191,5 +1489,23 @@ describe('through the Worker', () => {
     ])
     expect(await purchasesOf(await chat.userId())).toMatchObject([{ source_id: 'msg-1', occurred_at: receivedAt }])
     expect((await connectionOf(await chat.userId()))?.last_checked_at).toBeGreaterThanOrEqual(receivedAt)
+  })
+
+  it('logs the run that the cron trigger started', async () => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.mailboxes[JANE] = [gmailMessage({ receivedAt: Math.floor(Date.now() / 1000) - 60 })]
+    const logged = catchConsole()
+
+    const context = createExecutionContext()
+    await worker.scheduled(createScheduledController({ cron: '* * * * *' }), env, context)
+    await waitOnExecutionContext(context)
+
+    // The Worker goes by the real clock, so how long the run took is whatever it took.
+    const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
+    expect(logged.events()).toEqual([
+      { event: 'alert', outcome: 'stored', parser: 'example-bank' },
+      { event: 'check', ...NOTHING_DONE, ...found, stored: 1, notified: 1, checked: true, ms: expect.any(Number) },
+    ])
   })
 })

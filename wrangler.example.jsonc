@@ -8,6 +8,11 @@
   "triggers": {
     "crons": ["* * * * *"]
   },
+  // Workers Logs: Cloudflare keeps what the Worker writes to its console, which
+  // is the service's log. Without this it keeps none of it.
+  "observability": {
+    "enabled": true
+  },
   "d1_databases": [
     {
       "binding": "DB",

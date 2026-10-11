@@ -68,20 +68,20 @@ function setLastRun(userId: number, lastRunAt: number | null) {
 }
 
 describe('sign-ins that have expired', () => {
-  it('are deleted, and the mailboxes that they held are returned', async () => {
+  it('are deleted, and the mailbox that each held is returned, or null for one that held none', async () => {
     const [approved, opened, justExpired, inTime] = [await newUser(), await newUser(), await newUser(), await newUser()]
     await startAttempt(approved, NOW - 60, 'made-up-encrypted-token-1')
     await startAttempt(opened, NOW - 60)
     await startAttempt(justExpired, NOW, 'made-up-encrypted-token-2')
     await startAttempt(inTime, NOW + 1, 'made-up-encrypted-token-3')
 
-    const held = await removeExpiredAttempts(db, NOW, 5)
+    const deleted = await removeExpiredAttempts(db, NOW, 5)
 
-    // The sign-in that Google had brought no mailbox is deleted with the others, and has nothing to return.
-    expect(held.sort((a, b) => a.refreshTokenEnc.localeCompare(b.refreshTokenEnc))).toEqual([
-      { email: 'jane@example.test', refreshTokenEnc: 'made-up-encrypted-token-1' },
-      { email: 'jane@example.test', refreshTokenEnc: 'made-up-encrypted-token-2' },
-    ])
+    // The sign-in that Google had brought no mailbox is deleted with the others, and has none to return.
+    expect(deleted).toHaveLength(3)
+    expect(deleted).toContainEqual({ email: 'jane@example.test', refreshTokenEnc: 'made-up-encrypted-token-1' })
+    expect(deleted).toContainEqual({ email: 'jane@example.test', refreshTokenEnc: 'made-up-encrypted-token-2' })
+    expect(deleted).toContain(null)
     expect(await ownersOf('connect_attempts')).toEqual([inTime.id])
     expect(await removeExpiredAttempts(db, NOW, 5)).toEqual([])
   })
@@ -96,7 +96,7 @@ describe('sign-ins that have expired', () => {
 
     expect(first).toHaveLength(3)
     expect(second).toHaveLength(1)
-    expect(new Set([...first, ...second].map((held) => held.refreshTokenEnc)).size).toBe(4)
+    expect(new Set([...first, ...second].map((held) => held?.refreshTokenEnc)).size).toBe(4)
     expect(await ownersOf('connect_attempts')).toEqual([])
   })
 })

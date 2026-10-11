@@ -4,6 +4,7 @@
 // and whatever they read comes through the store of the user who asked.
 
 import type { Deps } from '../deps'
+import { Failure, log, logFailure, type Events } from '../log'
 import { LIST_SCHEMA, SUMMARY, TRANSACTIONS } from '../mcp/server'
 import { DEFAULT_LIMIT, listTransactions, spendingSummary, ToolError, type ListArguments } from '../mcp/tools'
 import { storeFor, type User } from '../store'
@@ -53,53 +54,97 @@ const TOOLS: Tool[] = [
   },
 ]
 
-/** What came of a question. */
+/**
+ * The names of the tools. What a model calls a tool is text from outside, so the log has it only as the name that it
+ * is known to be.
+ */
+const TOOL_NAMES = ['get_spending_summary', 'list_transactions'] as const
+
+/** What came of a question. `error` is what went wrong with one that was not answered, for whoever logs that. */
 export type Answer =
   | { status: 'answered'; text: string }
   /**
    * The provider has had as many requests as it takes for now. `retryAfter` is how long it said to wait before it
    * is asked again, in seconds and more than zero, when it said.
    */
-  | { status: 'busy'; retryAfter?: number }
-  | { status: 'failed' }
+  | { status: 'busy'; retryAfter?: number; error: unknown }
+  /**
+   * The answering ran out of time: the provider did not answer a request in the time that the request was given, or
+   * no time was left to ask it again.
+   */
+  | { status: 'timeout'; error: unknown }
+  | { status: 'failed'; error: unknown }
 
 /**
- * Answers a question for the user who asked it, with `provider` for the model. It does not throw for what goes
- * wrong with the model or with the provider: that is logged, and the question is then one that failed.
+ * What the answering of a question has taken so far: the requests to the provider, and the calls of tools that were
+ * answered. Each is counted as it is made, so that the log has the counts of a question however its answering ends.
  */
-export async function answerQuestion(deps: Deps, provider: AiProvider, user: User, question: string): Promise<Answer> {
+export type Taken = Pick<Events['question'], 'requests' | 'tool_calls'>
+
+/** What the log has of one call of a tool by the model. */
+type Called = Events['assistant_tool']
+
+/**
+ * Answers a question for the user who asked it, with `provider` for the model, and counts in `taken` what that
+ * takes. It does not throw for what goes wrong with the model or with the provider: the question is then one that
+ * failed, and what went wrong comes back with that.
+ */
+export async function answerQuestion(
+  deps: Deps,
+  provider: AiProvider,
+  user: User,
+  question: string,
+  taken: Taken,
+): Promise<Answer> {
   const began = deps.now()
   try {
-    return { status: 'answered', text: await converse(deps, provider, user, question, began) }
+    return { status: 'answered', text: await converse(deps, provider, user, question, began, taken) }
   } catch (error) {
-    // Only the status of the provider's answer is logged, or the error's name: an error's message could quote the
-    // question or what is stored.
-    const what = error instanceof ProviderError ? error.status : error instanceof Error ? error.name : typeof error
-    console.error('assistant failed:', what)
-    if (error instanceof ProviderError && error.status === 429) return { status: 'busy', retryAfter: error.retryAfter }
-    return { status: 'failed' }
+    if (error instanceof ProviderError && error.status === 429) {
+      return { status: 'busy', retryAfter: error.retryAfter, error }
+    }
+    return { status: ranOutOfTime(error) ? 'timeout' : 'failed', error }
   }
 }
 
+/**
+ * Whether the answering failed because time ran out: its own time, which is ANSWER_TIME, or the time that one
+ * request was given, at the end of which fetch gives the request up with a TimeoutError.
+ */
+function ranOutOfTime(error: unknown): boolean {
+  if (error instanceof Failure) return error.reason === 'out_of_time'
+  return error instanceof Error && error.name === 'TimeoutError'
+}
+
 /** Asks the model, and answers its calls of tools, until it gives its answer: which is what this returns. */
-async function converse(deps: Deps, provider: AiProvider, user: User, question: string, began: Date): Promise<string> {
+async function converse(
+  deps: Deps,
+  provider: AiProvider,
+  user: User,
+  question: string,
+  began: Date,
+  taken: Taken,
+): Promise<string> {
   const messages: ChatMessage[] = [
     { role: 'system', content: systemMessage(began, user.timezone) },
     { role: 'user', content: question },
   ]
-  const answerCall = toolsFor(deps, user)
+  const answerCall = toolsFor(deps, user, taken)
 
   for (let calls = 1; ; calls++) {
     const left = began.getTime() + ANSWER_TIME - deps.now().getTime()
-    if (left <= 0) throw new Error('The answering ran out of time')
+    if (left <= 0) throw new Failure('out_of_time', 'The answering ran out of time')
+    taken.requests++
     const { content, toolCalls, cutShort } = await complete(provider, messages, TOOLS, Math.min(CALL_TIMEOUT, left))
     if (toolCalls.length === 0) {
-      if (content.trim() === '') throw new Error('The model gave no answer')
+      if (content.trim() === '') throw new Failure('no_answer', 'The model gave no answer')
       // An answer that ran into the limit on its length ends wherever that fell, which can be halfway through an
       // amount. So it ends with an ellipsis, as one that is cut to what Telegram takes does.
       return cutShort ? `${content.trimEnd()}…` : content
     }
-    if (calls === MAX_MODEL_CALLS) throw new Error('The model was still calling tools at its last message')
+    if (calls === MAX_MODEL_CALLS) {
+      throw new Failure('still_calling_tools', 'The model was still calling tools at its last message')
+    }
 
     // The model is asked again with the whole conversation: its message, and after that what each call came to.
     messages.push({ role: 'assistant', content: content || undefined, tool_calls: toolCalls })
@@ -132,9 +177,11 @@ function systemMessage(now: Date, timeZone: string): string {
 
 /**
  * What answers the model's calls of tools over one question, each with what the model is to be told came of it:
- * the data as JSON, or what was wrong with the call, so that the model can call again and better.
+ * the data as JSON, or what was wrong with the call, so that the model can call again and better. Every call is
+ * counted in `taken`, and is logged as a call through the MCP endpoint is: of which tool, what came of it and how
+ * long it took, and nothing of what was asked for or of what was answered.
  */
-function toolsFor(deps: Deps, user: User): (call: ToolCall) => Promise<string> {
+function toolsFor(deps: Deps, user: User, taken: Taken): (call: ToolCall) => Promise<string> {
   // Everything the tools read comes through this store, so none of it is another user's.
   const store = storeFor(deps.db, user.id)
   let calls = 0
@@ -160,11 +207,27 @@ function toolsFor(deps: Deps, user: User): (call: ToolCall) => Promise<string> {
   }
 
   return async (call) => {
+    const began = deps.now().getTime()
+    const tool = TOOL_NAMES.find((known) => known === call.function.name) ?? 'unknown'
+    const called = (outcome: Called['outcome']): Called => ({
+      user: user.id,
+      tool,
+      outcome,
+      ms: deps.now().getTime() - began,
+    })
+    taken.tool_calls++
     try {
-      return await run(call.function)
+      const result = await run(call.function)
+      log('assistant_tool', called('ok'))
+      return result
     } catch (error) {
+      // What is wrong with a call is for the model to put right, and is no failure of the service's.
+      if (error instanceof ToolError) {
+        log('assistant_tool', called('invalid'))
+        return `Error: ${error.message}`
+      }
       // Anything else that goes wrong, such as the database failing, is nothing that the model can put right.
-      if (error instanceof ToolError) return `Error: ${error.message}`
+      logFailure('assistant_tool', error, called('failed'))
       throw error
     }
   }

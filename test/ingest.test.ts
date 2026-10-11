@@ -3,6 +3,7 @@ import { expect, it } from 'vitest'
 import { ingestAlert } from '../src/ingest'
 import { findOrCreateUser, storeFor } from '../src/store'
 import { alertEmail, alertText, newTelegramId, seconds } from './helpers'
+import { catchConsole } from './log-helpers'
 
 const ANY_TIME = [0, 4_000_000_000] as const
 
@@ -58,4 +59,40 @@ it('reports an email no parser can read as unparsed, and stores nothing', async 
   expect(await ingestAlert(store, alertEmail({ text: 'Your statement is ready.' }))).toEqual({ status: 'unparsed' })
 
   expect(await store.sumByCurrency('1234', ...ANY_TIME)).toEqual([])
+})
+
+it('logs what came of each alert, with the parser of the bank that sent it', async () => {
+  const store = await newStore()
+  const logged = catchConsole()
+
+  await ingestAlert(store, alertEmail({ sourceId: 'msg-7' }))
+  await ingestAlert(store, alertEmail({ sourceId: 'msg-7' }))
+  // An email that its bank's parser cannot read is named by that parser all the same.
+  await ingestAlert(store, alertEmail({ sourceId: 'msg-8', text: 'Your statement is ready.' }))
+  await ingestAlert(store, alertEmail({ sourceId: 'msg-9', from: 'news@shop.test' }))
+
+  expect(logged.events()).toEqual([
+    { event: 'alert', outcome: 'stored', parser: 'example-bank' },
+    { event: 'alert', outcome: 'duplicate', parser: 'example-bank' },
+    { event: 'alert', outcome: 'unparsed', parser: 'example-bank' },
+    { event: 'alert', outcome: 'unparsed', parser: null },
+  ])
+})
+
+it('logs nothing else of an alert: not its sender, its subject or its text, nor the purchase in it', async () => {
+  const logged = catchConsole()
+  const store = await newStore()
+  const email = alertEmail({
+    sourceId: 'made-up-message-id',
+    subject: 'A made-up subject',
+    text: `Dear Jane,\n${alertText('SGD 98.76', '4321', 'PRIVATE CLINIC')}`,
+  })
+
+  await ingestAlert(store, email)
+  await ingestAlert(store, email)
+  await ingestAlert(store, { ...email, sourceId: 'another-made-up-id', text: 'A notice for jane@example.test.' })
+
+  expect(logged.events().map((event) => event.outcome)).toEqual(['stored', 'duplicate', 'unparsed'])
+  const kept = ['made-up', 'subject', 'Jane', 'jane@', 'examplebank.test', 'PRIVATE CLINIC', '4321', '98', 'SGD']
+  for (const text of kept) expect(logged.text()).not.toContain(text)
 })

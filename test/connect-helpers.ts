@@ -52,6 +52,8 @@ interface Outside {
   grant: Record<string, unknown>
   /** The endpoints that answer with an error. */
   failing: Set<string>
+  /** The endpoints that never answer. A request to one ends only when its signal does, as fetch has it end. */
+  stalled: Set<string>
   /** Runs once while a code is being exchanged: something else happening in the meantime. */
   meanwhile: (() => Promise<unknown>) | undefined
   /** What each mailbox holds, by its address and newest first. Gmail lists all of it, whatever the search asks for. */
@@ -84,6 +86,7 @@ function newOutside(): Outside {
     blocked: new Set(),
     grant: {},
     failing: new Set(),
+    stalled: new Set(),
     meanwhile: undefined,
     mailboxes: {},
     pageSize: 100,
@@ -107,10 +110,13 @@ export const sent: { chatId: number; text: string }[] = []
 export type Posted = Outgoing & { id: number; chatId: number }
 
 /**
- * Every message that the bot has sent, whole: with what is marked in it and the buttons under it. An edit changes
- * the message here, as it does in the chat.
+ * Every message of text that the bot has sent, whole: with what is marked in it and the buttons under it. An edit
+ * changes the message here, and a delete takes it out, as they do in the chat.
  */
 export const posted: Posted[] = []
+
+/** The id of the last message that was put in `posted`. Telegram gives every message an id that no other has. */
+let lastPosted = 0
 
 /** The rich messages that the bot has sent, whole: `rich` takes each reply out. */
 export const sentRich: { chatId: number; message: RichMessage }[] = []
@@ -124,7 +130,12 @@ export const deps: Deps = {
   messenger: {
     async send(chatId, text, entities, buttons) {
       sent.push({ chatId, text })
-      posted.push({ id: posted.length + 1, chatId, text, entities, buttons })
+      posted.push({ id: ++lastPosted, chatId, text, entities, buttons })
+    },
+    // What is sent so is the placeholder of a question, which is no reply: it is in the chat, and not in `sent`.
+    async post(chatId, text) {
+      posted.push({ id: ++lastPosted, chatId, text })
+      return lastPosted
     },
     async sendRich(chatId, message) {
       sentRich.push({ chatId, message })
@@ -136,6 +147,11 @@ export const deps: Deps = {
       const message = posted.find((each) => each.chatId === chatId && each.id === messageId)
       if (!message) throw new Error('A test edited a message that was never sent')
       Object.assign(message, { text, entities, buttons })
+    },
+    async delete(chatId, messageId) {
+      const at = posted.findIndex((each) => each.chatId === chatId && each.id === messageId)
+      if (at < 0) throw new Error('A test deleted a message that was never sent')
+      posted.splice(at, 1)
     },
     // Nothing is kept of this. A test that is about it watches for it.
     async typing() {},
@@ -177,6 +193,10 @@ async function fakeFetch(url: string, init: RequestInit = {}): Promise<Response>
   const { origin, pathname, searchParams } = new URL(url)
   const endpoint = origin + pathname
   if (outside.failing.has(endpoint)) return Response.json({ error: 'made_up_error' }, { status: 400 })
+  if (outside.stalled.has(endpoint)) {
+    const { signal } = init
+    return new Promise<never>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))
+  }
   const form: Record<string, string> = Object.fromEntries(init.body instanceof URLSearchParams ? init.body : [])
   const mailbox = (new Headers(init.headers).get('authorization') ?? '').replace('Bearer access-token-of-', '')
 
@@ -311,14 +331,19 @@ export function openChat() {
   return {
     telegramId,
     send,
-    /** Sends the bot a message and returns its one reply, which is taken out of `sent`. */
+    /**
+     * Sends the bot a message and returns its one reply, which is taken out of `sent`. The reply is the one message
+     * of text that the bot has left in the chat when it is done: for a question, that is what stands in the place
+     * of the placeholder, and a placeholder that is left beside it would be a second.
+     */
     async say(text: string): Promise<string> {
-      const before = sent.length
+      const [before, beforePosted] = [sent.length, posted.length]
       await send(text)
-      expect(sent).toHaveLength(before + 1)
-      const [reply] = sent.splice(before)
-      expect(reply.chatId).toBe(telegramId)
-      return reply.text
+      sent.splice(before)
+      const replies = posted.slice(beforePosted)
+      expect(replies).toHaveLength(1)
+      expect(replies[0].chatId).toBe(telegramId)
+      return replies[0].text
     },
     /**
      * Sends the bot a message and returns its replies whole, however many there are. They are taken out of `sent`.
@@ -334,12 +359,14 @@ export function openChat() {
     },
     /**
      * Sends the bot a message and returns the rich message that is its one reply, which is taken out of `sentRich`.
-     * The bot is to send no message of text with it.
+     * The bot is to send no message of text with it, and to leave none in the chat: the placeholder of a question
+     * is gone by the time its answer is there.
      */
     async rich(text: string): Promise<RichMessage> {
-      const [before, beforeRich] = [sent.length, sentRich.length]
+      const [before, beforePosted, beforeRich] = [sent.length, posted.length, sentRich.length]
       await send(text)
       expect(sent).toHaveLength(before)
+      expect(posted).toHaveLength(beforePosted)
       expect(sentRich).toHaveLength(beforeRich + 1)
       const [reply] = sentRich.splice(beforeRich)
       expect(reply.chatId).toBe(telegramId)

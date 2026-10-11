@@ -1,9 +1,10 @@
 import { env } from 'cloudflare:workers'
-import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WINDOW_LIMIT } from '../src/domain/sorting'
 import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { clock, deps, openChat, sent, sentRich, type Posted } from './connect-helpers'
 import { buy } from './helpers'
+import { catchConsole } from './log-helpers'
 
 // /spend with a card, as text: the purchases of its current window, in tables. It is what the bot sends when
 // Telegram does not take the rich message that test/detail-rich.test.ts is about, so in these tests Telegram takes
@@ -12,12 +13,11 @@ import { buy } from './helpers'
 
 const TERMS = "Limits are from the bank's terms for the UOB EVOL Card, as of 10 June 2026."
 
-/** What the bot logs, which is that it sent text in the place of a rich message. */
-let logged: MockInstance<typeof console.error>
+/** What a chat is sent when the handling of its message fails, the sending of the reply included. */
+const FAILED = "Something went wrong on the bot's side. Please try again in a moment."
 
 beforeEach(() => {
   vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 400))
-  logged = vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
 /** The blocks of a message: each stretch of its text that is set as the rows of a table, and as nothing else. */
@@ -63,10 +63,11 @@ async function shopper() {
 }
 
 describe('/spend with a card, when Telegram does not take the rich message', () => {
-  it('sends the same as text instead, and logs the status that Telegram answered with and no more', async () => {
+  it('sends the same as text instead, and logs the update as one that was replied to, with nothing of the reply', async () => {
     const chat = openChat()
     await chat.say('/addcard amex 0005 calendar')
     const id = await buy(await chat.userId(), { cardLast4: '0005' })
+    const logged = catchConsole()
 
     const [message, ...more] = await chat.ask('/spend amex')
 
@@ -86,23 +87,48 @@ describe('/spend with a card, when Telegram does not take the rich message', () 
         'Total: SGD 12.40 in 1 purchase, resets 1 Nov',
       ].join('\n'),
     )
-    // Nothing of the message is logged: no text of it, and no merchant.
-    expect(logged.mock.calls).toEqual([['rich message failed, sent as text:', 400]])
+    // Nothing of the message is logged: no text of it, and no merchant. The request that Telegram refused is logged
+    // where it is made, by the messenger that posts to Telegram, which the one of these tests stands in for: see
+    // test/webhook.test.ts.
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'command', command: 'spend', outcome: 'replied', ms: 0 },
+    ])
+    for (const text of ['amex', '0005', 'COFFEE', '12.40']) expect(logged.text()).not.toContain(text)
   })
 
-  it.each([
-    ['a chat that Telegram will send nothing to', new ChatBlockedError()],
-    ['a request that Telegram never answered', new TypeError('A made-up failure of the network')],
-  ])('sends nothing as text after %s, and leaves the error as it is', async (_, error) => {
+  it.each<[what: string, error: Error, told: boolean, failure: object]>([
+    [
+      'a chat that Telegram will send nothing to',
+      new ChatBlockedError(),
+      false,
+      { error: 'ChatBlockedError', reason: 'chat_blocked' },
+    ],
+    [
+      'a request that never reached Telegram',
+      new TypeError('A made-up failure of the network'),
+      true,
+      { error: 'TypeError' },
+    ],
+    [
+      'a request that Telegram never answered, and that was given up on',
+      new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+      true,
+      { error: 'TimeoutError' },
+    ],
+  ])('sends nothing as text after %s, and logs the update as one that failed', async (_, error, told, failure) => {
     const chat = openChat()
     await chat.say('/addcard amex 0005 calendar')
     await buy(await chat.userId(), { cardLast4: '0005' })
     vi.mocked(deps.messenger.sendRich).mockRejectedValueOnce(error)
+    const logged = catchConsole()
 
-    await expect(chat.send('/spend amex')).rejects.toBe(error)
+    await chat.send('/spend amex')
 
-    expect(sent).toEqual([])
-    expect(logged).not.toHaveBeenCalled()
+    // All that a chat is sent then is that something went wrong: and a chat that is to be sent nothing, not that.
+    expect(sent).toEqual(told ? [{ chatId: chat.telegramId, text: FAILED }] : [])
+    // The reply had been made, and it was the sending of it that failed: so the log has the command as handled.
+    const line = { event: 'update', kind: 'command', command: 'spend', outcome: 'failed', handled: true, told, ms: 0 }
+    expect(logged.events()).toEqual([{ ...line, ...failure }])
   })
 })
 

@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { depsFor, type Deps } from '../src/deps'
 import { ingestAlert } from '../src/ingest'
 import { findOrCreateUser, storeFor } from '../src/store'
+import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { handleUpdate, type Update } from '../src/telegram/handler'
-import { alertEmail, alertText, newTelegramId, rowsOwnedBy, seconds, userCount } from './helpers'
+import { alertEmail, alertText, buy, newTelegramId, rowsOwnedBy, seconds, userCount } from './helpers'
+import { catchConsole } from './log-helpers'
 
 const NOW = new Date('2026-10-09T12:00:00+08:00')
 
@@ -24,10 +26,15 @@ function recorder() {
       },
       // No reply here is a rich message, which /spend with a card is, and an answer of the assistant's:
       // test/detail-rich.test.ts and test/assistant.test.ts have those. And no reply to a message answers a press
-      // or edits a message. test/sort.test.ts has the presses.
+      // or edits a message. test/sort.test.ts has the presses. Nor is anything here sent for its id, or deleted,
+      // as the placeholder of a question is: test/working.test.ts has that.
+      async post() {
+        return 0
+      },
       async sendRich() {},
       async answer() {},
       async edit() {},
+      async delete() {},
       async typing() {},
     },
   }
@@ -397,39 +404,613 @@ describe('anything else', () => {
   })
 })
 
+/**
+ * An update with the parts that Telegram posts of what is not text, which the bot does not read: a photo, say, and
+ * the words under it. An update comes to the bot as JSON that nothing has checked.
+ */
+function unchecked(update: object): Update {
+  return update
+}
+
+/** A photo as Telegram posts one: the picture in each of the sizes that it is kept in. */
+const photo = [{ file_id: 'made-up-file-id', file_unique_id: 'made-up-id', width: 90, height: 51, file_size: 1234 }]
+
+const sticker = {
+  file_id: 'made-up-file-id',
+  file_unique_id: 'made-up-id',
+  type: 'regular',
+  width: 512,
+  height: 512,
+  is_animated: false,
+  is_video: false,
+  emoji: '👍',
+}
+
+/** A place that is shared for a time, which Telegram posts again as an edited message each time it moves. */
+const liveLocation = { latitude: 1.29, longitude: 103.85, live_period: 900 }
+
+describe('a message that is not text', () => {
+  const NOT_TEXT =
+    'The bot only reads text messages. It cannot read an attachment, such as a photo, a file or a voice message, or ' +
+    'the caption under one. Please send your question or command as text.'
+
+  it.each<[what: string, content: object]>([
+    // The words under an attachment are its caption. Here they are a command, and a question.
+    ['a photo with words under it', { photo, caption: '/addcard visa 1234 calendar' }],
+    ['a photo with nothing under it', { photo }],
+    [
+      'a file with words under it',
+      { document: { file_id: 'made-up-file-id', file_unique_id: 'made-up-id' }, caption: 'How much have I spent?' },
+    ],
+    ['a sticker', { sticker }],
+    ['a voice message', { voice: { file_id: 'made-up-file-id', file_unique_id: 'made-up-id', duration: 3 } }],
+    ['a location', { location: liveLocation }],
+    ['a message with nothing in it', {}],
+    // Whatever the bot does not know is answered so too, and not passed over: silence would be the worse mistake.
+    ['a die that was thrown', { dice: { emoji: '🎲', value: 3 } }],
+    ['a note of Telegram’s that the bot does not know', { made_up_note_of_telegrams: { made_up: true } }],
+  ])('answers %s with that the bot only reads text, and does nothing else about it', async (_, content) => {
+    const telegramId = newTelegramId()
+    const { sent, deps } = recorder()
+    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
+
+    const later = await handleUpdate(deps, unchecked({ message: { message_id: 1, date: 1, chat, from, ...content } }))
+
+    expect(sent).toEqual([{ chatId: telegramId, text: NOT_TEXT }])
+    expect(later).toBeUndefined()
+    // The words under it are not read: the command in them is not run, which would have stored its user.
+    expect(await userCount(telegramId)).toBe(0)
+  })
+})
+
+describe('a message that was edited', () => {
+  const EDITED = 'The bot does not read a message again after it has been edited. Please send it as a new message.'
+
+  it('is answered with that the bot does not read it again, and the command that it now is is not run', async () => {
+    const telegramId = newTelegramId()
+    const { sent, deps } = recorder()
+    await handleUpdate(deps, privateMessage(telegramId, '/addcard visa 1234 calendar'))
+    const { message } = privateMessage(telegramId, '/removecard visa')
+
+    // Telegram posts the message as it stands after the edit, in the place of a new message.
+    const later = await handleUpdate(deps, { edited_message: message })
+
+    expect(later).toBeUndefined()
+    expect(sent.map((each) => each.text)).toEqual(['Added visa ••••1234: calendar month.', EDITED])
+    await handleUpdate(deps, privateMessage(telegramId, '/cards'))
+    expect(sent.at(-1)).toEqual({ chatId: telegramId, text: 'visa ••••1234: calendar month' })
+  })
+
+  it('is answered so whatever it says, and for somebody whom nothing is stored about', async () => {
+    const telegramId = newTelegramId()
+    const { sent, deps } = recorder()
+
+    await handleUpdate(deps, { edited_message: privateMessage(telegramId, 'How much have I spent?').message })
+
+    expect(sent).toEqual([{ chatId: telegramId, text: EDITED }])
+    expect(await userCount(telegramId)).toBe(0)
+  })
+})
+
 describe('updates that are ignored', () => {
   const text = '/start'
   // The id and the text that a message of Telegram's has, so that each of these is ignored for what it is said to be.
   const body = { message_id: 1, text }
-  const updates: [what: string, update: (id: number) => Update][] = [
-    ['a group chat', (id) => ({ message: { ...body, chat: { id: -5001, type: 'group' }, from: { id } } })],
-    ['a supergroup chat', (id) => ({ message: { ...body, chat: { id: -5002, type: 'supergroup' }, from: { id } } })],
-    ['a channel', () => ({ message: { ...body, chat: { id: -5003, type: 'channel' } } })],
-    ['a message without text', (id) => ({ message: { message_id: 1, chat: { id, type: 'private' }, from: { id } } })],
-    ['a message without a sender', (id) => ({ message: { ...body, chat: { id, type: 'private' } } })],
-    ['a message without an id', (id) => ({ message: { text, chat: { id, type: 'private' }, from: { id } } })],
-    ['an update without a message', () => ({})],
+  const [group, supergroup] = [{ id: -5001, type: 'group' }, { id: -5002, type: 'supergroup' }]
+  /** Each with what the log has of it: what it was, as far as the bot looked, and why it was ignored. */
+  const updates: [what: string, update: (id: number) => Update, kind: string, why: string][] = [
+    [
+      'a group chat',
+      (id) => ({ message: { ...body, chat: { id: -5001, type: 'group' }, from: { id } } }),
+      'message',
+      'not_private',
+    ],
+    [
+      'a supergroup chat',
+      (id) => ({ message: { ...body, chat: { id: -5002, type: 'supergroup' }, from: { id } } }),
+      'message',
+      'not_private',
+    ],
+    ['a channel', () => ({ message: { ...body, chat: { id: -5003, type: 'channel' } } }), 'message', 'not_private'],
+    [
+      'a message without a sender',
+      (id) => ({ message: { ...body, chat: { id, type: 'private' } } }),
+      'message',
+      'not_own_chat',
+    ],
+    [
+      'a message without an id',
+      (id) => ({ message: { text, chat: { id, type: 'private' }, from: { id } } }),
+      'message',
+      'no_id',
+    ],
+    ['an update without a message', () => ({}), 'other', 'nothing_read'],
+    // What is not text, and what was edited, is answered in a user's own private chat with the bot, and nowhere else.
+    [
+      'a photo with words under it in a group',
+      (id) => unchecked({ message: { message_id: 1, photo, caption: text, chat: group, from: { id } } }),
+      'message',
+      'not_private',
+    ],
+    [
+      'a sticker in a supergroup',
+      (id) => unchecked({ message: { message_id: 1, sticker, chat: supergroup, from: { id } } }),
+      'message',
+      'not_private',
+    ],
+    [
+      'a photo without a sender',
+      (id) => unchecked({ message: { message_id: 1, photo, chat: { id, type: 'private' } } }),
+      'message',
+      'not_own_chat',
+    ],
+    [
+      'an edited message in a group',
+      (id) => ({ edited_message: { ...body, chat: group, from: { id } } }),
+      'edited',
+      'not_private',
+    ],
+    [
+      'an edited message in a supergroup',
+      (id) => ({ edited_message: { ...body, chat: supergroup, from: { id } } }),
+      'edited',
+      'not_private',
+    ],
+    [
+      'an edited message without a sender',
+      (id) => ({ edited_message: { ...body, chat: { id, type: 'private' } } }),
+      'edited',
+      'not_own_chat',
+    ],
+    [
+      'an edited post of a channel',
+      () => unchecked({ edited_channel_post: { ...body, chat: { id: -5003, type: 'channel' } } }),
+      'other',
+      'nothing_read',
+    ],
+    // Telegram posts a live location as an edited message each time it moves, which is no edit of its user's. It
+    // was answered when it first came, as a message that is not text.
+    [
+      'an edited message that is not text, as a live location is',
+      (id) => {
+        const [chat, from] = [{ id, type: 'private' }, { id }]
+        return unchecked({ edited_message: { message_id: 1, edit_date: 2, location: liveLocation, chat, from } })
+      },
+      'edited',
+      'not_text',
+    ],
+    // What Telegram writes in a chat itself is no message of its user's. It says that a message was pinned by
+    // holding that message, and that the timer which deletes the chat's messages was set by holding the new time.
+    [
+      'what Telegram writes when a message is pinned',
+      (id) => {
+        const [chat, from] = [{ id, type: 'private' }, { id }]
+        return unchecked({ message: { message_id: 2, date: 2, chat, from, pinned_message: { ...body, chat, from } } })
+      },
+      'message',
+      'service_message',
+    ],
+    [
+      'what Telegram writes when the timer that deletes messages is set',
+      (id) => {
+        const [chat, from] = [{ id, type: 'private' }, { id }]
+        const set = { message_auto_delete_time: 86_400 }
+        return unchecked({ message: { message_id: 2, date: 2, chat, from, message_auto_delete_timer_changed: set } })
+      },
+      'message',
+      'service_message',
+    ],
   ]
 
-  it.each(updates)('ignores %s', async (_, update) => {
+  it.each(updates)('ignores %s, and logs that it did and why', async (_, update, kind, why) => {
     const telegramId = newTelegramId()
     const { sent, deps } = recorder()
+    const logged = catchConsole()
 
-    await handleUpdate(deps, update(telegramId))
+    const later = await handleUpdate(deps, update(telegramId))
 
     expect(sent).toEqual([])
+    expect(later).toBeUndefined()
     expect(await userCount(telegramId)).toBe(0)
+    expect(logged.events()).toEqual([{ event: 'update', kind, outcome: 'ignored', why, ms: 0 }])
+    // To ignore an update is no failure.
+    expect(logged.failures()).toEqual([])
   })
 
-  it("ignores a message in a private chat that is not its sender's own", async () => {
+  it.each<[what: string, update: (message: object) => Update, kind: string]>([
+    ['a message', (message) => ({ message }), 'message'],
+    [
+      'a message that is not text',
+      (message) => unchecked({ message: { ...message, text: undefined, sticker } }),
+      'message',
+    ],
+    ['an edited message', (message) => ({ edited_message: message }), 'edited'],
+  ])("ignores %s in a private chat that is not its sender's own", async (_, update, kind) => {
     const [senderId, chatId] = [newTelegramId(), newTelegramId()]
     const { sent, deps } = recorder()
+    const logged = catchConsole()
 
     // The user is known by the sender, and the reply goes to the chat. It would be the sender's reply, sent elsewhere.
-    await handleUpdate(deps, { message: { ...body, chat: { id: chatId, type: 'private' }, from: { id: senderId } } })
+    await handleUpdate(deps, update({ ...body, chat: { id: chatId, type: 'private' }, from: { id: senderId } }))
 
     expect(sent).toEqual([])
     expect(await userCount(senderId)).toBe(0)
     expect(await userCount(chatId)).toBe(0)
+    expect(logged.events()).toEqual([{ event: 'update', kind, outcome: 'ignored', why: 'not_own_chat', ms: 0 }])
+  })
+})
+
+describe('what the log has of an update', () => {
+  /** The names of the bot's commands. A name is what the log has its command as: the command, without the slash. */
+  const COMMAND_NAMES = [
+    'start',
+    'addcard',
+    'cards',
+    'products',
+    'product',
+    'removecard',
+    'spend',
+    'add',
+    'remove',
+    'sort',
+    'timezone',
+    'connect',
+    'code',
+    'status',
+    'disconnect',
+    'mcp',
+    'delete',
+  ]
+
+  it.each(COMMAND_NAMES)('is that /%s came, as the command of that name, and that it was replied to', async (name) => {
+    const chat = openChat()
+    const logged = catchConsole()
+
+    // With nothing after it. What a command does with that is its own affair: it replies.
+    const reply = await chat.say(`/${name}`)
+
+    expect(logged.events('update')).toEqual([
+      { event: 'update', kind: 'command', command: name, outcome: 'replied', ms: 0 },
+    ])
+    // It is a command that there is: one that there is not is answered with the list of those that there are.
+    expect(reply.startsWith('Commands:')).toBe(false)
+  })
+
+  it('is each command that the bot lists, under the name that the list gives it', async () => {
+    const chat = openChat()
+    // The names at the start of the lines of the list, each of them once: /spend is there with and without a card.
+    const lines = (await chat.say('/help')).split('\n')
+    const listed = [...new Set(lines.flatMap((line) => /^\/([a-z]+)/.exec(line)?.[1] ?? []))]
+    expect(listed).toHaveLength(15)
+    const logged = catchConsole()
+
+    for (const name of listed) await chat.say(`/${name}`)
+
+    expect(logged.events('update').map((event) => event.command)).toEqual(listed)
+  })
+
+  it.each<[what: string, text: string, as: object]>([
+    ['a command that there is not', '/nosuchcommand', { kind: 'command', command: 'unknown' }],
+    ['a slash with nothing after it', '/', { kind: 'command', command: 'unknown' }],
+    ['a command with arguments', '/addcard visa 1234 calendar', { kind: 'command', command: 'addcard' }],
+    ['a command in capitals, with the name of a bot', '/SPEND@SpendTrackerBot', { kind: 'command', command: 'spend' }],
+    ['a command that only starts like one of the bot’s', '/spending', { kind: 'command', command: 'unknown' }],
+    ['the six digits of a sign-in', '123456', { kind: 'code' }],
+    ['the six digits of a sign-in, after /code', '/code 123456', { kind: 'command', command: 'code' }],
+    // The service of these tests has no assistant, so a question is answered at once, with that.
+    ['a question', 'How much have I spent?', { kind: 'question' }],
+    ['the name of a command with no slash, which is a question', 'spend', { kind: 'question' }],
+  ])('is that %s came, as what it is, and that it was replied to', async (_, text, as) => {
+    const chat = openChat()
+    const logged = catchConsole()
+
+    await chat.say(text)
+
+    expect(logged.events('update')).toEqual([{ event: 'update', ...as, outcome: 'replied', ms: 0 }])
+  })
+
+  it('is how long the handling took, by the clock that the service goes by', async () => {
+    const telegramId = newTelegramId()
+    const { deps } = recorder()
+    await handleUpdate(deps, privateMessage(telegramId, '/start'))
+    let now = NOW.getTime()
+    // The database takes 40 milliseconds over each statement, and Telegram takes 300 over the reply.
+    const prepare = env.DB.prepare.bind(env.DB)
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      now += 40
+      return prepare(query)
+    })
+    vi.spyOn(deps.messenger, 'send').mockImplementation(async () => {
+      now += 300
+    })
+    const logged = catchConsole()
+
+    // Two statements: the user is looked up, and then their cards.
+    await handleUpdate({ ...deps, now: () => new Date(now) }, privateMessage(telegramId, '/cards'))
+
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'command', command: 'cards', outcome: 'replied', ms: 2 * 40 + 300 },
+    ])
+  })
+
+  it('is nothing of what a message said, and nothing that Telegram knows its user or its chat by', async () => {
+    const logged = catchConsole()
+    const chat = openChat()
+
+    await chat.say('/addcard privatecard 4321 calendar')
+    await chat.say('/add privatecard 98.76 PRIVATE CLINIC')
+    await chat.say('/remove 424242')
+    await chat.say('/timezone Asia/Tokyo')
+    await chat.say('/nosuchcommand PRIVATE')
+    await chat.say('What did I spend at PRIVATE CLINIC?')
+
+    expect(logged.events().map((event) => [event.kind, event.command])).toEqual([
+      ['command', 'addcard'],
+      ['command', 'add'],
+      ['command', 'remove'],
+      ['command', 'timezone'],
+      ['command', 'unknown'],
+      ['question', undefined],
+    ])
+    const never = ['privatecard', '4321', '98.76', '9876', 'PRIVATE', 'CLINIC', 'calendar', '424242', 'Tokyo', 'nosuch']
+    for (const text of [...never, 'What did', String(chat.telegramId)]) expect(logged.text()).not.toContain(text)
+  })
+})
+
+/**
+ * What a chat is sent when the handling of its message fails, and what it is sent in the place of that when the
+ * message is an /add whose purchase is stored by then.
+ */
+const FAILED = "Something went wrong on the bot's side. Please try again in a moment."
+const STORED_NO_REPLY =
+  'Your purchase was stored, but the bot could not reply to it. Check it with /spend before adding it again.'
+
+/** The line that the log has of a message whose handling failed, by the fake clock of these tests: in no time. */
+function failedLine(as: object, handled: boolean, told = true) {
+  return { event: 'update', ...as, outcome: 'failed', handled, told, ms: 0 }
+}
+
+describe('an update whose handling fails', () => {
+  it('has its chat told in one line that something went wrong, and is logged as one that failed', async () => {
+    const telegramId = newTelegramId()
+    const { sent, deps } = recorder()
+    vi.spyOn(env.DB, 'prepare').mockImplementation(() => {
+      throw new Error('a made-up failure that quotes: /addcard visa 1234 calendar')
+    })
+    const logged = catchConsole()
+
+    // It does not throw: there is nobody for it to throw to, and Telegram is to be told that the update was taken.
+    const later = await handleUpdate(deps, privateMessage(telegramId, '/addcard visa 1234 calendar'))
+
+    expect(later).toBeUndefined()
+    expect(sent).toEqual([{ chatId: telegramId, text: FAILED }])
+    // The command failed on the database before anything was done, which is what `handled` says of it.
+    const line = failedLine({ kind: 'command', command: 'addcard' }, false)
+    expect(logged.events()).toEqual([{ ...line, error: 'Error' }])
+    // A failure is written at the level of one, with the name of its error and nothing that the error said.
+    expect(logged.failures()).toEqual(logged.events())
+    for (const text of ['visa', '1234', 'made-up']) expect(logged.text()).not.toContain(text)
+  })
+
+  it.each<[what: string, update: (id: number) => Update, kind: string]>([
+    [
+      'a message that is not text',
+      (id) => unchecked({ message: { message_id: 1, sticker, chat: { id, type: 'private' }, from: { id } } }),
+      'not_text',
+    ],
+    ['an edited message', (id) => ({ edited_message: privateMessage(id, 'How much?').message }), 'edited'],
+  ])('is logged as what it was when it is %s whose reply cannot be sent, with its chat told the same', async (_, update, kind) => {
+    const telegramId = newTelegramId()
+    const { sent, deps } = recorder()
+    // Telegram cannot be reached for the reply, and can after that.
+    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TypeError('A made-up failure of the network'))
+    const logged = catchConsole()
+
+    await handleUpdate(deps, update(telegramId))
+
+    // The bot does nothing about such a message but reply to it, so it is no message that was handled.
+    expect(sent).toEqual([{ chatId: telegramId, text: FAILED }])
+    expect(logged.events()).toEqual([{ ...failedLine({ kind }, false), error: 'TypeError' }])
+  })
+
+  it('is logged as the code of a sign-in when it is one that cannot be checked, with nothing of the code', async () => {
+    const telegramId = newTelegramId()
+    const { sent, deps } = recorder()
+    vi.spyOn(env.DB, 'prepare').mockImplementation(() => {
+      throw new TypeError('A made-up failure of the database')
+    })
+    const logged = catchConsole()
+
+    await handleUpdate(deps, privateMessage(telegramId, '123456'))
+
+    expect(sent).toEqual([{ chatId: telegramId, text: FAILED }])
+    expect(logged.events()).toEqual([{ ...failedLine({ kind: 'code' }, false), error: 'TypeError' }])
+    expect(logged.text()).not.toContain('123456')
+  })
+
+  it('is logged as one that nobody was told of, when the chat is one that Telegram will send nothing to', async () => {
+    const telegramId = newTelegramId()
+    const { sent, deps } = recorder()
+    const send = vi.spyOn(deps.messenger, 'send').mockRejectedValue(new ChatBlockedError())
+    const logged = catchConsole()
+
+    await handleUpdate(deps, privateMessage(telegramId, '/products'))
+
+    // The reply was tried, and nothing after it.
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(sent).toEqual([])
+    const line = failedLine({ kind: 'command', command: 'products' }, true, false)
+    expect(logged.events()).toEqual([{ ...line, error: 'ChatBlockedError', reason: 'chat_blocked' }])
+  })
+
+  it('is logged as one that nobody was told of, when what the chat was to be told cannot be sent either', async () => {
+    const telegramId = newTelegramId()
+    const { deps } = recorder()
+    const send = vi.spyOn(deps.messenger, 'send').mockRejectedValue(new TelegramError('sendMessage', 502))
+    const logged = catchConsole()
+
+    await handleUpdate(deps, privateMessage(telegramId, '/products'))
+
+    expect(send.mock.calls).toEqual([
+      [telegramId, expect.stringMatching(/^The card products whose reward rules are known:/), undefined, undefined],
+      [telegramId, FAILED],
+    ])
+    const line = failedLine({ kind: 'command', command: 'products' }, true, false)
+    expect(logged.events()).toEqual([{ ...line, error: 'Error', reason: 'http_error', status: 502 }])
+  })
+})
+
+describe('a message that was handled, whose reply cannot be sent', () => {
+  it.each<[what: string, text: string, as: object]>([
+    // What these two make is nowhere but in the reply that was lost: to send them again is the way to it.
+    ['an /mcp, which made a token', '/mcp', { kind: 'command', command: 'mcp' }],
+    ['a /connect, which made a link', '/connect', { kind: 'command', command: 'connect' }],
+    ['a command that changed nothing', '/cards', { kind: 'command', command: 'cards' }],
+    ['a command that there is not', '/nosuchcommand', { kind: 'command', command: 'unknown' }],
+    ['a question, on a service with no assistant', 'How much have I spent?', { kind: 'question' }],
+  ])('is answered with "try again" when it is %s, and logged as one that had been handled', async (_, text, as) => {
+    const telegramId = newTelegramId()
+    const { sent, deps } = recorder()
+    // Telegram refuses the reply, and takes what comes after it.
+    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 502))
+    const logged = catchConsole()
+
+    await handleUpdate(deps, privateMessage(telegramId, text))
+
+    // Sent again, none of these does any harm. So the chat is told what it is told when anything else fails.
+    expect(sent).toEqual([{ chatId: telegramId, text: FAILED }])
+    expect(logged.events('update')).toEqual([
+      { ...failedLine(as, true), error: 'Error', reason: 'http_error', status: 502 },
+    ])
+  })
+})
+
+describe('an /add whose purchase is stored, when something fails after that', () => {
+  /** A user with a card, and the messenger and the messages of somebody who is to get the reply to their /add. */
+  async function shopper() {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+    return { chat, ...recorder() }
+  }
+
+  /** The line of an /add that failed once its purchase was stored: handled, with its user told. */
+  const STORED = failedLine({ kind: 'command', command: 'add' }, true)
+
+  it('is told that the purchase was stored, and not to try again, when what its card comes to cannot be read', async () => {
+    const { chat, sent, deps } = await shopper()
+    // The purchase goes in, and the database fails at the next thing: the reading of what the card then comes to.
+    const prepare = env.DB.prepare.bind(env.DB)
+    const queried = vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes('SUM(amount_minor)')) throw new Error('a made-up failure that quotes: Lunch')
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    await handleUpdate(deps, privateMessage(chat.telegramId, '/add visa 12.50 Lunch'))
+
+    // The insert went through before the statement that failed.
+    const statements = queried.mock.calls.map(([query]) => query)
+    const inserted = statements.findIndex((query) => query.includes('INSERT INTO transactions'))
+    expect(inserted).toBeGreaterThan(-1)
+    expect(statements.findIndex((query) => query.includes('SUM(amount_minor)'))).toBeGreaterThan(inserted)
+    queried.mockRestore()
+    // So the chat is not told to try again, which would store the purchase a second time.
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: STORED_NO_REPLY }])
+    expect(sent[0].text).not.toMatch(/try again/i)
+    expect(logged.events()).toEqual([{ ...STORED, error: 'Error' }])
+    expect(logged.text()).not.toContain('Lunch')
+    // The purchase is stored, once.
+    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 12.50 in 1 purchase')
+  })
+
+  it('is told the same when it is the reply that Telegram refuses: sent again, its words would store another', async () => {
+    const { chat, sent, deps } = await shopper()
+    // Telegram refuses the reply, and takes what comes after it.
+    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 502))
+    const logged = catchConsole()
+
+    await handleUpdate(deps, privateMessage(chat.telegramId, '/add visa 12.50 Lunch'))
+
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: STORED_NO_REPLY }])
+    expect(logged.events()).toEqual([{ ...STORED, error: 'Error', reason: 'http_error', status: 502 }])
+    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 12.50 in 1 purchase')
+
+    // Which is what the advice is for: the same words in a new message are a second purchase.
+    await chat.say('/add visa 12.50 Lunch')
+    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 25.00 in 2 purchases')
+  })
+
+  it('is told the same when Telegram delivers its message again, and it is the reply to that which fails', async () => {
+    const { chat, sent, deps } = await shopper()
+    const message = privateMessage(chat.telegramId, '/add visa 12.50 Lunch')
+    await handleUpdate(deps, message)
+    expect(sent).toHaveLength(1)
+    sent.length = 0
+    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 502))
+    const logged = catchConsole()
+
+    // The message as it was, with the id that it had: its purchase is the one that the first delivery stored.
+    await handleUpdate(deps, message)
+
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: STORED_NO_REPLY }])
+    expect(logged.events()).toEqual([{ ...STORED, error: 'Error', reason: 'http_error', status: 502 }])
+    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 12.50 in 1 purchase')
+  })
+})
+
+describe('an /add that stored no purchase, whose reply cannot be sent', () => {
+  /** The line of an /add that failed with nothing stored for its message: not handled, with its user told. */
+  const NOT_STORED = failedLine({ kind: 'command', command: 'add' }, false)
+  const refused = { error: 'Error', reason: 'http_error', status: 502 }
+
+  it.each<[what: string, text: string]>([
+    ['names no card of its user’s', '/add amex 12.50 Lunch'],
+    ['gives no amount', '/add visa Lunch'],
+  ])('is answered with "try again" when it %s: there is no purchase to store twice', async (_, text) => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+    const { sent, deps } = recorder()
+    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 502))
+    const logged = catchConsole()
+
+    await handleUpdate(deps, privateMessage(chat.telegramId, text))
+
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: FAILED }])
+    expect(logged.events()).toEqual([{ ...NOT_STORED, ...refused }])
+  })
+
+  it('is answered with "try again" when its purchase is one too many for a day, and was not stored', async () => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+    const userId = (await chat.user()).id
+    for (let added = 1; added <= 100; added++) await buy(userId, { parser: 'manual' })
+    const { sent, deps } = recorder()
+    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 502))
+    const logged = catchConsole()
+
+    await handleUpdate(deps, privateMessage(chat.telegramId, '/add visa 12.50 One too many'))
+
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: FAILED }])
+    expect(logged.events()).toEqual([{ ...NOT_STORED, ...refused }])
+    expect((await rowsOwnedBy(userId))?.transactions).toBe(100)
+  })
+
+  it('is answered with "try again" when its message comes again after its purchase was taken out', async () => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+    const { sent, deps } = recorder()
+    const message = privateMessage(chat.telegramId, '/add visa 12.50 Lunch')
+    await handleUpdate(deps, message)
+    const [, id] = /^ID (\d+) /.exec(sent[0].text) ?? []
+    await chat.say(`/remove ${id}`)
+    sent.length = 0
+    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 502))
+    const logged = catchConsole()
+
+    // The message as it was. Its purchase is not added again, which is what the reply that fails was to say.
+    await handleUpdate(deps, message)
+
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: FAILED }])
+    expect(logged.events()).toEqual([{ ...NOT_STORED, ...refused }])
   })
 })

@@ -4,9 +4,11 @@ import {
   exchangeCode,
   fetchEmailAddress,
   GMAIL_READONLY,
+  GoogleError,
   revokeToken,
   type GoogleClient,
 } from '../src/google/oauth'
+import { Failure } from '../src/log'
 
 const client: GoogleClient = {
   clientId: 'made-up-client-id',
@@ -109,13 +111,17 @@ describe('exchanging a code', () => {
 
     const failure = await exchangeCode(client, 'made-up-code', 'made-up-verifier').catch((error: Error) => error)
 
-    expect(failure).toEqual(new Error('Google token exchange failed with status 400'))
+    // All that the error holds is the status, and why it was thrown. Its message names the request and the status.
+    expect(failure).toEqual(new GoogleError('Google token exchange', 400))
+    expect((failure as Error).message).toBe('Google token exchange failed with status 400')
   })
 
   it('throws when the response holds no access token', async () => {
     google.mockResolvedValue(Response.json({ refresh_token: 'made-up-refresh-token' }))
 
-    await expect(exchangeCode(client, 'made-up-code', 'made-up-verifier')).rejects.toThrow('no access token')
+    const failure = await exchangeCode(client, 'made-up-code', 'made-up-verifier').catch((error: Error) => error)
+
+    expect(failure).toEqual(new Failure('no_access_token', 'Google token exchange returned no access token'))
   })
 })
 
@@ -136,10 +142,12 @@ describe('the mailbox address', () => {
     google.mockResolvedValueOnce(new Response('Forbidden', { status: 403 }))
     google.mockResolvedValueOnce(Response.json({ messagesTotal: 12 }))
 
-    await expect(fetchEmailAddress('made-up-access-token')).rejects.toThrow(
-      'Gmail profile request failed with status 403',
+    await expect(fetchEmailAddress('made-up-access-token')).rejects.toEqual(
+      new GoogleError('Gmail profile request', 403),
     )
-    await expect(fetchEmailAddress('made-up-access-token')).rejects.toThrow('Gmail profile held no address')
+    await expect(fetchEmailAddress('made-up-access-token')).rejects.toEqual(
+      new Failure('no_address', 'Gmail profile held no address'),
+    )
   })
 })
 
@@ -158,6 +166,18 @@ describe('revoking a token', () => {
 
     const failure = await revokeToken('made-up-refresh-token').catch((error: Error) => error)
 
-    expect(failure).toEqual(new Error('Google token revocation failed with status 400'))
+    expect(failure).toEqual(new GoogleError('Google token revocation', 400))
+    expect((failure as Error).message).toBe('Google token revocation failed with status 400')
+  })
+})
+
+describe("an answer of Google's that is an error", () => {
+  it('is thrown as an error that holds its status, and why, and goes by the name of a plain Error', () => {
+    const error = new GoogleError('Gmail list request', 503)
+
+    expect(error).toBeInstanceOf(Failure)
+    // The request is named in the message, and nothing of it is in the error besides.
+    expect({ ...error }).toEqual({ reason: 'http_error', status: 503 })
+    expect([error.name, error.message]).toEqual(['Error', 'Gmail list request failed with status 503'])
   })
 })

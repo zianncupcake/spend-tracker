@@ -34,8 +34,15 @@ export interface MailSummary {
   unparsed: number
 }
 
-/** Deletes up to `limit` sign-ins that have run out of time, and returns the mailbox of each that held one. */
-export async function removeExpiredAttempts(db: D1Database, now: number, limit: number): Promise<HeldMailbox[]> {
+/**
+ * Deletes up to `limit` sign-ins that have run out of time. Returns, for each that it deleted, the mailbox that the
+ * sign-in held, or null when it held none: Google had brought it no mailbox yet.
+ */
+export async function removeExpiredAttempts(
+  db: D1Database,
+  now: number,
+  limit: number,
+): Promise<(HeldMailbox | null)[]> {
   const { results } = await db
     .prepare(
       `DELETE FROM connect_attempts
@@ -44,7 +51,7 @@ export async function removeExpiredAttempts(db: D1Database, now: number, limit: 
     )
     .bind(now, limit)
     .all<{ email: string | null; refreshTokenEnc: string | null }>()
-  return results.filter(holdsMailbox)
+  return results.map((attempt) => (holdsMailbox(attempt) ? attempt : null))
 }
 
 /**

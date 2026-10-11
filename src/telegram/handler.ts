@@ -7,6 +7,7 @@ import { breakDown, perCurrency } from '../domain/breakdown'
 import { sortByRules, startingCategoryOn, WINDOW_LIMIT } from '../domain/sorting'
 import { cardTotals, type CardTotals } from '../domain/totals'
 import { currentWindow, dayOf, startOfDay } from '../domain/window'
+import { Failure, log, logFailure, type Events } from '../log'
 import { issueToken } from '../mcp/tokens'
 import { hundredths } from '../parsers/shared'
 import {
@@ -26,6 +27,7 @@ import { connectStoreFor, type Connection } from '../store-connect'
 import { mailStoreFor, type MailSummary } from '../store-mail'
 import { mcpStoreFor } from '../store-mcp'
 import {
+  ChatBlockedError,
   TelegramError,
   type MessageEntity,
   type Messenger,
@@ -57,10 +59,22 @@ export interface Update {
   message?: {
     /** Telegram's id of the message, which no other message in its chat has. A delivery that is repeated has it too. */
     message_id?: number
+    /**
+     * What a message of text says. A message of anything else has none: the words under a photo or a file are its
+     * caption, which the bot does not read.
+     */
     text?: string
     chat?: { id?: number; type?: string }
     from?: { id?: number }
+    /**
+     * What a message holds that Telegram wrote in the chat itself, to note that a message was pinned there, or that
+     * the timer which deletes the chat's messages was set. The bot reads neither: only that one of them is there.
+     */
+    pinned_message?: unknown
+    message_auto_delete_timer_changed?: unknown
   }
+  /** A message as it stands after it was edited, which Telegram posts in the place of `message` then. */
+  edited_message?: Update['message']
   /** The press of a button under one of the bot's messages. */
   callback_query?: Press
 }
@@ -105,17 +119,54 @@ interface Tabled {
 type Reply = string | Outgoing[] | Tabled
 
 /**
- * A reply that is still to be made: the answer to a question. A model takes seconds over an answer, and Telegram
- * posts an update again when it has waited too long to hear that the update was taken. So an answer is made, and
- * sent, once Telegram has heard that.
+ * What the making of the reply to a question comes to: the answer or, for a question that was not answered, what its
+ * user is told in the place of one, with what went wrong.
  */
-type Deferred = () => Promise<Reply>
+type Made =
+  | { outcome: 'answered'; reply: Tabled }
+  | { outcome: 'busy' | 'failed' | 'timeout'; notice: string; error: unknown }
 
 /**
- * What is left to be done about an update once Telegram has been told that the update was taken: see Deferred.
- * Whoever calls it has its failing to see to.
+ * A reply that is still to be made: the answer to a question. A model takes seconds over an answer, and Telegram
+ * posts an update again when it has waited too long to hear that the update was taken. So an answer is made, and
+ * sent, once Telegram has heard that. What the making learns of the question, it notes in `asked`.
+ */
+type Deferred = (asked: Asked) => Promise<Made>
+
+/**
+ * What is left to be done about an update once Telegram has been told that the update was taken: see Deferred. It
+ * does not throw: what comes of it is logged, as what came of the update was.
  */
 export type Later = () => Promise<void>
+
+/**
+ * What the log has of an update besides what came of it: what the update is. It is noted as soon as it is known, so
+ * that an update whose handling fails is logged as what it was. See `update` in ../log.
+ */
+type Seen = Pick<Events['update'], 'kind' | 'command' | 'why'>
+
+/** The handling of one update, as it goes on. */
+interface Handling {
+  seen: Seen
+  /**
+   * Whether what the update asked for has been done, so that only the telling of it is left: which the log has of
+   * an update whose handling fails. A message is handled once its reply has been made, and a press once it is to
+   * be answered. An /add is the exception: it is handled once a purchase for its message is stored, and not before.
+   */
+  handled: boolean
+  /**
+   * Tells whoever sent the update that the handling of it failed, in the words for how far the handling had got.
+   * There is none before the update is known to be one to answer, and none for a press that has been answered, as
+   * Telegram takes one answer to a press.
+   */
+  tell?: () => Promise<void>
+}
+
+/**
+ * What the log has of a question, but for how long its answering took. It is noted as the answering goes on, so that
+ * a question is logged with as much as was learnt of it, however its answering ends. See `question` in ../log.
+ */
+type Asked = Omit<Events['question'], 'ms'>
 
 const NICKNAME = /^[A-Za-z0-9_-]{1,20}$/
 const LAST4 = /^\d{4}$/
@@ -146,8 +197,46 @@ const MAX_MERCHANT_LENGTH = 80
  */
 const MAX_QUESTION_LENGTH = 500
 
+/**
+ * How often a chat is shown that the bot is writing while a question is answered, in milliseconds. Telegram shows
+ * it for five seconds at most.
+ */
+const TYPING_EVERY = 4_000
+
+/**
+ * How long the reply to a question is waited for, in milliseconds, from when the answering begins. A Worker is given
+ * 30 seconds after its response, and what is left of them is for telling the user what came of the question. It is
+ * more than the assistant gives the model in all, so a model that is slow is the assistant's to stop: see
+ * ANSWER_TIME in ../ai/assistant.
+ */
+const QUESTION_TIME = 27_000
+
 /** The most blocks that Telegram takes in a rich message: see RichMessage. An answer has one to each of its lines. */
 const MAX_PARAGRAPHS = 500
+
+/**
+ * The names of the bot's commands, each without its slash. What a message begins with is text from outside, so the
+ * log has a command only as the name that it is known to be.
+ */
+const COMMAND_NAMES = [
+  'start',
+  'addcard',
+  'cards',
+  'products',
+  'product',
+  'removecard',
+  'spend',
+  'add',
+  'remove',
+  'sort',
+  'timezone',
+  'connect',
+  'code',
+  'status',
+  'disconnect',
+  'mcp',
+  'delete',
+] as const
 
 export const ADD_CARD_USAGE = `/addcard <nickname> <last4> statement <day>
 /addcard <nickname> <last4> calendar`
@@ -216,7 +305,17 @@ const NO_ASSISTANT =
 
 const QUESTION_TOO_LONG = `A question can be ${MAX_QUESTION_LENGTH} characters at most.`
 
+/**
+ * What a question is answered with at once, so that its user knows that it came: the placeholder, which the reply
+ * then takes the place of. It says what to make of it when nothing does, because a Worker that is ended before it
+ * is done can say nothing more.
+ */
+const WORKING =
+  'Working on it… If this message is still here in half a minute, something went wrong. Please ask again.'
+
 const NOT_ANSWERED = 'That question could not be answered. Try again later, or ask it another way.'
+
+const TOOK_TOO_LONG = 'That question took too long to answer. Try again later, or ask it another way.'
 
 const NO_CARDS = `You have no cards yet. Add one with:\n${ADD_CARD_USAGE}`
 
@@ -233,28 +332,132 @@ const TIMEZONE_USAGE = '/timezone <IANA name>, for example /timezone Asia/Tokyo'
 const NO_SIGN_IN =
   'No sign-in is waiting for a code. It may have expired, or had too many wrong codes. Send /connect to start again.'
 
+// What a message that the bot does not read is answered with, so that nobody waits for the answer to one.
+
+const NOT_TEXT =
+  'The bot only reads text messages. It cannot read an attachment, such as a photo, a file or a voice message, or ' +
+  'the caption under one. Please send your question or command as text.'
+
+const EDITED = 'The bot does not read a message again after it has been edited. Please send it as a new message.'
+
+// What an update is answered with when the handling of it fails, so that nobody waits for an answer that is not
+// coming: a message, or what a press of a button is answered with, which Telegram shows for a moment.
+
+const FAILED = "Something went wrong on the bot's side. Please try again in a moment."
+
+/**
+ * What an /add is answered with when a purchase for its message is stored and something fails after that: the
+ * reading of what its card then comes to, or the sending of the reply. It does not say to try again, as FAILED
+ * does. An /add that is sent again is a message with a new id, and stores the purchase a second time. No other
+ * command does harm when it is sent again, and some have to be: the token that /mcp makes is nowhere but in its
+ * reply, and neither is the link of /connect. So whatever else fails is answered with FAILED, the sending of a
+ * reply included.
+ */
+const STORED_NO_REPLY =
+  'Your purchase was stored, but the bot could not reply to it. Check it with /spend before adding it again.'
+
+const PRESS_FAILED = 'Something went wrong. Please try again in a moment.'
+
 /**
  * Answers a text message that a user sent in their private chat with the bot, or their press of a button under one
- * of the bot's messages there. Every other update is ignored.
+ * of the bot's messages there. A message there that is not text, and one of text that was edited, are answered with
+ * that the bot does not read them. Every other update is ignored.
  *
  * Everything is done by the time this returns but the answering of a question, which is returned to be done once
  * Telegram has been told that the update was taken: see Later.
+ *
+ * It does not throw. Whatever comes of an update is logged, with what the update was and how long the handling of
+ * it took. When that fails, whoever sent the update is told so: see tellOfFailure.
  */
 export async function handleUpdate(deps: Deps, update: Update): Promise<Later | void> {
-  if (update.callback_query) return press(deps, update.callback_query)
+  const began = deps.now().getTime()
+  const handling: Handling = { seen: { kind: 'other' }, handled: false }
+  try {
+    const later = await handle(deps, update, handling)
+    const { kind, command, why } = handling.seen
+    // What is not ignored, and is not left for later, has been replied to.
+    const outcome = later ? 'deferred' : why ? 'ignored' : 'replied'
+    log('update', { kind, command, outcome, why, ms: deps.now().getTime() - began })
+    return later
+  } catch (error) {
+    const told = await tellOfFailure(handling.tell, error)
+    const { seen, handled } = handling
+    const ms = deps.now().getTime() - began
+    // Nothing of the error's message is logged: it could quote what the update held, or what is stored.
+    logFailure('update', error, { kind: seen.kind, command: seen.command, outcome: 'failed', handled, told, ms })
+  }
+}
 
-  const { message_id: messageId, text, chat, from } = update.message ?? {}
-  if (chat?.type !== 'private' || typeof chat.id !== 'number') return
-  if (typeof from?.id !== 'number' || typeof text !== 'string' || typeof messageId !== 'number') return
+/** Does what `handleUpdate` is said to do, and notes in `handling` what the update is found to be on the way. */
+async function handle(deps: Deps, update: Update, handling: Handling): Promise<Later | void> {
+  const { seen } = handling
+  if (update.callback_query) return press(deps, update.callback_query, handling)
+
+  // An update holds one thing: here a message, or a message as it stands after it was edited.
+  const message = update.message ?? update.edited_message
+  if (!message) return ignore(seen, 'nothing_read')
+  seen.kind = update.message ? 'message' : 'edited'
+  const { message_id: messageId, text, chat, from } = message
+  if (chat?.type !== 'private' || typeof chat.id !== 'number') return ignore(seen, 'not_private')
   // The user is known by who sent the message, and the reply goes to the chat it was sent in. A user's private
   // chat with the bot has the user's own id, so the two are the same, and an update in which they differ is not
   // one to answer.
-  if (from.id !== chat.id) return
+  if (typeof from?.id !== 'number' || from.id !== chat.id) return ignore(seen, 'not_own_chat')
   const chatId = chat.id
+  handling.tell = () => deps.messenger.send(chatId, FAILED)
 
-  const answer = await reply(deps, from.id, messageId, text)
-  if (typeof answer !== 'function') return sendReply(deps.messenger, chatId, answer)
-  return async () => sendReply(deps.messenger, chatId, await answer())
+  // An edited message is not read again: a command in it is not run, and a question in it is not asked. Its user
+  // is told so when it is one of text. One that is not was answered with NOT_TEXT when it first came, and Telegram
+  // posts edits that are none of its user's making, as every move of a live location is.
+  if (!update.message) {
+    return typeof text === 'string' ? sendReply(deps.messenger, chatId, EDITED) : ignore(seen, 'not_text')
+  }
+  // What Telegram writes in a chat itself is no message of its user's, and is not answered: that a message was
+  // pinned, and that the timer which deletes the chat's messages was set. The list is short on purpose. Whatever
+  // else the bot does not know is answered with NOT_TEXT, because silence is the worse mistake.
+  if (message.pinned_message !== undefined || message.message_auto_delete_timer_changed !== undefined) {
+    return ignore(seen, 'service_message')
+  }
+  // The words under an attachment are no question, and are sent to nobody.
+  if (typeof text !== 'string') {
+    seen.kind = 'not_text'
+    return sendReply(deps.messenger, chatId, NOT_TEXT)
+  }
+  if (typeof messageId !== 'number') return ignore(seen, 'no_id')
+
+  // An /add says when a purchase for its message is stored. What it asked for is done from then on, and whatever
+  // fails after that is not answered with FAILED, which says to try again: see STORED_NO_REPLY.
+  const stored = () => {
+    handling.handled = true
+    handling.tell = () => deps.messenger.send(chatId, STORED_NO_REPLY)
+  }
+  const answer = await reply(deps, from.id, messageId, text, seen, stored)
+  if (typeof answer !== 'function') {
+    // What any other message asked for is done once its reply has been made: only the sending of it is left.
+    if (seen.command !== 'add') handling.handled = true
+    return sendReply(deps.messenger, chatId, answer)
+  }
+  return () => sendLater(deps, chatId, answer)
+}
+
+/** Notes why an update is ignored, which is all that is done about one that is. */
+function ignore(seen: Seen, why: NonNullable<Seen['why']>): void {
+  seen.why = why
+}
+
+/**
+ * Tells whoever sent an update that the handling of it failed, with `tell`, and returns whether they were told. A
+ * chat that Telegram will send nothing to is not told: it would take this no more than it took what failed. When
+ * the telling fails too, that is all: the request that failed has its own line in the log.
+ */
+async function tellOfFailure(tell: Handling['tell'], error: unknown): Promise<boolean> {
+  if (!tell || error instanceof ChatBlockedError) return false
+  try {
+    await tell()
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function sendReply(messenger: Messenger, chatId: number, answer: Reply): Promise<void> {
@@ -279,17 +482,156 @@ async function sendTabled(messenger: Messenger, chatId: number, { rich, asText }
     // A chat that is to be sent nothing would take the text no more than it took this. That error goes on as it is,
     // and so does one that is not an answer of Telegram's at all.
     if (!(error instanceof TelegramError)) throw error
-    // Only the status is logged, and nothing of the message, which holds the names of merchants.
-    console.error('rich message failed, sent as text:', error.status)
+    // The request that Telegram refused has its own line in the log: see request in ./api.
     return asText()
   }
 }
 
-/** The reply to a message or, to a question for the assistant, the reply that is still to be made. */
-async function reply(deps: Deps, telegramId: number, messageId: number, text: string): Promise<Reply | Deferred> {
+/**
+ * Makes a reply that was left to be made, which is the answer to a question, and sends it. Its user is not left to
+ * wonder in the meantime: the chat is sent a placeholder at once, which the reply takes the place of. And they are
+ * told whatever comes of the question: that it could not be answered, when the reply cannot be made or cannot be
+ * sent, and that it took too long, when the making does.
+ *
+ * Only a chat that Telegram will send nothing to is told nothing.
+ *
+ * It does not throw. What came of the question is logged in one line when this ends, however it ends. A request to
+ * Telegram that fails on the way has a line of its own, whether or not the answering goes on after it: see
+ * `request` in ./api.
+ */
+async function sendLater({ messenger, now }: Deps, chatId: number, make: Deferred): Promise<void> {
+  const began = now().getTime()
+  // The time that a question is given starts here, with the first thing that is done about it.
+  const until = began + QUESTION_TIME
+  // Until more is learnt of it, the question is one that failed, of a user who is not known, with nothing said.
+  const asked: Asked = { user: null, outcome: 'failed', sent: 'none', placeholder: false, requests: 0, tool_calls: 0 }
+  // What went wrong with a question that was not answered, which its line has as the error of a failure.
+  let wrong: unknown
+  try {
+    const placeholder = await sendPlaceholder(messenger, chatId)
+    asked.placeholder = placeholder !== undefined
+    // What is said in the place of the placeholder. An answer is not said there: it is a rich message, and Telegram's
+    // reference does not say that a message of text can be edited into one. So it is sent as any other rich reply is,
+    // as a message of its own, and the placeholder is then deleted.
+    let notice: string | undefined
+    try {
+      const came = await made(messenger, chatId, () => make(asked), until - now().getTime())
+      if (came.outcome === 'answered') {
+        const asText = await sendTabled(messenger, chatId, came.reply)
+        await sendReply(messenger, chatId, asText)
+        asked.sent = asText.length > 0 ? 'text' : 'rich'
+      } else {
+        notice = came.notice
+        wrong = came.error
+      }
+      asked.outcome = came.outcome
+    } catch (error) {
+      if (error instanceof ChatBlockedError) throw error
+      notice = NOT_ANSWERED
+      wrong = error
+    }
+    if (notice !== undefined) {
+      asked.sent = await sayInstead(messenger, chatId, placeholder, notice)
+    } else if (placeholder !== undefined) {
+      // The answer is in the chat, and a placeholder that stays above it is all that a failure to delete it leaves.
+      await messenger.delete(chatId, placeholder).catch(() => {})
+    }
+  } catch (error) {
+    // What gets here was said to nobody. A chat that Telegram will send nothing to is the one that is to be told
+    // nothing, whatever came of its question. Anything else is a notice that could not be said in a message of its
+    // own either: the question is logged with what went wrong before that.
+    if (error instanceof ChatBlockedError) asked.outcome = 'blocked'
+    if (error instanceof ChatBlockedError || wrong === undefined) wrong = error
+  }
+  const line = { ...asked, ms: now().getTime() - began }
+  // Nothing of an error's message is logged: it could quote the question, or what is stored.
+  if (asked.outcome === 'answered') log('question', line)
+  else logFailure('question', wrong, line)
+}
+
+/**
+ * Sends the placeholder: see WORKING. Returns the id that Telegram gave it, or nothing when it could not be sent,
+ * and the question is then answered all the same. A chat that Telegram will send nothing to ends the answering
+ * here, before the model is asked anything: that error goes on as it is.
+ */
+async function sendPlaceholder(messenger: Messenger, chatId: number): Promise<number | undefined> {
+  try {
+    return await messenger.post(chatId, WORKING)
+  } catch (error) {
+    if (error instanceof ChatBlockedError) throw error
+    return undefined
+  }
+}
+
+/**
+ * Makes a reply that was left to be made, with the chat shown that the bot is writing until it is made: Telegram
+ * shows that for five seconds, so it is shown again every four. The making is waited for only so long, which is
+ * `time` in milliseconds. Then the question is one that took too long, and whatever the making comes to after that
+ * is sent to nobody.
+ */
+async function made(messenger: Messenger, chatId: number, make: () => Promise<Made>, time: number): Promise<Made> {
+  const showTyping = () => {
+    // The question is answered all the same.
+    messenger.typing(chatId).catch(() => {})
+  }
+  showTyping()
+  const typing = setInterval(showTyping, TYPING_EVERY)
+  const late = Promise.withResolvers<Made>()
+  const deadline = setTimeout(() => {
+    const error = new Failure('took_too_long', 'The question took too long to answer')
+    late.resolve({ outcome: 'timeout', notice: TOOK_TOO_LONG, error })
+  }, time)
+  try {
+    return await Promise.race([make(), late.promise])
+  } finally {
+    clearInterval(typing)
+    clearTimeout(deadline)
+  }
+}
+
+/**
+ * Says one thing in the place of the placeholder, which is edited to say it. With no placeholder, or with one that
+ * Telegram will not have edited, as one that its user has deleted, it is sent as a message of its own. Returns which
+ * of the two it was.
+ */
+async function sayInstead(
+  messenger: Messenger,
+  chatId: number,
+  placeholder: number | undefined,
+  text: string,
+): Promise<'edit' | 'message'> {
+  if (placeholder !== undefined) {
+    try {
+      await messenger.edit(chatId, placeholder, text)
+      return 'edit'
+    } catch (error) {
+      // A chat that is to be sent nothing would take a message no more than it took the edit.
+      if (error instanceof ChatBlockedError) throw error
+    }
+  }
+  await messenger.send(chatId, text)
+  return 'message'
+}
+
+/**
+ * The reply to a message or, to a question for the assistant, the reply that is still to be made. What the message
+ * is found to be is noted in `seen`, and `stored` is what an /add calls once a purchase for the message is stored.
+ */
+async function reply(
+  deps: Deps,
+  telegramId: number,
+  messageId: number,
+  text: string,
+  seen: Seen,
+  stored: () => void,
+): Promise<Reply | Deferred> {
   const { db, now } = deps
   const [first = '', ...args] = text.trim().split(/\s+/)
   const command = first.split('@')[0].toLowerCase() // "/spend@SomeBot" is "/spend"
+  // What the log has of a command is the name that it is known by here, and never what was sent. A message that is
+  // none of the commands is noted for what it is where that is found out, at the end of the switch.
+  seen.kind = 'command'
+  seen.command = COMMAND_NAMES.find((name) => command === `/${name}`)
   // A user row is only created by the commands that need one.
   const user = () => findOrCreateUser(db, telegramId)
 
@@ -379,7 +721,7 @@ async function reply(deps: Deps, telegramId: number, messageId: number, text: st
       if (!card) return `You have no card called ${nickname}.`
       const currency = productOf(card.product)?.homeCurrency ?? DEFAULT_CURRENCY
       const entry = parseEntry(rest, card, currency, now(), timezone)
-      return typeof entry === 'string' ? entry : addPurchase(store, card, entry, messageId, now(), timezone)
+      return typeof entry === 'string' ? entry : addPurchase(store, card, entry, messageId, now(), timezone, stored)
     }
 
     case '/remove': {
@@ -490,40 +832,45 @@ async function reply(deps: Deps, telegramId: number, messageId: number, text: st
 
     default:
       // The code from the sign-in page, sent as a message of its own.
-      if (args.length === 0 && CODE.test(first)) return confirmReply(deps, (await user()).id, first)
+      if (args.length === 0 && CODE.test(first)) {
+        seen.kind = 'code'
+        return confirmReply(deps, (await user()).id, first)
+      }
       // A command that there is not, or a message with nothing in it: the list of the commands and, where the bot
       // has an assistant, what becomes of a message that is none of them.
-      if (first === '' || first.startsWith('/')) return deps.ai ? `${COMMANDS}\n\n${ASK_TOO}` : COMMANDS
+      if (first === '' || first.startsWith('/')) {
+        seen.command = 'unknown'
+        return deps.ai ? `${COMMANDS}\n\n${ASK_TOO}` : COMMANDS
+      }
       // Whatever else a message says, it is a question for the assistant.
+      seen.kind = 'question'
       return ask(deps, telegramId, text.trim())
   }
 }
 
 /**
- * The reply to a question for the assistant. Where the bot has one, it is a reply that is still to be made: the
- * chat is first shown that the bot is writing, and the answer then takes the seconds that a model takes over it.
+ * The reply to a question for the assistant. Where the bot has one, it is a reply that is still to be made, as the
+ * answer takes the seconds that a model takes over it: see sendLater for what its user is shown in the meantime.
  */
 function ask(deps: Deps, telegramId: number, question: string): Reply | Deferred {
-  const { ai, db, messenger } = deps
+  const { ai, db } = deps
   if (!ai) return NO_ASSISTANT
   if (question.length > MAX_QUESTION_LENGTH) return QUESTION_TOO_LONG
 
-  return async () => {
-    try {
-      await messenger.typing(telegramId)
-    } catch (error) {
-      // The question is answered all the same.
-      console.error('typing action failed:', error instanceof Error ? error.name : typeof error)
-    }
+  return async (asked) => {
     // A question needs a user as a command does: its answer is read from their store.
-    const result = await answerQuestion(deps, ai, await findOrCreateUser(db, telegramId), question)
+    const user = await findOrCreateUser(db, telegramId)
+    asked.user = user.id
+    const result = await answerQuestion(deps, ai, user, question, asked)
     switch (result.status) {
       case 'answered':
-        return answered(result.text)
+        return { outcome: 'answered', reply: answered(result.text) }
       case 'busy':
-        return busyReply(result.retryAfter)
+        return { outcome: 'busy', notice: busyReply(result.retryAfter), error: result.error }
+      case 'timeout':
+        return { outcome: 'timeout', notice: TOOK_TOO_LONG, error: result.error }
       case 'failed':
-        return NOT_ANSWERED
+        return { outcome: 'failed', notice: NOT_ANSWERED, error: result.error }
     }
   }
 }
@@ -586,16 +933,29 @@ function describeWait(seconds: number): string {
  * Answers the press of a button. The bot's buttons move a purchase to a category, so that is what a press does:
  * for the user who made it, and in their own private chat with the bot.
  */
-async function press(deps: Deps, { id, from, data, message }: Press): Promise<void> {
+async function press(deps: Deps, { id, from, data, message }: Press, handling: Handling): Promise<void> {
   const { db, messenger } = deps
-  if (typeof id !== 'string' || typeof from?.id !== 'number') return
+  const { seen } = handling
+  seen.kind = 'press'
+  if (typeof id !== 'string') return ignore(seen, 'no_id')
   // As with a message: an update whose chat is not the private chat of the user it is from is not one to answer.
-  if (message?.chat?.type !== 'private' || message.chat.id !== from.id) return
+  if (message?.chat?.type !== 'private') return ignore(seen, 'not_private')
+  if (typeof from?.id !== 'number' || message.chat.id !== from.id) return ignore(seen, 'not_own_chat')
   const chatId = from.id
+
+  // Telegram shows a button as waiting until its press is answered, and takes one answer to a press. So a press
+  // whose handling fails is answered with that it did, unless it has been answered by then.
+  handling.tell = () => messenger.answer(id, PRESS_FAILED)
+  const answer = async (text: string) => {
+    // A press is answered once what it asked for is done, or is found to be nothing that can be done.
+    handling.handled = true
+    await messenger.answer(id, text)
+    handling.tell = undefined
+  }
 
   // A client can send what no button of the bot's holds. So every part of it is looked up before anything is
   // changed, and the purchase through the store of the user who pressed, which finds no purchase of anyone else's.
-  const refuse = () => messenger.answer(id, 'That button no longer works.')
+  const refuse = () => answer('That button no longer works.')
   const pressed = readPress(typeof data === 'string' ? data : '')
   const user = pressed && (await findUser(db, chatId))
   if (!pressed || !user) return refuse()
@@ -615,7 +975,7 @@ async function press(deps: Deps, { id, from, data, message }: Press): Promise<vo
   // like any other. It is what comes after Telegram failed to take the answer or the edit of an earlier press: the
   // purchase was moved then, and its message still says where it was. So this press brings the message up to date.
   const { line, buttons } = sortEnd(product, { id: purchase.id, category: category.key })
-  await messenger.answer(id, line)
+  await answer(line)
 
   // The message ends with the line that said where the purchase was. That line is replaced, and so are the buttons:
   // by those for where the purchase is now.
@@ -762,7 +1122,8 @@ function dayStart(year: number, month: number, day: number, timeZone: string): n
 /**
  * Stores a purchase that its user described, and tells of it: the purchase, and where it leaves its card. On a card
  * with a product the message ends as the one for a purchase from an alert does, with where the purchase is sorted
- * and with the buttons that move it. `messageId` is Telegram's id of the message that described the purchase.
+ * and with the buttons that move it. `messageId` is Telegram's id of the message that described the purchase, and
+ * `stored` is called once a purchase for that message is known to be stored.
  */
 async function addPurchase(
   store: Store,
@@ -771,6 +1132,7 @@ async function addPurchase(
   messageId: number,
   now: Date,
   timeZone: string,
+  stored: () => void,
 ): Promise<string | Outgoing[]> {
   const described = { ...entry, cardLast4: card.last4, parser: MANUAL }
   const category = startingCategoryOn(card, described)
@@ -784,6 +1146,9 @@ async function addPurchase(
   const purchase = id === null ? await store.findBySourceId(sourceId) : { ...described, id, category, removedAt: null }
   if (!purchase) return TOO_MANY_BY_HAND
   if (purchase.removedAt !== null) return `ID ${purchase.id} has been taken out, and is not added again.`
+  // From here on a purchase for this message is stored: by this delivery of the message, or by an earlier one.
+  // Whatever fails after this, its user is not to be told to send the message again.
+  stored()
 
   const [totals] = await cardTotals(store, [card], now, timeZone)
   const date = formatShortDate(new Date(purchase.occurredAt * 1000), timeZone)

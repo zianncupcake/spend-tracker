@@ -5,8 +5,9 @@ import { serveMcp } from '../src/mcp/server'
 import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { handleUpdate, type Update } from '../src/telegram/handler'
 import { called, calling, refusing, saying, toolResult, type ChatMessage, type Completion } from './ai-helpers'
-import { clock, deps, NOW, openChat, outside, sent, sentRich } from './connect-helpers'
+import { clock, deps, NOW, openChat, outside, posted, sent, sentRich } from './connect-helpers'
 import { buy, linesOf, plain, userCount } from './helpers'
+import { catchConsole } from './log-helpers'
 import { mcpRequest, messageIn } from './mcp-helpers'
 
 // The bot's assistant: a question that a user asks in their own words, and the answer that a model gives it with
@@ -28,6 +29,11 @@ const NO_ASSISTANT =
 
 const BUSY = 'The assistant has reached its limit for now. Try again later.'
 const NOT_ANSWERED = 'That question could not be answered. Try again later, or ask it another way.'
+const TOOK_TOO_LONG = 'That question took too long to answer. Try again later, or ask it another way.'
+
+/** The placeholder that a question is answered with at once. test/working.test.ts has what becomes of it. */
+const WORKING =
+  'Working on it… If this message is still here in half a minute, something went wrong. Please ask again.'
 
 const BAD_DATE = 'must be a date such as 2026-10-01, or an instant such as 2026-10-01T09:30:00+08:00.'
 const MORE = 'There may be more purchases than are listed here. To see them, ask for a shorter stretch of time.'
@@ -122,6 +128,35 @@ async function chatWithCard() {
 /** A message in a user's private chat with the bot, as Telegram posts it. Nothing here goes by the id of one. */
 function privateMessage(telegramId: number, text: string): Update {
   return { message: { message_id: 1, text, chat: { id: telegramId, type: 'private' }, from: { id: telegramId } } }
+}
+
+/**
+ * The line that the log has of a question when its answering ends: here of one that the model answered at once, with
+ * the answer sent as a rich message and the placeholder gone, in no time by the clock of these tests. A test says
+ * what the line of its question has otherwise. `userId` is the service's own id of the user who asked.
+ */
+function questionLine(userId: number) {
+  return {
+    event: 'question',
+    user: userId,
+    outcome: 'answered',
+    sent: 'rich',
+    placeholder: true,
+    requests: 1,
+    tool_calls: 0,
+    ms: 0,
+  }
+}
+
+/**
+ * What the line has otherwise of a question that was not answered, when its user was told so in the place of the
+ * placeholder.
+ */
+const NOT = { outcome: 'failed', sent: 'edit' }
+
+/** What a line has of the failure, when the provider answered a request with the status. */
+function refusedWith(status: number) {
+  return { error: 'Error', reason: 'http_error', status }
 }
 
 describe('a question', () => {
@@ -388,9 +423,10 @@ describe('a call of a tool that cannot be answered', () => {
   })
 
   it('fails the question when it is the database that failed it, which the model cannot put right', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = await chatWithCard()
-    await buy(await chat.userId())
+    const userId = await chat.userId()
+    await buy(userId)
     outside.model = [calling(['call_1', 'list_transactions'])]
     const prepare = env.DB.prepare.bind(env.DB)
     vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
@@ -400,9 +436,14 @@ describe('a call of a tool that cannot be answered', () => {
 
     expect(await chat.say('What did I buy?')).toBe(NOT_ANSWERED)
 
-    // The model is not asked again, and only the name of the error is logged.
+    // The model is not asked again. The call is logged as one that failed, and the question as one that failed with
+    // it: only the name of the error is logged.
     expect(outside.completions).toHaveLength(1)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 'Error']])
+    expect(logged.events('assistant_tool')).toEqual([
+      { event: 'assistant_tool', user: userId, tool: 'list_transactions', outcome: 'failed', ms: 0, error: 'Error' },
+    ])
+    expect(logged.events('question')).toEqual([{ ...questionLine(userId), ...NOT, tool_calls: 1, error: 'Error' }])
+    expect(logged.text()).not.toContain('COFFEE PLACE')
   })
 })
 
@@ -487,8 +528,9 @@ describe('the model', () => {
   })
 
   it('is not asked a fifth time: when its fourth message still calls tools, the question is left unanswered', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = await chatWithCard()
+    const userId = await chat.userId()
     outside.model = [
       calling(['call_1', 'get_spending_summary']),
       calling(['call_2', 'list_transactions']),
@@ -502,7 +544,11 @@ describe('the model', () => {
     expect(outside.completions).toHaveLength(4)
     // The calls of the fourth message are not answered: the user, the summary of one card, and two listings.
     expect(queried).toHaveBeenCalledTimes(1 + 2 + 2 * 2)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 'Error']])
+    // The log has why, with the four requests that the question took and the three calls that were answered.
+    const failure = { error: 'Error', reason: 'still_calling_tools' }
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(userId), ...NOT, requests: 4, tool_calls: 3, ...failure },
+    ])
   })
 
   it.each<[what: string, content: string | null]>([
@@ -510,14 +556,16 @@ describe('the model', () => {
     ['an empty text', ''],
     ['only blanks', ' \n\t '],
   ])('leaves the question unanswered when it answers with %s', async (_, content) => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = openChat()
     outside.model = [saying(content)]
 
     expect(await chat.say('How much have I spent?')).toBe(NOT_ANSWERED)
 
     expect(outside.completions).toHaveLength(1)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 'Error']])
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(await chat.userId()), ...NOT, error: 'Error', reason: 'no_answer' },
+    ])
   })
 
   /** A user with as many cards as a user may have: the summary runs a query for each. */
@@ -540,6 +588,7 @@ describe('the model', () => {
       saying('That is everything.'),
     ]
     const queried = vi.spyOn(env.DB, 'prepare')
+    const logged = catchConsole()
 
     expect(linesOf(await chat.rich('Tell me everything?'))).toEqual(['That is everything.'])
 
@@ -550,10 +599,15 @@ describe('the model', () => {
     expect(messagesOf(3).at(-1)).toEqual(toolResult('call_7', 'list_transactions', refused))
     expect(messagesOf(4).at(-1)).toEqual(toolResult('call_8', 'get_spending_summary', refused))
     // The user, the cards and a total for each of the 20, and the cards and the purchases for each of the 5
-    // listings. A request may run 50.
+    // listings. A request may run 50. The logging of all this asks the database nothing.
     expect(queried).toHaveBeenCalledTimes(1 + (1 + 20) + 5 * 2)
     expect(queried).toHaveBeenCalledTimes(32)
     expect(outside.completions).toHaveLength(4)
+    // The log has all eight calls, the last two as calls that the model was told were wrong, and the question as
+    // one that took them all.
+    const outcomes = logged.events('assistant_tool').map((event) => event.outcome)
+    expect(outcomes).toEqual(['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'invalid', 'invalid'])
+    expect(logged.events('question')).toMatchObject([{ outcome: 'answered', requests: 4, tool_calls: 8 }])
   })
 
   it('has the summary read once for a question, however often it calls for it', async () => {
@@ -578,21 +632,36 @@ describe('the model', () => {
 describe('a provider that does not answer as it should', () => {
   const QUESTION = 'How much did I spend at COFFEE PLACE?'
 
-  it.each<[what: string, reply: () => Response, said: string, logged: number | string]>([
-    ['answers 429, as it does when it has had too many requests or tokens', refusing(429, QUESTION), BUSY, 429],
-    ['answers 500', refusing(500, QUESTION), NOT_ANSWERED, 500],
-    ['answers 401, as it does to a key that it does not know', refusing(401, 'test-ai-key'), NOT_ANSWERED, 401],
-    ['answers with what is not JSON', () => new Response(`<p>${QUESTION}</p>`), NOT_ANSWERED, 'SyntaxError'],
+  it.each<[what: string, reply: () => Response, said: string, failure: object]>([
+    [
+      'answers 429, as it does when it has had too many requests or tokens',
+      refusing(429, QUESTION),
+      BUSY,
+      refusedWith(429),
+    ],
+    ['answers 500', refusing(500, QUESTION), NOT_ANSWERED, refusedWith(500)],
+    [
+      'answers 401, as it does to a key that it does not know',
+      refusing(401, 'test-ai-key'),
+      NOT_ANSWERED,
+      refusedWith(401),
+    ],
+    [
+      'answers with what is not JSON',
+      () => new Response(`<p>${QUESTION}</p>`),
+      NOT_ANSWERED,
+      { error: 'SyntaxError' },
+    ],
     [
       'cannot be reached',
       () => {
         throw new TypeError(`A made-up failure of the network that quotes: ${QUESTION}`)
       },
       NOT_ANSWERED,
-      'TypeError',
+      { error: 'TypeError' },
     ],
-  ])('has the user told so, and only a status or an error name logged, when it %s', async (_, reply, said, what) => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  ])('has the user told so, and only a status or an error name logged, when it %s', async (_, reply, said, failure) => {
+    const logged = catchConsole()
     const chat = await chatWithCard()
     outside.model = [reply]
 
@@ -600,11 +669,16 @@ describe('a provider that does not answer as it should', () => {
 
     // It is not asked again.
     expect(outside.completions).toHaveLength(1)
-    expect(logged.mock.calls).toEqual([['assistant failed:', what]])
+    // The question's line has what the line of the request has of the failure. Neither has what the provider said,
+    // or what the error did, each of which quotes the question or the key.
+    const outcome = said === BUSY ? 'busy' : 'failed'
+    expect(logged.events('question')).toEqual([{ ...questionLine(await chat.userId()), ...NOT, outcome, ...failure }])
+    expect(logged.events('ai_call')).toMatchObject([failure])
+    for (const text of [QUESTION, 'COFFEE PLACE', 'test-ai-key']) expect(logged.text()).not.toContain(text)
   })
 
-  it('is given 20 seconds for a request, and the question is left unanswered when it takes longer', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('is given 20 seconds for a request, and its user is told that the question took too long when it takes longer', async () => {
+    const logged = catchConsole()
     // The 20 seconds are cut to a few milliseconds here, and are otherwise as they are: the time runs out as it does
     // for fetch, which then fails with why.
     const timeout = AbortSignal.timeout.bind(AbortSignal)
@@ -613,22 +687,28 @@ describe('a provider that does not answer as it should', () => {
     // A model that never answers.
     outside.model = [() => new Promise<Response>(() => {})]
 
-    expect(await chat.say(QUESTION)).toBe(NOT_ANSWERED)
+    // Not that the question could not be answered: it is the time that ran out, and that is what its user is told.
+    expect(await chat.say(QUESTION)).toBe(TOOK_TOO_LONG)
 
     expect(timeouts.mock.calls).toEqual([[20_000]])
     expect(outside.completions).toHaveLength(1)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 'TimeoutError']])
+    // The line of the question says so too, with the error of the request that was given up on.
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(await chat.userId()), outcome: 'timeout', sent: 'edit', error: 'TimeoutError' },
+    ])
   })
 
   it('has the user told that the assistant has reached its limit when it answers 429 partway through a question', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = await chatWithCard()
     outside.model = [calling(['call_1', 'get_spending_summary']), refusing(429)]
 
     expect(await chat.say(QUESTION)).toBe(BUSY)
 
     expect(outside.completions).toHaveLength(2)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 429]])
+    // The question's line has the two requests, and the call of a tool that was answered between them.
+    const line = { ...questionLine(await chat.userId()), ...NOT, outcome: 'busy', requests: 2, tool_calls: 1 }
+    expect(logged.events('question')).toEqual([{ ...line, ...refusedWith(429) }])
   })
 
   it.each<[seconds: string, wait: string]>([
@@ -644,15 +724,17 @@ describe('a provider that does not answer as it should', () => {
     ['7.66', 'a minute'],
     ['60.5', '2 minutes'],
   ])('has the user told when to try again when its 429 says to wait %s seconds: in about %s', async (seconds, wait) => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = openChat()
     outside.model = [refusing(429, QUESTION, { 'retry-after': seconds })]
 
     expect(await chat.say(QUESTION)).toBe(`The assistant has reached its limit for now. Try again in about ${wait}.`)
 
-    // The bot does not wait and ask again itself, and no more is logged than of any other 429.
+    // The bot does not wait and ask again itself, and no more is logged of the question than of any other 429.
     expect(outside.completions).toHaveLength(1)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 429]])
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(await chat.userId()), ...NOT, outcome: 'busy', ...refusedWith(429) },
+    ])
   })
 
   it.each<[what: string, headers: Record<string, string>]>([
@@ -663,13 +745,15 @@ describe('a provider that does not answer as it should', () => {
     // HTTP lets the header hold the time to ask again at, in place of how long to wait. That is not read.
     ['gives a date in place of a number of seconds', { 'retry-after': 'Fri, 09 Oct 2026 04:12:00 GMT' }],
   ])('has the user told only to try again later when its 429 %s', async (_, headers) => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = openChat()
     outside.model = [refusing(429, QUESTION, headers)]
 
     expect(await chat.say(QUESTION)).toBe(BUSY)
 
-    expect(logged.mock.calls).toEqual([['assistant failed:', 429]])
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(await chat.userId()), ...NOT, outcome: 'busy', ...refusedWith(429) },
+    ])
   })
 
   /** A call of a tool whose arguments are not the text that a call has them as. */
@@ -679,22 +763,29 @@ describe('a provider that does not answer as it should', () => {
     function: { name: 'list_transactions', arguments: { limit: 1 } },
   }
 
-  it.each<[what: string, completion: object]>([
-    ['nothing of a completion', {}],
-    ['no choice', { choices: [] }],
-    ['a choice with no message', { choices: [{ index: 0, finish_reason: 'stop' }] }],
-    ['a call of a tool with no id', { choices: [{ message: { tool_calls: [{ function: unreadable.function }] } }] }],
-    ['a call whose arguments are not text', { choices: [{ message: { tool_calls: [unreadable] } }] }],
-    ['a call that is nothing', { choices: [{ message: { tool_calls: [null] } }] }],
-  ])('leaves the question unanswered when the model is said to have written %s', async (_, completion) => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it.each<[what: string, completion: object, reason: string]>([
+    ['nothing of a completion', {}, 'no_message'],
+    ['no choice', { choices: [] }, 'no_message'],
+    ['a choice with no message', { choices: [{ index: 0, finish_reason: 'stop' }] }, 'no_message'],
+    [
+      'a call of a tool with no id',
+      { choices: [{ message: { tool_calls: [{ function: unreadable.function }] } }] },
+      'bad_tool_call',
+    ],
+    ['a call whose arguments are not text', { choices: [{ message: { tool_calls: [unreadable] } }] }, 'bad_tool_call'],
+    ['a call that is nothing', { choices: [{ message: { tool_calls: [null] } }] }, 'bad_tool_call'],
+  ])('leaves the question unanswered when the model is said to have written %s', async (_, completion, reason) => {
+    const logged = catchConsole()
     const chat = await chatWithCard()
     outside.model = [completion]
 
     expect(await chat.say(QUESTION)).toBe(NOT_ANSWERED)
 
     expect(outside.completions).toHaveLength(1)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 'Error']])
+    // The question's line says why, as the line of the request does. No tool was called: the call could not be read.
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(await chat.userId()), ...NOT, error: 'Error', reason },
+    ])
   })
 })
 
@@ -709,13 +800,15 @@ describe('a message that the model wrote up to its limit on length, and no furth
   })
 
   it('leaves the question unanswered when none of the answer was written before the limit', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = openChat()
     outside.model = [saying(null, 'length')]
 
     expect(await chat.say('How much have I spent?')).toBe(NOT_ANSWERED)
 
-    expect(logged.mock.calls).toEqual([['assistant failed:', 'Error']])
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(await chat.userId()), ...NOT, error: 'Error', reason: 'no_answer' },
+    ])
   })
 
   it('is a call that cannot be answered when its arguments were cut, which the model is told like any other', async () => {
@@ -737,9 +830,10 @@ describe('a message that the model wrote up to its limit on length, and no furth
 
 describe('the time that the answering of a question may take', () => {
   it('is 25 seconds in all, so a request is given what is left of them when that is less than its 20', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const timeouts = vi.spyOn(AbortSignal, 'timeout')
     const chat = await chatWithCard()
+    const userId = await chat.userId()
     const after = (milliseconds: number, completion: object) => () => {
       clock.now = new Date(NOW.getTime() + milliseconds)
       return Response.json(completion)
@@ -751,15 +845,19 @@ describe('the time that the answering of a question may take', () => {
       () => new Promise<Response>(() => {}),
     ]
 
-    expect(await chat.say('How much have I spent?')).toBe(NOT_ANSWERED)
+    expect(await chat.say('How much have I spent?')).toBe(TOOK_TOO_LONG)
 
     expect(timeouts.mock.calls).toEqual([[20_000], [13_000], [10]])
-    expect(logged.mock.calls).toEqual([['assistant failed:', 'TimeoutError']])
+    // The question is logged as one that took too long, with all that it took by then: three requests, two calls
+    // of tools, and the time.
+    const line = { ...questionLine(userId), outcome: 'timeout', sent: 'edit', requests: 3, tool_calls: 2, ms: 24_990 }
+    expect(logged.events('question')).toEqual([{ ...line, error: 'TimeoutError' }])
   })
 
   it('is not gone past: with none of it left, the model is not asked again', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = await chatWithCard()
+    const userId = await chat.userId()
     outside.model = [
       () => {
         clock.now = new Date(NOW.getTime() + 25_000)
@@ -767,10 +865,13 @@ describe('the time that the answering of a question may take', () => {
       },
     ]
 
-    expect(await chat.say('How much have I spent?')).toBe(NOT_ANSWERED)
+    expect(await chat.say('How much have I spent?')).toBe(TOOK_TOO_LONG)
 
     expect(outside.completions).toHaveLength(1)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 'Error']])
+    // The log has that the question took too long, and how: the answering was out of time, after one request and
+    // one call.
+    const line = { ...questionLine(userId), outcome: 'timeout', sent: 'edit', tool_calls: 1, ms: 25_000 }
+    expect(logged.events('question')).toEqual([{ ...line, error: 'Error', reason: 'out_of_time' }])
   })
 })
 
@@ -787,7 +888,7 @@ describe('the questions of a day', () => {
   })
 
   it('are limited by the provider alone: after one that it answers 429, the next is asked of it all the same', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     const chat = openChat()
     outside.model = [refusing(429), saying('An answer.')]
 
@@ -795,7 +896,7 @@ describe('the questions of a day', () => {
     expect(linesOf(await chat.rich('How much have I spent?'))).toEqual(['An answer.'])
 
     expect(outside.completions).toHaveLength(2)
-    expect(logged.mock.calls).toEqual([['assistant failed:', 429]])
+    expect(logged.events('question').map((event) => event.outcome)).toEqual(['busy', 'answered'])
   })
 })
 
@@ -923,7 +1024,7 @@ describe('a merchant name that holds orders for the model, a command and a link'
   })
 
   it('comes back as text that is all marked as code, when Telegram will not take the rich message', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logged = catchConsole()
     vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 400))
     const { chat } = await chatWithPurchase()
     outside.model = [calling(['call_1', 'list_transactions']), saying(`Your one purchase was SGD 12.40 at ${HOSTILE}`)]
@@ -937,8 +1038,11 @@ describe('a merchant name that holds orders for the model, a command and a link'
     expect(more).toEqual([])
     expect(reply).toMatchObject({ text, entities: [{ type: 'code', offset: 0, length: text.length }] })
     expect(reply.buttons).toBeUndefined()
-    // Only the status is logged, and nothing of the answer.
-    expect(logged.mock.calls).toEqual([['rich message failed, sent as text:', 400]])
+    // The question is logged as one that was answered in text, and nothing of the answer is logged.
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(await chat.userId()), sent: 'text', requests: 2, tool_calls: 1 },
+    ])
+    for (const text of ['LUNCH', 'SYSTEM', 'ignore', 'attacker', 'someone']) expect(logged.text()).not.toContain(text)
   })
 })
 
@@ -994,7 +1098,6 @@ describe('an answer as it is sent', () => {
   })
 
   it('is the same text, cut the same, when it has to be sent as text', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 400))
     const chat = openChat()
     outside.model = [saying(`First.\n\n${'x'.repeat(5000)}`)]
@@ -1011,11 +1114,19 @@ describe('an answer as it is sent', () => {
     vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new ChatBlockedError())
     const chat = openChat()
     outside.model = [saying('An answer.')]
+    const logged = catchConsole()
 
-    // The failure goes on to whoever sees to what is done after Telegram has been answered, which logs its name.
-    await expect(chat.send('What did I buy?')).rejects.toBeInstanceOf(ChatBlockedError)
+    // What is done after Telegram has been answered does not fail for that.
+    await chat.send('What did I buy?')
 
+    // It is not sent as text, and nothing is said in the place of the placeholder, which is left as it was.
     expect(sent).toEqual([])
+    expect(posted.map(({ text }) => text)).toEqual([WORKING])
+    // The question is logged as one of a chat that is to be sent nothing, whatever the model made of it.
+    const failure = { error: 'ChatBlockedError', reason: 'chat_blocked' }
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(await chat.userId()), outcome: 'blocked', sent: 'none', ...failure },
+    ])
   })
 })
 
@@ -1028,10 +1139,11 @@ describe('when a question is answered', () => {
 
     const later = await handleUpdate(deps, privateMessage(telegramId, 'How much have I spent?'))
 
+    // Not the placeholder either, which is the first thing that is sent.
     expect(queried).not.toHaveBeenCalled()
     expect(typing).not.toHaveBeenCalled()
     expect(outside.completions).toEqual([])
-    expect([sent, sentRich]).toEqual([[], []])
+    expect([sent, posted, sentRich]).toEqual([[], [], []])
     expect(later).toBeTypeOf('function')
 
     await later?.()
@@ -1039,6 +1151,8 @@ describe('when a question is answered', () => {
     expect(sentRich).toEqual([
       { chatId: telegramId, message: { skip_entity_detection: true, blocks: [plain('An answer.')] } },
     ])
+    // The answer is all that the chat is left with.
+    expect([sent, posted]).toEqual([[], []])
   })
 
   it.each<[what: string, text: string]>([
@@ -1056,14 +1170,21 @@ describe('when a question is answered', () => {
     expect(outside.completions).toEqual([])
   })
 
-  it('is after the chat has been shown that the bot is writing', async () => {
+  it('is after the chat has its placeholder and has been shown that the bot is writing', async () => {
     const chat = openChat()
     const order: string[] = []
+    vi.spyOn(deps.messenger, 'post').mockImplementation(async (chatId, text) => {
+      order.push(`"${text}" to ${chatId}`)
+      return 77
+    })
     vi.spyOn(deps.messenger, 'typing').mockImplementation(async (chatId) => {
       order.push(`typing in ${chatId}`)
     })
     vi.spyOn(deps.messenger, 'sendRich').mockImplementation(async (chatId) => {
       order.push(`answer to ${chatId}`)
+    })
+    vi.spyOn(deps.messenger, 'delete').mockImplementation(async (chatId, messageId) => {
+      order.push(`message ${messageId} deleted in ${chatId}`)
     })
     outside.model = [
       () => {
@@ -1074,21 +1195,143 @@ describe('when a question is answered', () => {
 
     await chat.send('How much have I spent?')
 
-    expect(order).toEqual([`typing in ${chat.telegramId}`, 'model asked', `answer to ${chat.telegramId}`])
+    // And the placeholder goes, by the id that it was sent with, once the answer is there.
+    expect(order).toEqual([
+      `"${WORKING}" to ${chat.telegramId}`,
+      `typing in ${chat.telegramId}`,
+      'model asked',
+      `answer to ${chat.telegramId}`,
+      `message 77 deleted in ${chat.telegramId}`,
+    ])
   })
 
   it.each<[what: string, error: Error]>([
     ['an error', new TelegramError('sendChatAction', 400)],
     ['that the chat is to be sent nothing', new ChatBlockedError()],
   ])('is all the same when Telegram answers the showing of that with %s', async (_, error) => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.spyOn(deps.messenger, 'typing').mockRejectedValue(error)
     const chat = openChat()
     outside.model = [saying('An answer.')]
+    const logged = catchConsole()
 
     expect(linesOf(await chat.rich('How much have I spent?'))).toEqual(['An answer.'])
 
-    expect(logged.mock.calls).toEqual([['typing action failed:', error.name]])
+    // The question is logged as one that was answered, and as no failure. The request that Telegram refused is
+    // logged where it is made, by the messenger that posts to Telegram: see test/working.test.ts.
+    expect(logged.events('question')).toEqual([questionLine(await chat.userId())])
+    expect(logged.failures()).toEqual([])
+  })
+})
+
+describe('what the log has of a question', () => {
+  it('is what it took, and each call of a tool by the name that the bot has for the tool', async () => {
+    const chat = await chatWithCard()
+    const userId = await chat.userId()
+    await buy(userId)
+    outside.model = [
+      calling(['call_1', 'get_spending_summary'], ['call_2', 'list_transactions', { card: 'no-such-card' }]),
+      calling(['call_3', 'delete_everything', { confirm: true }], ['call_4', 'list_transactions', { limit: 1 }]),
+      saying('One purchase.'),
+    ]
+    // The clock moves on by 15 milliseconds whenever the database is asked something.
+    const prepare = env.DB.prepare.bind(env.DB)
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      clock.now = new Date(clock.now.getTime() + 15)
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    await chat.rich('What did I buy?')
+
+    // The summary asks for the cards, and for the total of the one card. A listing asks for the cards and then for
+    // the purchases, which the listing of a card that there is not does not get to. A tool that there is not asks
+    // for nothing, and is logged as no tool of the bot's, whatever the model called it.
+    const called = { event: 'assistant_tool', user: userId }
+    expect(logged.events('assistant_tool')).toEqual([
+      { ...called, tool: 'get_spending_summary', outcome: 'ok', ms: 30 },
+      { ...called, tool: 'list_transactions', outcome: 'invalid', ms: 15 },
+      { ...called, tool: 'unknown', outcome: 'invalid', ms: 0 },
+      { ...called, tool: 'list_transactions', outcome: 'ok', ms: 30 },
+    ])
+    // The question took three requests and the four calls, and as long as they did after the user's row was read.
+    expect(logged.events('question')).toEqual([
+      { ...questionLine(userId), requests: 3, tool_calls: 4, ms: 15 + 30 + 15 + 30 },
+    ])
+    // A call that the model is told is wrong is no failure of the service's, and nothing here is.
+    expect(logged.failures()).toEqual([])
+  })
+
+  it('is nothing of the question, of the answer, or of what a tool was asked for and what it returned', async () => {
+    const logged = catchConsole()
+    const chat = openChat()
+    await chat.say('/addcard privatecard 4321 calendar')
+    await buy(await chat.userId(), { cardLast4: '4321', amountMinor: 9876, merchant: 'PRIVATE CLINIC' })
+    const listing = { card: 'privatecard', from: '2026-10-01', limit: 7 }
+    outside.model = [
+      calling(['call_1', 'get_spending_summary'], ['call_2', 'list_transactions', listing]),
+      calling(['call_3', 'drop_table_transactions', { table: 'transactions' }]),
+      saying('You spent SGD 98.76 at PRIVATE CLINIC.'),
+    ]
+
+    await chat.rich('What did I spend at PRIVATE CLINIC?')
+
+    // The model was told of the purchase, and its user was told the answer. The log was told that there was one.
+    expect(JSON.stringify(messagesOf(3))).toContain('PRIVATE CLINIC')
+    expect(logged.events().map((event) => event.event)).toEqual([
+      'update',
+      'update',
+      'ai_call',
+      'assistant_tool',
+      'assistant_tool',
+      'ai_call',
+      'assistant_tool',
+      'ai_call',
+      'question',
+    ])
+    const asked = ['What did', 'PRIVATE', 'CLINIC', 'privatecard', '4321', '98.76', '9876', 'SGD', '2026-10-01']
+    const called = ['call_', 'drop_table', 'table', 'calendar', 'Singapore', 'test-ai-key']
+    for (const text of [...asked, ...called, String(chat.telegramId)]) expect(logged.text()).not.toContain(text)
+  })
+})
+
+describe('what is no question, on a service that has an assistant', () => {
+  const NOT_TEXT =
+    'The bot only reads text messages. It cannot read an attachment, such as a photo, a file or a voice message, or ' +
+    'the caption under one. Please send your question or command as text.'
+  const EDITED = 'The bot does not read a message again after it has been edited. Please send it as a new message.'
+
+  it('is the words under a photo: the model is not asked, and their user is told that the bot only reads text', async () => {
+    const { telegramId } = openChat()
+    const typing = vi.spyOn(deps.messenger, 'typing')
+    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
+    const photo = [{ file_id: 'made-up-file-id', file_unique_id: 'made-up-id', width: 90, height: 51 }]
+    // As Telegram posts it: the words are the caption of a message that has no text.
+    const update: object = { message: { message_id: 1, date: 1, chat, from, photo, caption: 'How much have I spent?' } }
+
+    const later = await handleUpdate(deps, update)
+
+    // It is answered at once, with nothing left for later: no placeholder, and no showing that the bot is writing.
+    expect(later).toBeUndefined()
+    expect(posted.map(({ chatId, text }) => ({ chatId, text }))).toEqual([{ chatId: telegramId, text: NOT_TEXT }])
+    expect(typing).not.toHaveBeenCalled()
+    expect(outside.completions).toEqual([])
+    expect(await userCount(telegramId)).toBe(0)
+  })
+
+  it('is a question as it stands after it was edited: the model is not asked again, and its user is told so', async () => {
+    const chat = openChat()
+    outside.model = [saying('An answer.')]
+    await chat.rich('How much have I spent?')
+    const { message } = privateMessage(chat.telegramId, 'How much have I spent this month?')
+
+    // Telegram posts the message as it now stands, in the place of a new message.
+    const later = await handleUpdate(deps, { edited_message: message })
+
+    expect(later).toBeUndefined()
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: EDITED }])
+    // The model was asked the question as it first was, and nothing since.
+    expect(outside.completions).toHaveLength(1)
+    expect(messagesOf(1)[1]).toEqual(user('How much have I spent?'))
   })
 })
 

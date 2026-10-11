@@ -13,6 +13,7 @@ import {
   type JsonSchemaType,
 } from '@modelcontextprotocol/server'
 import type { Deps } from '../deps'
+import { log, logFailure, type Events } from '../log'
 import { storeFor, type User } from '../store'
 import {
   DEFAULT_DAYS,
@@ -97,26 +98,44 @@ function serverFor(deps: Deps, user: User): McpServer {
     { capabilities: { tools: { listChanged: false } } },
   )
   server.registerTool('get_spending_summary', { description: SUMMARY, annotations: READ_ONLY }, () =>
-    answer(() => spendingSummary(store, deps.now(), user.timezone)),
+    answer(deps, user, 'get_spending_summary', () => spendingSummary(store, deps.now(), user.timezone)),
   )
   server.registerTool(
     'list_transactions',
     { description: TRANSACTIONS, inputSchema: LIST_INPUT, annotations: READ_ONLY },
-    (args) => answer(() => listTransactions(store, args, deps.now(), user.timezone)),
+    (args) => answer(deps, user, 'list_transactions', () => listTransactions(store, args, deps.now(), user.timezone)),
   )
   return server
 }
 
-/** What a tool answers: its data, or else what went wrong, as a tool error. */
-async function answer(read: () => Promise<Record<string, unknown>>): Promise<CallToolResult> {
+/** What the log has of one call of a tool. */
+type Call = Events['mcp_tool']
+
+/**
+ * What a tool answers: its data, or else what went wrong, as a tool error. Every call is logged: whose it was, of
+ * which tool, what came of it and how long it took. Nothing of what was asked for, or of what was answered, is.
+ */
+async function answer(
+  deps: Deps,
+  user: User,
+  tool: Call['tool'],
+  read: () => Promise<Record<string, unknown>>,
+): Promise<CallToolResult> {
+  const began = deps.now().getTime()
+  const call = (outcome: Call['outcome']): Call => ({ user: user.id, tool, outcome, ms: deps.now().getTime() - began })
   try {
     const data = await read()
+    log('mcp_tool', call('ok'))
     // A merchant's name is text from an email. As JSON it stays inside a string, and cannot pass for anything else.
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data }
   } catch (error) {
-    if (error instanceof ToolError) return failure(error.message)
+    // What is wrong with a call is for the assistant that made it to put right, and is no failure of the service's.
+    if (error instanceof ToolError) {
+      log('mcp_tool', call('invalid'))
+      return failure(error.message)
+    }
     // Only the error's name is logged, and nothing of it is sent: its message could quote what is stored.
-    console.error('mcp tool failed:', error instanceof Error ? error.name : typeof error)
+    logFailure('mcp_tool', error, call('failed'))
     return failure('The request could not be answered. Try again later.')
   }
 }

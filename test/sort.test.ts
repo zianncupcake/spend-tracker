@@ -1,9 +1,11 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
 import { storeFor } from '../src/store'
+import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
 import { answered, deps, openChat, sent, type Posted } from './connect-helpers'
 import { buy, userCount } from './helpers'
+import { catchConsole } from './log-helpers'
 
 // Moving purchases between the categories of a card's product: /sort, and the buttons under the bot's messages. On
 // the UOB EVOL Card a purchase is online until its user flags it as made with the physical card, which one button
@@ -337,16 +339,17 @@ describe('a press that is refused', () => {
 })
 
 describe('a press that is ignored', () => {
-  it.each<[what: string, chat: (id: number) => { id?: number; type?: string } | undefined]>([
-    ['a group chat', () => ({ id: -5001, type: 'group' })],
-    ["a private chat that is not the presser's own", (id) => ({ id: id + 1, type: 'private' })],
-    ['a chat of no known type', (id) => ({ id })],
-    ['no chat at all', () => undefined],
-  ])('is one under a message in %s', async (_, chatOf) => {
+  it.each<[what: string, chat: (id: number) => { id?: number; type?: string } | undefined, why: string]>([
+    ['a group chat', () => ({ id: -5001, type: 'group' }), 'not_private'],
+    ["a private chat that is not the presser's own", (id) => ({ id: id + 1, type: 'private' }), 'not_own_chat'],
+    ['a chat of no known type', (id) => ({ id }), 'not_private'],
+    ['no chat at all', () => undefined, 'not_private'],
+  ])('is one under a message in %s, which is logged with why', async (_, chatOf, why) => {
     const chat = await chatWithCard()
     const id = await buy(await chat.userId())
     const message = await ask(chat, `/sort ${id}`)
     const under = { message_id: message.id, chat: chatOf(chat.telegramId), text: message.text }
+    const logged = catchConsole()
 
     await handleUpdate(deps, {
       callback_query: { id: 'press-ignored', from: { id: chat.telegramId }, data: `${id}:other`, message: under },
@@ -355,12 +358,14 @@ describe('a press that is ignored', () => {
     expect(await categoryOf(id)).toBeNull()
     expect(answered).toEqual([])
     expect(sent).toEqual([])
+    expect(logged.events()).toEqual([{ event: 'update', kind: 'press', outcome: 'ignored', why, ms: 0 }])
   })
 
   it('is one that does not say who pressed, or which press it is', async () => {
     const chat = await chatWithCard()
     const id = await buy(await chat.userId())
     const under = { message_id: 1, chat: { id: chat.telegramId, type: 'private' }, text: 'A line\nAnother' }
+    const logged = catchConsole()
 
     const data = `${id}:other`
 
@@ -369,6 +374,82 @@ describe('a press that is ignored', () => {
 
     expect(await categoryOf(id)).toBeNull()
     expect(answered).toEqual([])
+    // A press that names nobody is in nobody's own chat, and one with no id is one that cannot be answered.
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'press', outcome: 'ignored', why: 'not_own_chat', ms: 0 },
+      { event: 'update', kind: 'press', outcome: 'ignored', why: 'no_id', ms: 0 },
+    ])
+  })
+})
+
+describe('a press that fails', () => {
+  const PRESS_FAILED = 'Something went wrong. Please try again in a moment.'
+
+  it('is answered with that something went wrong when it fails before it is answered, so that its button stops waiting', async () => {
+    const chat = await chatWithCard()
+    const id = await buy(await chat.userId(), { merchant: 'PRIVATE CLINIC' })
+    const message = await ask(chat, `/sort ${id}`)
+    const prepare = env.DB.prepare.bind(env.DB)
+    const failing = vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      if (query.includes('FROM transactions')) throw new Error('a made-up failure that quotes: PRIVATE CLINIC')
+      return prepare(query)
+    })
+    const logged = catchConsole()
+
+    const pressed = await chat.press(message, FLAG)
+    failing.mockRestore()
+
+    expect(pressed).toEqual({ answer: PRESS_FAILED, sent: [] })
+    expect(answered).toHaveLength(1)
+    expect(await categoryOf(id)).toBeNull()
+    expect(labels(message)).toEqual([FLAG])
+    // The log has that a press failed before its purchase was moved, and that it was answered so: the name of the
+    // error, and nothing of the press.
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'press', outcome: 'failed', handled: false, told: true, ms: 0, error: 'Error' },
+    ])
+    for (const text of ['PRIVATE', 'press-', ':other', String(chat.telegramId)]) {
+      expect(logged.text()).not.toContain(text)
+    }
+  })
+
+  it('is answered so when it is the answer that Telegram did not take, as it may take the next', async () => {
+    const chat = await chatWithCard()
+    const id = await buy(await chat.userId())
+    const message = await ask(chat, `/sort ${id}`)
+    const refusal = new TelegramError('answerCallbackQuery', 502)
+    const answer = vi.spyOn(deps.messenger, 'answer').mockRejectedValueOnce(refusal)
+    const logged = catchConsole()
+
+    const pressed = await chat.press(message, FLAG)
+
+    // The purchase was moved before the answer failed. Its message is left as it was, and the press that follows
+    // brings it up to date.
+    expect(answer.mock.calls.map(([, text]) => text)).toEqual([`ID ${id}: ${OTHER}`, PRESS_FAILED])
+    expect(pressed).toEqual({ answer: PRESS_FAILED, sent: [] })
+    expect(await categoryOf(id)).toBe('other')
+    expect(labels(message)).toEqual([FLAG])
+    // The log has that the press had been handled when it failed: what it asked for was done.
+    const failure = { error: 'Error', reason: 'http_error', status: 502 }
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'press', outcome: 'failed', handled: true, told: true, ms: 0, ...failure },
+    ])
+  })
+
+  it('is answered with nothing when its chat is one that Telegram will send nothing to', async () => {
+    const chat = await chatWithCard()
+    const id = await buy(await chat.userId())
+    const message = await ask(chat, `/sort ${id}`)
+    const answer = vi.spyOn(deps.messenger, 'answer').mockRejectedValue(new ChatBlockedError())
+    const logged = catchConsole()
+
+    await chat.press(message, FLAG)
+
+    expect(answer).toHaveBeenCalledTimes(1)
+    const failure = { error: 'ChatBlockedError', reason: 'chat_blocked' }
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'press', outcome: 'failed', handled: true, told: false, ms: 0, ...failure },
+    ])
   })
 })
 
@@ -411,8 +492,18 @@ describe('a press', () => {
     const id = await buy(await chat.userId())
     const message = await ask(chat, `/sort ${id}`)
     // The purchase is flagged, and then Telegram does not take the edit of the message.
-    vi.spyOn(deps.messenger, 'edit').mockRejectedValueOnce(new Error('Telegram editMessageText failed'))
-    await expect(chat.press(message, FLAG)).rejects.toThrow('Telegram editMessageText failed')
+    vi.spyOn(deps.messenger, 'edit').mockRejectedValueOnce(new TelegramError('editMessageText', 400))
+    const logged = catchConsole()
+    const failed = await chat.press(message, FLAG)
+    // The press had its answer before the edit failed, and Telegram takes one answer to a press: so it is not
+    // answered again, with that something went wrong. The log has that the update failed once the press had been
+    // handled, and that nobody was told.
+    expect(failed).toEqual({ answer: `ID ${id}: ${OTHER}`, sent: [] })
+    expect(answered).toHaveLength(1)
+    const failure = { error: 'Error', reason: 'http_error', status: 400 }
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'press', outcome: 'failed', handled: true, told: false, ms: 0, ...failure },
+    ])
     expect(await categoryOf(id)).toBe('other')
     expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${ONLINE}`)
     expect(labels(message)).toEqual([FLAG])

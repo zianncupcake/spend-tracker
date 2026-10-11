@@ -7,7 +7,8 @@ import {
   PageTokenError,
   refreshAccessToken,
 } from '../src/google/gmail'
-import { GMAIL_READONLY, type GoogleClient } from '../src/google/oauth'
+import { GMAIL_READONLY, GoogleError, type GoogleClient } from '../src/google/oauth'
+import { Failure } from '../src/log'
 import { gmailMessage, gmailResults, headersOf, htmlPart, multipart, textPart, type Part } from './gmail-helpers'
 import { alertText, seconds } from './helpers'
 
@@ -86,6 +87,7 @@ describe('refreshing an access token', () => {
 
     expect(failure).toBeInstanceOf(GrantLostError)
     expect((failure as Error).name).toBe('GrantLostError')
+    expect(failure).toMatchObject({ reason: 'grant_lost' })
   })
 
   it.each([
@@ -100,13 +102,17 @@ describe('refreshing an access token', () => {
     const failure = await refreshAccessToken(client, 'made-up-refresh-token').catch((error: Error) => error)
 
     expect(failure).not.toBeInstanceOf(GrantLostError)
-    expect(failure).toEqual(new Error(`Google token refresh failed with status ${status}`))
+    // All that the error holds is the status, and why it was thrown. Its message names the request and the status.
+    expect(failure).toEqual(new GoogleError('Google token refresh', status))
+    expect((failure as Error).message).toBe(`Google token refresh failed with status ${status}`)
   })
 
   it('throws when the response holds no access token', async () => {
     google.mockResolvedValue(Response.json({ expires_in: 3599, token_type: 'Bearer' }))
 
-    await expect(refreshAccessToken(client, 'made-up-refresh-token')).rejects.toThrow('no access token')
+    const failure = await refreshAccessToken(client, 'made-up-refresh-token').catch((error: Error) => error)
+
+    expect(failure).toEqual(new Failure('no_access_token', 'Google token refresh returned no access token'))
   })
 })
 
@@ -166,7 +172,8 @@ describe('listing messages', () => {
 
     const failure = await listMessageIds('made-up-access-token', QUERY).catch((error: Error) => error)
 
-    expect(failure).toEqual(new Error('Gmail list request failed with status 500'))
+    expect(failure).toEqual(new GoogleError('Gmail list request', 500))
+    expect((failure as Error).message).toBe('Gmail list request failed with status 500')
   })
 
   it('says that Gmail did not take the page token when it answers 400 to a request that brought one', async () => {
@@ -179,6 +186,7 @@ describe('listing messages', () => {
     expect(failure).toBeInstanceOf(PageTokenError)
     expect((failure as Error).name).toBe('PageTokenError')
     expect((failure as Error).message).toBe('')
+    expect(failure).toMatchObject({ reason: 'page_token' })
   })
 
   it.each<[what: string, status: number, pageToken?: string]>([
@@ -191,7 +199,7 @@ describe('listing messages', () => {
     const failure = await listMessageIds('made-up-access-token', QUERY, pageToken).catch((error: Error) => error)
 
     expect(failure).not.toBeInstanceOf(PageTokenError)
-    expect(failure).toEqual(new Error(`Gmail list request failed with status ${status}`))
+    expect(failure).toEqual(new GoogleError('Gmail list request', status))
   })
 })
 
@@ -252,7 +260,8 @@ describe('reading the headers of a message', () => {
 
     const failure = await getMessageHeaders('made-up-access-token', 'msg-1').catch((error: Error) => error)
 
-    expect(failure).toEqual(new Error('Gmail message request failed with status 404'))
+    expect(failure).toEqual(new GoogleError('Gmail message request', 404))
+    expect((failure as Error).message).toBe('Gmail message request failed with status 404')
   })
 })
 
@@ -332,10 +341,12 @@ describe('reading a message', () => {
     google.mockResolvedValueOnce(Response.json({ error: { code: 404, message: 'Not Found' } }, { status: 404 }))
     google.mockResolvedValueOnce(Response.json({ id: 'msg-1' }))
 
-    await expect(getMessage('made-up-access-token', 'msg-1')).rejects.toThrow(
-      'Gmail message request failed with status 404',
+    await expect(getMessage('made-up-access-token', 'msg-1')).rejects.toEqual(
+      new GoogleError('Gmail message request', 404),
     )
-    await expect(getMessage('made-up-access-token', 'msg-1')).rejects.toThrow('Gmail message held no date')
+    await expect(getMessage('made-up-access-token', 'msg-1')).rejects.toEqual(
+      new Failure('no_date', 'Gmail message held no date'),
+    )
   })
 })
 
