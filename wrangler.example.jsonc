@@ -1,5 +1,8 @@
 // Template for the real config. Copy it to wrangler.jsonc (git-ignored) and add
-// your own D1 "database_id" there. The tests read this file as it is.
+// your own D1 "database_id" there. The tests read this file as it is, and a
+// deploy makes its config from it, so what is merged here is deployed. That is
+// the work of scripts/deploy-config.mjs, which reads JSON with // comments: it
+// takes no other kind of comment, and no trailing comma.
 {
   "name": "spend-tracker",
   "main": "src/index.ts",
