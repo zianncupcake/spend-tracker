@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { hsbcRevolution } from '../src/catalogue/hsbc-revolution'
 import type { Product } from '../src/catalogue/types'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { breakDown, perCurrency } from '../src/domain/breakdown'
@@ -6,6 +7,17 @@ import type { CategoryTotal } from '../src/store'
 import { breakdownLines } from '../src/telegram/purchases'
 
 const TERMS = "Limits are from the bank's terms for the UOB EVOL Card, as of 10 June 2026."
+
+/** The same of the HSBC Revolution Credit Card. It has no minimum spend, so this is the one line that it always has. */
+const HSBC_TERMS = "Limits are from the bank's terms for the HSBC Revolution Credit Card, as of 1 April 2026."
+
+/** The line that says of what a group with a limit holds in other currencies that it is not taken off the limit. */
+function notTakenOff(amounts: string): string {
+  return (
+    `A table has a Total for each currency. A Cap counts SGD only, so ${amounts} is not taken off what is Left: ` +
+    'an alert does not say what a purchase in another currency comes to in SGD.'
+  )
+}
 
 /** The same card, were it to take a purchase to be nowhere until something says where it is. */
 const NO_DEFAULT: Product = { ...uobEvol, defaultCategory: undefined }
@@ -126,6 +138,8 @@ describe('what comes after the tables of a window', () => {
   it('counts what was spent past a limit too, and says when other currencies are left out of the minimum', () => {
     const sums = [sum('online', 35000), sum(null, 1240), sum('fx', 500, 'USD'), sum('fx', 120000, 'JPY')]
 
+    // The purchases in other currencies are where the product's rule puts them, in a group with no limit. So these
+    // two lines are all: nothing is said of a limit that they were not taken off.
     expect(breakdownLines(uobEvol, breakDown(uobEvol, sums))).toEqual([
       'Minimum spend: SGD 362.40 of SGD 800.00, not counting purchases in other currencies',
       TERMS,
@@ -139,5 +153,44 @@ describe('what comes after the tables of a window', () => {
       'Minimum spend: SGD 362.40 of SGD 800.00',
       TERMS,
     ])
+  })
+
+  it('says of a purchase in another currency that it is not taken off a limit, in a group that has one', () => {
+    // On the HSBC Revolution Credit Card a purchase is in the group with the limit, whatever its currency.
+    const sums = [sum('eligible', 100), sum('eligible', 100, 'USD')]
+
+    expect(breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums))).toEqual([
+      notTakenOff('USD 1.00'),
+      HSBC_TERMS,
+    ])
+  })
+
+  it('names a total for each of the other currencies, joined as the total of a card joins them', () => {
+    // Two sums of one currency are one total. Nothing is stored for the first, which is eligible all the same.
+    const sums = [sum(null, 40, 'USD'), sum('eligible', 200, 'EUR'), sum('eligible', 60, 'USD'), sum('eligible', 100)]
+
+    expect(breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums))).toEqual([
+      notTakenOff('USD 1.00 + EUR 2.00'),
+      HSBC_TERMS,
+    ])
+  })
+
+  it('names one total for a currency that more than one group with a limit holds, under the minimum spend', () => {
+    // The UOB EVOL Card has two groups with a limit, and a minimum spend. The third sum is in a group without one.
+    const sums = [sum('online', 100, 'USD'), sum('selected', 250, 'USD'), sum('fx', 700, 'USD')]
+
+    expect(breakdownLines(uobEvol, breakDown(uobEvol, sums))).toEqual([
+      'Minimum spend: SGD 0.00 of SGD 800.00, not counting purchases in other currencies',
+      notTakenOff('USD 3.50'),
+      TERMS,
+    ])
+  })
+
+  it('says nothing of other currencies that only a group without a limit holds, or that there are none of', () => {
+    const lines = (sums: CategoryTotal[]) => breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums))
+
+    expect(lines([sum('eligible', 100), sum('other', 100, 'USD')])).toEqual([HSBC_TERMS])
+    expect(lines([sum('eligible', 100), sum('other', 100)])).toEqual([HSBC_TERMS])
+    expect(lines([])).toEqual([HSBC_TERMS])
   })
 })

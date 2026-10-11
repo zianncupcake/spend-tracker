@@ -399,6 +399,10 @@ describe('/spend with a card that is linked to a product', () => {
         OCTOBER_COUNTS,
         '',
         'Minimum spend: SGD 12.40 of SGD 800.00, not counting purchases in other currencies',
+        // Of the two purchases in other currencies, the one that is in a group with a limit. The other has no limit
+        // to come off.
+        'A table has a Total for each currency. A Cap counts SGD only, so USD 5.00 is not taken off what is Left: ' +
+          'an alert does not say what a purchase in another currency comes to in SGD.',
         TERMS,
       ].join('\n'),
     )

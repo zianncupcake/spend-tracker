@@ -1,9 +1,10 @@
 import { hsbcRevolution } from './hsbc-revolution'
+import { ocbcRewards } from './ocbc-rewards'
 import type { Category, Choice, Product } from './types'
 import { uobEvol } from './uob-evol'
 
 /** The card products whose reward rules are known. A user links a card to one by its key. */
-export const products: Product[] = [uobEvol, hsbcRevolution]
+export const products: Product[] = [uobEvol, hsbcRevolution, ocbcRewards]
 
 /** The product with the key. Undefined when there is none, and for the key of a card that is linked to no product. */
 export function productOf(key: string | undefined): Product | undefined {

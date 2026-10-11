@@ -24,9 +24,9 @@ const DAY_MS = 86_400_000
  * that the window closes on, and the day before it. A purchase is known by the day that it was made, and a bank
  * counts it by the day that it is posted, which is usually a day or two later. So a purchase of those days is taken
  * to be in the window after, where its bank will mostly have it. That it is two days is the owner's choice: how
- * long a posting takes was not measured. And that a bank counts by the day of posting is from the terms of two
- * cards, which ../catalogue/uob-evol and ../catalogue/hsbc-revolution quote: it is taken to hold for the others, and
- * was not checked for them. A product can say another number: see `daysCountedInNext` in ../catalogue/types.
+ * long a posting takes was not measured. And that a bank counts by the day of posting is from the terms of three
+ * cards, which the files of ../catalogue quote: it is taken to hold for the others, and was not checked for them. A
+ * product can say another number: see `daysCountedInNext` in ../catalogue/types.
  */
 export const DAYS_COUNTED_IN_NEXT = 2
 
