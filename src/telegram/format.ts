@@ -17,6 +17,11 @@ export function formatMoney(amountMinor: number, currency: string): string {
   return `${currency} ${formatAmount(amountMinor)}`
 }
 
+/** What was spent, a currency at a time: "SGD 12.40 + USD 5.00", or the one amount where there is one currency. */
+export function formatTotals(totals: { currency: string; amountMinor: number }[]): string {
+  return totals.map((total) => formatMoney(total.amountMinor, total.currency)).join(' + ')
+}
+
 /** A day and month as seen in the time zone, such as "16 Oct". */
 export function formatShortDate(date: Date, timeZone: string): string {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone, day: 'numeric', month: 'short' }).formatToParts(date)
@@ -51,7 +56,7 @@ export function describeWindow(card: WindowRule): string {
 
 /** What a card's window holds and when it starts again, such as "SGD 12.40 in 1 purchase, resets 16 Oct". */
 export function describeTotals({ window, totals, count }: CardTotals, timeZone: string): string {
-  const amounts = totals.map((total) => formatMoney(total.amountMinor, total.currency)).join(' + ')
+  const amounts = formatTotals(totals)
   const spent = count === 0 ? 'no purchases' : `${amounts} in ${count} ${count === 1 ? 'purchase' : 'purchases'}`
   return `${spent}, resets ${formatShortDate(window.end, timeZone)}`
 }

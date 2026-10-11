@@ -116,7 +116,7 @@ describe('a photo with a caption that names the card', () => {
     expect(texts).toEqual([])
     expect(await heldFor(userId)).toEqual([])
     // The purchases are in every list from then on, each removable by its id.
-    expect(await chat.say('/spend')).toContain('evol ••••5678: SGD 16.35 in 3 purchases, resets 1 Nov')
+    expect(await chat.lines('/spend')).toContain('evol | SGD 16.35 | 3 | 29 Sep to 29 Oct | 1 Nov')
     expect(await chat.say(`/remove ${rows[2].id}`)).toBe(
       `Removed from ••••5678:\nID ${rows[2].id} · 5 Oct · SGD 12.40 · COFFEE PLACE · by hand`,
     )
@@ -283,7 +283,7 @@ describe('a photo with a caption that names the card', () => {
     await chat.photo('evol')
 
     expect(await rowsOf(await bystander.userId())).toEqual([])
-    expect(await bystander.say('/spend')).toContain('evol ••••5678: no purchases, resets 1 Nov')
+    expect(await bystander.lines('/spend')).toContain('evol | SGD 0.00 | 0 | 29 Sep to 29 Oct | 1 Nov')
     expect(await rowsOf(await chat.userId())).toHaveLength(1)
   })
 
@@ -496,7 +496,7 @@ describe('a photo whose message Telegram delivers twice', () => {
 
     // A message of text whose purchases the assistant gave to be added is added from once in the same way.
     const adding = { kind: 'add' as const, reading: read([bought(520, 'LUNCH')]) }
-    const made = { status: 'acting' as const, actions: [adding], afterReading: false, dropped: 0 }
+    const made = { status: 'acting' as const, actions: [adding], afterReading: false, dropped: 0, more: false }
     vi.spyOn(assistant, 'answerQuestion').mockResolvedValue(made)
     await chat.ask('add 5.20 lunch', 7002)
     expect((await chat.ask('add 5.20 lunch', 7002)).map((message) => message.text)).toEqual([READ_ALREADY])

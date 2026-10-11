@@ -138,6 +138,21 @@ export function storeFor(db: D1Database, ownerId: number) {
       return result.meta.changes > 0
     },
 
+    /**
+     * Gives the card another nickname, and changes nothing else of it. False, with nothing changed, when the user
+     * has no card with that nickname, and when a card of theirs has the new one already: which the card itself has
+     * when the two are the same.
+     */
+    async renameCard(nickname: string, renamed: string): Promise<boolean> {
+      // The table takes no nickname that another card of its user's has. With OR IGNORE that leaves the row as it
+      // is, where it would fail the statement.
+      const result = await db
+        .prepare('UPDATE OR IGNORE cards SET nickname = ?1 WHERE owner_id = ?2 AND nickname = ?3 AND ?1 <> ?3')
+        .bind(renamed, ownerId, nickname)
+        .run()
+      return result.meta.changes > 0
+    },
+
     /** False when the user has no card with that nickname. */
     async removeCard(nickname: string): Promise<boolean> {
       const result = await db

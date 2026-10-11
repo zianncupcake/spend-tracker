@@ -6,9 +6,14 @@
 export const AI_URL = 'https://api.groq.com/openai/v1/chat/completions'
 
 /**
- * What the model is told of showing a user what they have spent, word for word: one line of what it is told before a
- * question, which the tests that have all of that written out share.
+ * What the model is told of a message that asks for several things, word for word: one line of what it is told
+ * before a question, which the tests that have all of that written out share.
  */
+export const ONE_AT_A_TIME =
+  'Call one tool at a time. When the user asks for several things, call the tool for the first with more set to ' +
+  'true, and you will be asked again for the next: set more to false on the last.'
+
+/** The same of showing a user what they have spent: the line after that one. */
 export const SHOWN_NOT_WRITTEN =
   'When the user asks what they have spent, or to see or list their purchases or transactions, or for a breakdown, a ' +
   'total or what is left of a limit, call show_spending and write nothing else: the bot then shows it in tables, for ' +

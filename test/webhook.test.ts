@@ -3,8 +3,9 @@ import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from '../src/index'
 import { findUser } from '../src/store'
+import type { RichMessage } from '../src/telegram/api'
 import { AI_URL, calling, refusing, saying } from './ai-helpers'
-import { newTelegramId, userCount, withoutCarried } from './helpers'
+import { linesOf, newTelegramId, userCount, withoutCarried } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const SECRET = env.TELEGRAM_WEBHOOK_SECRET
@@ -140,6 +141,20 @@ async function replyTo(telegramId: number, text: string): Promise<Sent> {
   expect(more).toEqual([])
   telegramApi.mockClear()
   return body as unknown as Sent
+}
+
+/**
+ * Posts the Worker a message, and returns what the one rich message that it sends in reply says, a line at a time:
+ * each row of a table with " | " between its cells, and the text of each paragraph. The calls are cleared after it.
+ */
+async function shownTo(telegramId: number, text: string): Promise<string[]> {
+  telegramApi.mockClear()
+  await say(telegramId, text)
+  const [[method, body], ...more] = asked()
+  expect(method).toBe('sendRichMessage')
+  expect(more).toEqual([])
+  telegramApi.mockClear()
+  return linesOf(body.rich_message as RichMessage)
 }
 
 /**
@@ -371,7 +386,7 @@ describe('POST /telegram when the handling of a message fails', () => {
       { ...failedUpdate({ kind: 'command', command: 'add' }, true, true), ...failure },
     ])
     // The purchase is stored. Sent again, the command would be a message with a new id, and would store another.
-    expect((await replyTo(telegramId, '/spend')).text).toMatch(/^visa ••••1234: SGD 12\.50 in 1 purchase, /)
+    expect(await shownTo(telegramId, '/spend')).toContainEqual(expect.stringMatching(/^visa \| SGD 12\.50 \| 1 \| /))
   })
 
   it('does not say to try again when /add stored its purchase and failed at what its card then comes to', async () => {
@@ -399,7 +414,7 @@ describe('POST /telegram when the handling of a message fails', () => {
     ])
     expect(logged.text()).not.toContain('Lunch')
     // The purchase is stored, once.
-    expect((await replyTo(telegramId, '/spend')).text).toMatch(/^visa ••••1234: SGD 12\.50 in 1 purchase, /)
+    expect(await shownTo(telegramId, '/spend')).toContainEqual(expect.stringMatching(/^visa \| SGD 12\.50 \| 1 \| /))
   })
 
   it.each([

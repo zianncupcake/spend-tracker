@@ -173,7 +173,7 @@ describe('a new alert', () => {
     })
     expect(await seenOf(userId)).toEqual([])
     // The second line is what /spend says of the card.
-    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 1,246.96 + USD 5.00 in 3 purchases, resets 16 Oct')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 1,246.96 + USD 5.00 | 3 | 14 Sep to 13 Oct | 16 Oct')
   })
 
   it('comes with how to add its card, when the user has not added that card', async () => {
@@ -363,7 +363,7 @@ describe('a new alert', () => {
     expect(outside.fetched).toEqual([])
     expect(sent).toEqual([])
     expect(await purchasesOf(userId)).toHaveLength(1)
-    expect(await chat.say('/spend')).toContain('visa ••••1234: no purchases, resets 1 Nov')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 0.00 | 0 | 29 Sep to 29 Oct | 1 Nov')
   })
 })
 

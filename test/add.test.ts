@@ -250,7 +250,7 @@ describe('/add', () => {
     const reply = await ask(chat, '/add visa 99 2026-09-28 last month')
 
     expect(reply.text.split('\n')[1]).toBe('visa ••••1234: SGD 10.00 in 1 purchase, resets 1 Nov')
-    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 10.00 in 1 purchase, resets 1 Nov')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 10.00 | 1 | 29 Sep to 29 Oct | 1 Nov')
   })
 
   it.each([
@@ -307,8 +307,8 @@ describe('/add', () => {
     await chat.ask('/add visa 12.50 Lunch')
 
     expect(await rowsOf(await bystander.userId())).toEqual([])
-    expect(await bystander.say('/spend')).toContain('visa ••••1234: no purchases, resets 1 Nov')
-    expect(await chat.say('/spend')).toContain('visa ••••1234: SGD 12.50 in 1 purchase, resets 1 Nov')
+    expect(await bystander.lines('/spend')).toContain('visa | SGD 0.00 | 0 | 29 Sep to 29 Oct | 1 Nov')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 12.50 | 1 | 29 Sep to 29 Oct | 1 Nov')
   })
 
   it('records one purchase for a message that Telegram delivers twice, and answers both alike', async () => {
@@ -332,7 +332,7 @@ describe('/add', () => {
     )
     expect(again.buttons).toEqual([[{ text: 'Mark as Other Spend', data: `${rows[0].id}:other` }]])
     expect(again).toMatchObject({ text: first.text, entities: first.entities, buttons: first.buttons })
-    expect(await chat.say('/spend')).toContain('evol ••••5678: SGD 12.50 in 1 purchase, resets 1 Nov')
+    expect(await chat.lines('/spend')).toContain('evol | SGD 12.50 | 1 | 29 Sep to 29 Oct | 1 Nov')
 
     // The same words in a message of their own are another purchase.
     await chat.ask('/add evol 12.50 Lunch')
@@ -566,7 +566,7 @@ describe('/remove', () => {
 
     await chat.ask(`/remove ${removed}`)
 
-    expect(await chat.say('/spend')).toContain('evol ••••5678: SGD 30.00 in 1 purchase, resets 1 Nov')
+    expect(await chat.lines('/spend')).toContain('evol | SGD 30.00 | 1 | 29 Sep to 29 Oct | 1 Nov')
     const detail = linesOf(await chat.rich('/spend evol')).join('\n')
     const row = `${kept} | 5 Oct | 30.00 | BOOK SHOP`
     expect(detail).toContain(`Other Spend\nID | Date | SGD | Merchant\n${row}\nTotal | 30.00\n`)
@@ -615,7 +615,7 @@ describe('/remove', () => {
 
     expect(await ingestAlert(store, email)).toEqual({ status: 'duplicate' })
     expect(await rowsOf(userId)).toMatchObject([{ id, source_id: 'msg-7', removed_at: expect.any(Number) }])
-    expect(await chat.say('/spend')).toContain('visa ••••1234: no purchases, resets 1 Nov')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 0.00 | 0 | 29 Sep to 29 Oct | 1 Nov')
   })
 
   it("takes out none of another user's purchases", async () => {
@@ -625,7 +625,7 @@ describe('/remove', () => {
     expect(await chat.say(`/remove ${theirs}`)).toBe(`You have no purchase with ID ${theirs}.`)
 
     expect(await rowsOf(await other.userId())).toMatchObject([{ id: theirs, removed_at: null }])
-    expect(await other.say('/spend')).toContain('visa ••••1234: SGD 12.40 in 1 purchase, resets 1 Nov')
+    expect(await other.lines('/spend')).toContain('visa | SGD 12.40 | 1 | 29 Sep to 29 Oct | 1 Nov')
   })
 
   it.each(['/remove', '/remove evol', '/remove 12 13', '/remove 1.5', '/remove -3', '/remove #'])(

@@ -1,9 +1,21 @@
 import { env } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { spendingSummary } from '../src/mcp/tools'
 import { storeFor } from '../src/store'
-import { clock, NOW, openChat } from './connect-helpers'
-import { BY_PURCHASE_DAY, buy, inCatalogue, linesOf, userCount } from './helpers'
+import { TelegramError } from '../src/telegram/api'
+import { clock, deps, NOW, openChat } from './connect-helpers'
+import {
+  BY_PURCHASE_DAY,
+  buy,
+  CARDS_HEADER,
+  ESTIMATED,
+  inCatalogue,
+  linesOf,
+  plain,
+  SPEND_HEADER,
+  tableOf,
+  userCount,
+} from './helpers'
 import { record } from './mcp-helpers'
 
 // Linking a card to a product of the catalogue. The clock stands at 12:00 on 9 October 2026 in Singapore.
@@ -19,20 +31,45 @@ async function categoriesOf(userId: number): Promise<Record<string, string | nul
 }
 
 describe('/products', () => {
-  it('lists the products by key and name, says how to link a card to one, and stores nothing', async () => {
+  const KNOWN = 'The card products whose reward rules are known:'
+  const HOW = 'To link a card to one, send /product <nickname> <product key>. Or add the key to the end of /addcard.'
+
+  it('lists the products in a table of their keys and their names, says how to link a card to one, and stores nothing', async () => {
     const chat = openChat()
 
-    expect(await chat.say('/products')).toBe(
+    // As Telegram is posted it: this is all of the `rich_message`, and no text is sent with it.
+    expect(await chat.rich('/products')).toEqual({
+      skip_entity_detection: true,
+      blocks: [
+        plain(KNOWN),
+        tableOf(
+          [
+            { text: 'Key', is_header: true },
+            { text: 'Product', is_header: true },
+          ],
+          [{ text: 'uob-evol' }, { text: 'UOB EVOL Card' }],
+          [{ text: 'hsbc-revolution' }, { text: 'HSBC Revolution Credit Card' }],
+          [{ text: 'ocbc-rewards' }, { text: 'OCBC Rewards Card' }],
+        ),
+        plain(HOW),
+      ],
+    })
+    expect(await userCount(chat.telegramId)).toBe(0)
+  })
+
+  it('is a line for each product, as it was before it was a table, when Telegram does not take the table', async () => {
+    vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 400))
+
+    expect(await openChat().say('/products')).toBe(
       [
-        'The card products whose reward rules are known:',
+        KNOWN,
         'uob-evol - UOB EVOL Card',
         'hsbc-revolution - HSBC Revolution Credit Card',
         'ocbc-rewards - OCBC Rewards Card',
         '',
-        'To link a card to one, send /product <nickname> <product key>. Or add the key to the end of /addcard.',
+        HOW,
       ].join('\n'),
     )
-    expect(await userCount(chat.telegramId)).toBe(0)
   })
 })
 
@@ -45,9 +82,11 @@ describe('/product', () => {
 
     expect(await chat.say('/product evol uob-evol')).toBe(LINKED)
 
-    expect(await chat.say('/cards')).toBe(
-      'evol ••••1234: statement closes on the 5th of the month, UOB EVOL Card\namex ••••0005: calendar month',
-    )
+    expect(await chat.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      'evol | ••••1234 | statement closes on the 5th of the month | UOB EVOL Card',
+      'amex | ••••0005 | calendar month | -',
+    ])
     expect(await store.listCards()).toEqual([
       { nickname: 'evol', last4: '1234', windowType: 'statement', statementDay: 5, product: 'uob-evol' },
       { nickname: 'amex', last4: '0005', windowType: 'calendar' },
@@ -55,9 +94,11 @@ describe('/product', () => {
 
     expect(await chat.say('/product evol none')).toBe('evol ••••1234 is linked to no product now.')
 
-    expect(await chat.say('/cards')).toBe(
-      'evol ••••1234: statement closes on the 5th of the month\namex ••••0005: calendar month',
-    )
+    expect(await chat.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      'evol | ••••1234 | statement closes on the 5th of the month | -',
+      'amex | ••••0005 | calendar month | -',
+    ])
     expect((await store.listCards())[0]).toEqual({
       nickname: 'evol',
       last4: '1234',
@@ -89,7 +130,7 @@ describe('/product', () => {
 
     expect(await chat.say(message)).toBe(reply)
 
-    expect(await chat.say('/cards')).toBe('evol ••••1234: calendar month')
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | -'])
   })
 
   it("links a user's own card, and not the card that another user calls the same", async () => {
@@ -98,8 +139,8 @@ describe('/product', () => {
 
     await chat.say('/product evol uob-evol')
 
-    expect(await chat.say('/cards')).toBe('evol ••••1234: calendar month, UOB EVOL Card')
-    expect(await bystander.say('/cards')).toBe('evol ••••1234: calendar month')
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | UOB EVOL Card'])
+    expect(await bystander.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | -'])
   })
 
   it("sorts the purchases of the card's current window that the product's rules settle, and no others", async () => {
@@ -432,7 +473,14 @@ describe('a card of a product whose terms count a purchase by the day that it wa
       ['2026-10-06T10:00:00+08:00', 10000, 'SGD', '1234'],
     ])
 
-    // No line under the card says which days its total counts, and none under the others says why.
+    // The days that its total counts are those of its cycle, and nothing under the table says why any are not.
+    expect(await chat.lines('/spend')).toEqual([
+      SPEND_HEADER,
+      'plain | SGD 100.00 | 1 | 6 Oct to 5 Nov | 6 Nov',
+      ESTIMATED,
+    ])
+    // As text, no line under the card says which days its total counts, and none under the others says why.
+    vi.spyOn(deps.messenger, 'sendRich').mockRejectedValueOnce(new TelegramError('sendRichMessage', 400))
     expect(await chat.say('/spend')).toBe(
       'plain ••••1234: SGD 100.00 in 1 purchase, resets 6 Nov\n\nTotals are estimated from bank alerts.',
     )
