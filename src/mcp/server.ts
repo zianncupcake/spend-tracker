@@ -25,8 +25,9 @@ import {
   type ListArguments,
 } from './tools'
 
-// What the two tools are said to do and to take. The bot's own assistant is told of them in the same words: see
-// src/ai/assistant.ts.
+// What the two tools are said to do and to take. The bot's own assistant offers its model the second of the two,
+// under a name of its own: in these words, after a sentence of its own, and with what the tool takes said a little
+// differently. See TOOLS in src/ai/assistant.ts.
 
 export const SUMMARY =
   "What the user has spent on each of their credit cards in the card's current window, which is its statement " +

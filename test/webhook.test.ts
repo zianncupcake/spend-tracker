@@ -861,10 +861,11 @@ describe('POST /telegram with a question', () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       model: 'openai/gpt-oss-120b',
       messages: [{ role: 'system' }, { role: 'user', content: 'How much have I spent?' }],
-      // The two tools that read, and the three by which the model says what it was asked to have done.
+      // The tool that reads, and the four by which the model says what it was asked to have done: the one that
+      // shows what was spent is the first of the five.
       tools: [
-        { function: { name: 'get_spending_summary' } },
-        { function: { name: 'list_transactions' } },
+        { function: { name: 'show_spending' } },
+        { function: { name: 'find_purchases' } },
         { function: { name: 'add_purchases' } },
         { function: { name: 'set_category' } },
         { function: { name: 'run_command' } },
@@ -879,7 +880,7 @@ describe('POST /telegram with a question', () => {
     await say(telegramId, `/add visa 12.50 ${MERCHANT}`)
     telegramApi.mockClear()
     provider
-      .mockImplementationOnce(async () => Response.json(calling(['call_1', 'list_transactions', { card: 'visa' }])))
+      .mockImplementationOnce(async () => Response.json(calling(['call_1', 'find_purchases', { card: 'visa' }])))
       .mockImplementationOnce(async () => Response.json(saying(`You spent SGD 12.50 at ${MERCHANT}`)))
     const logged = catchConsole()
 
@@ -890,8 +891,8 @@ describe('POST /telegram with a question', () => {
     const [, [, init]] = provider.mock.calls
     const { messages } = JSON.parse(init.body as string)
     expect(messages.slice(2)).toMatchObject([
-      { role: 'assistant', tool_calls: [{ id: 'call_1', function: { name: 'list_transactions' } }] },
-      { role: 'tool', tool_call_id: 'call_1', name: 'list_transactions' },
+      { role: 'assistant', tool_calls: [{ id: 'call_1', function: { name: 'find_purchases' } }] },
+      { role: 'tool', tool_call_id: 'call_1', name: 'find_purchases' },
     ])
     expect(JSON.parse(messages[3].content).transactions).toMatchObject([
       { cardLast4: '1234', amount: '12.50', currency: 'SGD', merchant: MERCHANT },
@@ -910,7 +911,7 @@ describe('POST /telegram with a question', () => {
     expect(logged.events()).toEqual([
       { event: 'update', kind: 'question', outcome: 'deferred', ms: took },
       expect.objectContaining({ event: 'ai_call', status: 200, finish: 'tool_calls', tool_calls: 1 }),
-      { event: 'assistant_tool', user, tool: 'list_transactions', outcome: 'ok', ms: took },
+      { event: 'assistant_tool', user, tool: 'find_purchases', outcome: 'ok', ms: took },
       expect.objectContaining({ event: 'ai_call', status: 200, finish: 'stop', tool_calls: 0 }),
       {
         event: 'question',

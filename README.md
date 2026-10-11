@@ -234,11 +234,34 @@ is answered 405). It answers the 2026-07-28 revision of the protocol, and the ol
 ## Asking the bot a question
 
 A text message that is not a command, and is not the 6-digit code of a sign-in, is a question for the bot's
-assistant: "how much have I spent on my EVOL card this cycle?", or "what did I buy on 9 October?". The answer is a
-model's. The model is told what was asked and is offered the two tools of the MCP server, in the words in which that
-server describes them, and it is asked again with what its calls of them came to until it answers. The tools are run
-inside the service, by the functions that the MCP endpoint runs and not through it, and whatever they read comes
-through the store of the user who asked.
+assistant: "what did I buy on 9 October?", or "how much did I spend at the book shop last month?". The answer is a
+model's. The model is told what was asked and is offered one tool that reads, `find_purchases`, which is the
+`list_transactions` of the MCP server under another name. It is asked again with what its calls of the tool came
+to until it answers. The tool is run inside the service, by the function that the MCP endpoint runs and not
+through it, and whatever it reads comes through the store of the user who asked.
+
+A request to see what was spent is answered with the bot's own tables, and never with text of the model's: "how
+much have I spent on my EVOL card this cycle?", or "breakdown of my spending". Such a message asks the bot to do
+something: see Asking the bot to do things. The model is offered a tool for it, `show_spending`, which takes a
+card's nickname or none, and is told to call it and to write none of the spending out itself. The reply is then
+the message that `/spend <nickname>` sends: the purchases of the card's current statement month or calendar month
+in tables, with the total of each category and what is left of each limit. With no card named, each card has
+such a message of its own, in the order of `/cards`, when the user has five cards at the most. A user with more is
+sent the one message that `/spend` sends, with the total of each card: five rich messages are as many as one
+message of the user's should set off. And the model is not offered `get_spending_summary`, so that it has no
+totals to write out: with them before it, a model was seen to answer in words of its own.
+
+The model is offered `find_purchases` in the words in which the MCP server describes `list_transactions`, with a
+few differences. It has a name of its own: as `list_transactions`, a model that was asked to list a user's
+transactions was seen to call it first and `show_spending` only after that, which is a request more, and purchases
+sent to the provider for nothing. It is said first that the user is shown none of what the tool gives. Its `card`
+is not said to be found with `get_spending_summary`, which the model is not offered. A listing is of 50 purchases
+at the most. And its schema is no stricter than it has to be: each argument may be null, and nothing says that
+the tool takes no other argument. The provider checks a call against the schema that the tool was offered with
+before the bot is given the call, and refuses the whole request for one that does not keep to it, so that the
+question cannot be answered. It was seen to do so for a null, which a model writes for an argument that it leaves
+out. So it is the bot that turns back a call with an argument that the tool has not got: the model is told which
+arguments there are, and can call again.
 
 There is no switch. The assistant is on for every user when the service is set up with an AI provider, and a
 service with none answers a question by saying that it has no assistant. Four settings make the setup, of which the
@@ -260,10 +283,11 @@ Any provider with a chat completions API of the kind that OpenAI has will do, an
 Nobody is asked before a question of theirs is sent to the provider, so a service that has an assistant says what
 is sent: in the welcome that answers `/start`, under the list of commands that answers a command that there is not,
 and in the privacy policy, which names the details. The provider is sent the question, what the user's cards are
-called and can be sorted into, and what the model's calls of the tools return, and nothing unless a question is
-asked or, where the bot reads photos, a photo is sent. The policy
-also says that what is taken from Gmail is not used to train AI models, so the provider has to be one that does not
-train its models on what it is sent.
+called and can be sorted into, and what the model's calls of `find_purchases` return, which is purchases, and
+nothing unless a question is asked or, where the bot reads photos, a photo is sent. It is sent no total of a card
+and nothing of the tables that the bot shows: those are made after the model has had its say, and go to the user
+alone. The policy also says that what is taken from Gmail is not used to train AI models, so the provider has to
+be one that does not train its models on what it is sent.
 
 A model takes seconds over an answer, and Telegram posts an update again when it has waited too long to hear that
 the update was taken. So the Worker answers Telegram at once, and the answering goes on in `ctx.waitUntil`. A Worker
@@ -295,12 +319,12 @@ the "typing" action stops nothing. An answer that Telegram does not answer at al
 as text, as one that it refuses is: the notice then says that the question could not be answered.
 
 A question costs the model four messages at the most: its calls of tools, and then its answer. Six calls of the
-tools that read are answered, however many the model makes in one message, and the summary is read once. With the
-user's row and their cards, which the model is told of before the question, that keeps a question to 33 database
-queries, and 4 requests to the provider at the most. It makes 12 requests to Telegram at the most: the
+tool that reads are answered, however many the model makes in one message, and a listing is two database queries.
+With the user's row and their cards, which the model is told of before the question, that keeps a question to 14
+database queries, and 4 requests to the provider at the most. It makes 12 requests to Telegram at the most: the
 placeholder, the "typing" action 7 times in the 27 seconds, the answer, the answer again as text and, when Telegram
 took it neither way, the notice in the place of the placeholder and again as a message of its own. An answer that
-Telegram took is followed by one request, which deletes the placeholder. `list_transactions` gives the model 50
+Telegram took is followed by one request, which deletes the placeholder. `find_purchases` gives the model 50
 purchases at the most, and says so when a listing is as long as it was let be. What is wrong with a call goes back
 to the model as the answer to it, so that it can call again. A question can be 500 characters long.
 
@@ -336,16 +360,20 @@ paragraphs, and what is cut ends with an ellipsis. So does an answer that the mo
 
 ## Asking the bot to do things
 
-A message for the assistant can ask for something to be done: "add 5.20 lunch to evol as other spend", "mark 57 as
-other spend", "set my time zone to Tokyo". The model works out what the user asked for, and the bot's own code does
-it. Beside the two tools that read, the model is offered three that act: `add_purchases`, `set_category` and
-`run_command`. A call of one does nothing. It ends the conversation with the model, and comes back from
-`answerQuestion` as an action (`Action` in `src/ai/assistant.ts`), which `act` in `src/telegram/handler.ts` carries
-out with the code that the commands run. The reply is the bot's too: the model is not asked again, so nothing that
-a model wrote ever says that something was done.
+A message for the assistant can ask for something to be done: "show me what I spent on evol", "add 5.20 lunch to
+evol as other spend", "mark 57 as other spend", "set my time zone to Tokyo". The model works out what the user
+asked for, and the bot's own code does it. Beside the one tool that reads, the model is offered four that act:
+`show_spending`, `add_purchases`, `set_category` and `run_command`. A call of one does nothing. It ends the
+conversation with the model, and comes back from `answerQuestion` as an action (`Action` in
+`src/ai/assistant.ts`), which `act` in `src/telegram/handler.ts` carries out with the code that the commands run.
+The reply is the bot's too: the model is not asked again, so nothing that a model wrote ever says that something
+was done.
 
-What can be undone in one step is done at once: adding purchases, sorting a purchase into a category, adding a
-card, linking a card to a product, changing the time zone, and the commands that only show things. Purchases are
+What changes nothing, or can be undone in one step, is done at once: showing what was spent, adding purchases,
+sorting a purchase into a category, adding a card, linking a card to a product, changing the time zone, and the
+commands that only show things. What was spent is shown as `/spend <nickname>` shows it, by `spendDetail`: in a
+message for the card that the model named, or in one for each card when it named none and the user has five cards
+at the most. A user with more cards is sent the one message that `/spend` sends. Purchases are
 added as those of a photo are, by `addRead`, under the id of the message, with the same limit and the same buttons
 for what is not clear, and a message has them added once. A purchase is sorted as a press of "Mark as" sorts one,
 when it is the user's, its card has a product, and the category is one that can be chosen for that product. A
@@ -394,13 +422,14 @@ are asked about after a reading, for the user who pressed, in their own private 
 Nothing keeps a press from being made twice. The message has no buttons after the first, and a command that is run
 again says so itself, as when it is sent twice.
 
-The things of one message may run 30 database queries between them, each counted at the most that it can run: 8
-for an adding, 1 for the cards and 2 for each purchase that is sorted, 1 for a message that asks, 22 for `/spend`
-with no card named, and 6 for any other command. What there is no room left for is not begun, and its user is told
-to ask for it again. The answering has run 2 queries by then, for the user and their cards, when no tool had read
-anything for the model, and 12 more at the most for calls that were told what was wrong with them: 44 in all. When
-tools had read for it, which can have run 31, the things may run 17, so that a request stays inside the 50 that it
-may run whatever the model does.
+The things of one message may run 30 database queries between them, each counted at the most that it can run: for
+spending that is shown, 1 for the cards and then 2 for each card, or 22 for the one message of `/spend`, 8 for an
+adding, 1 for the cards and 2 for each purchase that is sorted, 1 for a message that asks, 22 for `/spend` with no
+card named, and 6 for any other command. What there is no room left for is not begun, and its user is told to ask
+for it again. The answering has run 2 queries by then, for the user and their cards, and 12 more at the most for
+the model's calls of `find_purchases`, whether they gave it a listing or were told what was wrong with them.
+That is 44 in all, so a request stays inside the 50 that it may run whatever the model does, and whether or not
+the tool had read for it.
 
 ## Adding purchases from a photo
 
@@ -763,23 +792,25 @@ The bot:
     `TimeoutError` is an answer that Telegram did not answer in its 5 seconds, and has a `telegram_failed` line
     before it. A request that the provider did not answer in time is a `timeout`.
 - `assistant_tool`: a call of a tool by the model, over a question. These calls are made inside the service and
-  not through the MCP endpoint, so they have no `mcp_tool` line. `user`: who asked. `tool`: `get_spending_summary`
-  or `list_transactions`, one of the three that act, which are `add_purchases`, `set_category` and `run_command`,
-  or `unknown` for a tool that there is not, whatever the model called it. `outcome`: `ok`,
-  `invalid` when the model was told what was wrong with the call, which a call beyond the six that are answered
-  is too, or `failed`, with the fields of a failure. The question then fails with it. `ms`: how long the call took.
+  not through the MCP endpoint, so they have no `mcp_tool` line. `user`: who asked. `tool`: `find_purchases`,
+  one of the four that act, which are `show_spending`, `add_purchases`, `set_category` and `run_command`, or
+  `unknown` for a tool that there is not, whatever the model called it: the two names of the MCP server's tools
+  are such, as the model is offered neither. `outcome`: `ok`, `invalid` when the model was told what was wrong
+  with the call, which a call beyond the six that are answered is too, or `failed`, with the fields of a failure.
+  The question then fails with it. `ms`: how long the call took.
 - `action`: one thing that the assistant made out to do, as the bot is done with it: see Asking the bot to do
   things. It is written before the `question` line of its message. `user`: who asked.
-  - `kind`: `add` for purchases to add, `category` for purchases to sort, `command` for a command to run.
+  - `kind`: `show` for spending to show, `add` for purchases to add, `category` for purchases to sort, `command`
+    for a command to run.
   - `command`: which command, for a `command`, by its name in the bot's own list, and never what the model wrote.
     `unknown` is a line of no command of the bot's.
   - `outcome`: `done`. `asked` when nothing is done until its user presses a button: a command that removes or
     revokes, an adding of which every purchase is held and, after a tool had read for the model, a command that
     changes something. `refused` when the bot did nothing of it: `/delete`, a line of no command that is run for
-    the assistant, a command that is asked about and has nothing to act on, purchases of which none could be
-    sorted, and purchases to add that there were none of, or that their message had added already. `failed`, with
-    the fields of a failure, which ends the doing: every action after it is `skipped`, as every action is that
-    there was no room left for.
+    the assistant, a command that is asked about and has nothing to act on, spending to show for a user who has no
+    cards, purchases of which none could be sorted, and purchases to add that there were none of, or that their
+    message had added already. `failed`, with the fields of a failure, which ends the doing: every action after it
+    is `skipped`, as every action is that there was no room left for.
   - `stored`, `held`: how many purchases an `add` stored at once, and how many it holds.
 - `confirm_press`: the press of "Do it" or "Cancel" under a message that asked before a command was run. It is
   written before the `update` line of the press. `user`: who pressed. `command`: which command the button's line
@@ -1028,9 +1059,12 @@ its CPU limit ended `exceededCpu`: that is from the documentation, as no such ru
 - A purchase that was read from a photo has a day and no time. It is dated as `/add` dates one that is given with a
   date: at noon of that day in its user's time zone, or at the time that it is now, on a day that has not got to
   its noon yet.
-- The assistant sorts 14 purchases for one message at the most, 8 when the model looked purchases up first, and
-  fewer when the message asks for other things too: each takes two database queries. The model is told that it may
-  give 20. And `/spend` with no card named is not run for a message whose model read first: it is asked for again.
+- The assistant sorts 14 purchases for one message at the most, and fewer when the message asks for other things
+  too: each takes two database queries. The model is told that it may give 20.
+- The tables that the assistant shows are of each card's current statement month or calendar month, and of
+  nothing else. What was spent in an earlier month, or at one merchant, is still answered in the model's words,
+  from the purchases that `find_purchases` gives it. So is a message that the model does not take for a
+  request to see what was spent, though it is one: which of the two a message is, is the model's to make out.
 - A message for the assistant that Telegram delivers again is answered again: the model is asked a second time,
   and what it then makes out is done a second time. Purchases are added from a message once all the same, and a
   second doing of anything else that the bot does at once leaves it as it was, or says that it is done.

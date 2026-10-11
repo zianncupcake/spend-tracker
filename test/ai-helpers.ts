@@ -5,6 +5,17 @@
 /** Where the bot asks the model when the service is set up with a key and nothing else. */
 export const AI_URL = 'https://api.groq.com/openai/v1/chat/completions'
 
+/**
+ * What the model is told of showing a user what they have spent, word for word: one line of what it is told before a
+ * question, which the tests that have all of that written out share.
+ */
+export const SHOWN_NOT_WRITTEN =
+  'When the user asks what they have spent, or to see or list their purchases or transactions, or for a breakdown, a ' +
+  'total or what is left of a limit, call show_spending and write nothing else: the bot then shows it in tables, for ' +
+  "each card's current statement month or calendar month. Never write those out yourself. find_purchases is for " +
+  'your own reading, to find the id of a purchase or to answer what the tables do not show, such as an earlier month ' +
+  'or one merchant: the user is shown none of what it returns.'
+
 /** A message of a conversation, as the bot posts it to the provider. */
 export interface ChatMessage {
   role: string
