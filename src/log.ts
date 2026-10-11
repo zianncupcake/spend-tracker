@@ -135,7 +135,7 @@ export interface Events {
   }
   action: {
     user: number
-    kind: 'add' | 'category' | 'command'
+    kind: 'show' | 'add' | 'category' | 'command'
     command?: Events['update']['command']
     outcome: 'done' | 'asked' | 'refused' | 'failed' | 'skipped'
     stored?: number
@@ -149,8 +149,8 @@ export interface Events {
   assistant_tool: {
     user: number
     tool:
-      | 'get_spending_summary'
-      | 'list_transactions'
+      | 'show_spending'
+      | 'find_purchases'
       | 'add_purchases'
       | 'set_category'
       | 'run_command'

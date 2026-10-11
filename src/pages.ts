@@ -84,8 +84,7 @@ export function privacyPage(operator: Operator, assistant: boolean, photos = fal
 code of a sign-in. To answer it, your question is sent to an AI provider chosen by ${name}, which produces the
 answer. With every question go your time zone, the day and the time that it is there, the nicknames of your cards
 and the names of the reward categories that their purchases can be sorted into, whether or not the question needs
-them. Other details of your cards and purchases are sent only as the answering calls for them, out of these: the
-last four digits, window, totals and number of purchases of each of your cards and, of your purchases, the id, the
+them. Other details are sent only as the answering calls for them, and they are of your purchases: the id, the
 time, the last four digits of the card, the amount, the currency, the merchant and the reward category. Nothing is
 sent to the AI provider ${unless}.</p>
 <p>The AI provider also works out what you ask the bot to do in such a message, such as adding a purchase or

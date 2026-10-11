@@ -24,18 +24,23 @@ import {
   type Chat,
 } from './photo-helpers'
 
-// What the bot does when its assistant makes out, in a message, things for the bot to do: the purchases that it
-// adds, the purchases that it sorts and the commands that it runs, what it asks about before it does it, and what
-// the press of a button then does. The assistant is a model's work and is stood in for: a test says what the
-// assistant made of a message, and the tests are of what the bot then does. test/assistant-actions.test.ts has the
-// assistant's half. The chats, the clock and the service are those of ./connect-helpers: it is 12:00 on 9 October
-// 2026 in Singapore.
+// What the bot does when its assistant makes out, in a message, things for the bot to do: the spending that it
+// shows, the purchases that it adds, the purchases that it sorts and the commands that it runs, what it asks about
+// before it does it, and what the press of a button then does. The assistant is a model's work and is stood in for:
+// a test says what the assistant made of a message, and the tests are of what the bot then does.
+// test/assistant-actions.test.ts has the assistant's half. The chats, the clock and the service are those of
+// ./connect-helpers: it is 12:00 on 9 October 2026 in Singapore.
 
 const DOING =
   'Doing what you asked… If this message is still here in half a minute, something went wrong. Check /spend ' +
   'before you ask again.'
 const NOT_DONE =
   'Something that you asked for could not be done. Ask for it another way, or send /start for the list of commands.'
+const NO_CARDS = [
+  'You have no cards yet. Add one with:',
+  '/addcard <nickname> <last4> statement <day>',
+  '/addcard <nickname> <last4> calendar',
+].join('\n')
 const DELETE_WARNING =
   'This deletes your cards and every purchase stored for you, and cannot be undone. Send /delete confirm to go ahead.'
 const TOKYO = "Your time zone is now Asia/Tokyo. Your cards' cycles and months begin and end by it."
@@ -105,6 +110,100 @@ function loggedFor(user: number, actions: object[]) {
     { event: 'question', ...question, actions: actions.length, ms: 0 },
   ]
 }
+
+describe('what was spent, when the assistant makes out that it is to be shown', () => {
+  it('is shown as /spend with the card shows it, when a card is named: in the bot’s own table, which ends with its total', async () => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    // Two purchases on visa, which is linked to no product, and one on the other card.
+    const coffee = await buy(userId)
+    const books = await buy(userId, { at: '2026-10-08T10:00:00+08:00', amountMinor: 7700, merchant: 'BOOK SHOP' })
+    await buy(userId, { cardLast4: '5678', merchant: 'ON ANOTHER CARD' })
+    acting({ kind: 'show', card: 'visa' })
+    const logged = catchConsole()
+
+    const { rich, texts } = await told(chat)
+
+    // One rich message is all that the chat is left with: the placeholder is gone, and there is no text beside it.
+    const [shown, ...more] = rich
+    expect(more).toEqual([])
+    expect(texts).toEqual([])
+    // A card with no product has one table, of all its purchases, which ends with what they come to.
+    expect(shown.blocks).toContainEqual(
+      tableOf(
+        headerRow('SGD'),
+        purchaseRow(coffee, '5 Oct', '12.40', 'COFFEE PLACE'),
+        purchaseRow(books, '8 Oct', '77.00', 'BOOK SHOP'),
+        sumRow('Total', '89.40'),
+      ),
+    )
+    expect(logged.events()).toEqual([
+      ...loggedFor(userId, [{ kind: 'show', outcome: 'done' }]).slice(0, 2),
+      { ...loggedFor(userId, [{}])[2], sent: 'rich' },
+    ])
+    // It is the reply to /spend with that card, whole.
+    expect(shown).toEqual(await chat.rich('/spend visa'))
+  })
+
+  it('is shown for every card when none is named, each in a message of its own and in the order of the cards: with nothing asked first, whatever the model had read', async () => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    await buy(userId)
+    await buy(userId, { cardLast4: '5678', merchant: 'TEA HOUSE' })
+    actingWith({ afterReading: true }, { kind: 'show' })
+
+    const { rich, texts } = await told(chat)
+
+    expect(texts).toEqual([])
+    expect(rich.map(({ blocks }) => blocks[0])).toEqual([
+      bold('visa ••••1234: 1 Oct to 31 Oct'),
+      bold('evol ••••5678: 1 Oct to 31 Oct'),
+    ])
+    // Each is the reply to /spend with its card, whole.
+    expect(rich).toEqual([await chat.rich('/spend visa'), await chat.rich('/spend evol')])
+  })
+
+  it('is shown in full for five cards at the most: a user with six is shown what /spend with no card named shows, in one message of text', async () => {
+    const chat = openChat()
+    for (let card = 1; card <= 5; card++) await chat.say(`/addcard card-${card} 000${card} calendar`)
+    await buy(await chat.userId(), { cardLast4: '0003' })
+    acting({ kind: 'show' })
+
+    expect((await told(chat)).rich).toHaveLength(5)
+
+    await chat.say('/addcard card-6 0006 calendar')
+    const { rich, texts } = await told(chat)
+
+    expect(rich).toEqual([])
+    const [said, ...more] = texts.map((message) => message.text)
+    expect(more).toEqual([])
+    expect(said).toContain('card-3 ••••0003: SGD 12.40 in 1 purchase, resets 1 Nov')
+    expect(said).toBe(await chat.say('/spend'))
+  })
+
+  it('is answered with how to add a card, for a user who has none', async () => {
+    const chat = openChat()
+    acting({ kind: 'show' })
+    const logged = catchConsole()
+
+    const { rich, texts } = await told(chat)
+
+    expect(rich).toEqual([])
+    expect(texts.map((message) => message.text)).toEqual([NO_CARDS])
+    const refused = { event: 'action', user: await chat.userId(), kind: 'show', outcome: 'refused' }
+    expect(logged.events('action')).toEqual([refused])
+  })
+
+  it('is not shown for a card that its user has not got: the nickname is a model’s text, and is not said back', async () => {
+    const chat = await chatWithCard()
+    acting({ kind: 'show', card: 'amex' })
+
+    const { rich, texts } = await told(chat)
+
+    expect(rich).toEqual([])
+    expect(texts.map((message) => message.text)).toEqual([NOT_DONE])
+  })
+})
 
 describe('purchases that the assistant makes out in a message', () => {
   it('are added as those of a photo are: stored under the id of the message, and told of in a table with their ids', async () => {
@@ -621,6 +720,16 @@ describe('what the model asks for after a tool has read for it', () => {
     expect((await chat.press(texts[1], 'Do it')).sent.map((message) => message.text)).toEqual([TOKYO])
     expect((await chat.press(texts[0], 'Add these 2')).answer).toBe('Added 2 purchases.')
     expect(await rowsOf(userId)).toHaveLength(3)
+  })
+
+  it('has the room that any other answer has: /spend with no card named, which is counted at 22 queries, is run', async () => {
+    const chat = await chatWithCard()
+    actingWith({ afterReading: true }, command('/spend'))
+
+    const { rich, texts } = await told(chat)
+
+    expect(rich).toEqual([])
+    expect(texts.map((message) => message.text)).toEqual([await chat.say('/spend')])
   })
 })
 

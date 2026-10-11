@@ -52,10 +52,8 @@ describe('the privacy policy', () => {
     'A text message that you send the bot is read as a question when it is not a command, and is not the 6-digit ' +
       'code of a sign-in.',
     'To answer it, your question is sent to an AI provider chosen by Example Operator, which produces the answer.',
-    'Other details of your cards and purchases are sent only as the answering calls for them, out of these: the ' +
-      'last four digits, window, totals and number of purchases of each of your cards and, of your purchases, the ' +
-      'id, the time, the last four digits of the card, the amount, the currency, the merchant and the reward ' +
-      'category.',
+    'Other details are sent only as the answering calls for them, and they are of your purchases: the id, the ' +
+      'time, the last four digits of the card, the amount, the currency, the merchant and the reward category.',
     'Nothing is sent to the AI provider unless you ask a question.',
     'An AI provider chosen by Example Operator answers the questions that you ask the bot. It is sent each ' +
       'question and the card and purchase details needed to answer it, with your time zone and with the nicknames ' +
@@ -123,11 +121,12 @@ describe('the privacy policy', () => {
     for (const text of [await policy(true), await policy(true, true)]) {
       // It is said once, between what a question is sent to and what else is sent only when it is called for.
       expect(text.split(said)).toHaveLength(2)
-      expect(text).toContain(`which produces the answer. ${said} Other details of your cards and purchases are sent`)
-      // Nothing that is sent with every question is still said to be sent only when it is called for.
-      const [, asNeeded = ''] = /out of these: ([^.]*)\./.exec(text) ?? []
-      expect(asNeeded).toMatch(/^the last four digits, window, totals/)
-      expect(asNeeded).not.toMatch(/time zone|nickname/)
+      expect(text).toContain(`which produces the answer. ${said} Other details are sent only as the answering calls`)
+      // Nothing that is sent with every question is still said to be sent only when it is called for. And nothing
+      // of a card's window or its totals is said to be sent: the bot shows those itself, and sends them to nobody.
+      const [, asNeeded = ''] = /they are of your purchases: ([^.]*)\./.exec(text) ?? []
+      expect(asNeeded).toMatch(/^the id, the time, the last four digits of the card/)
+      expect(asNeeded).not.toMatch(/time zone|nickname|window|total/)
       expect(text).toContain('Last updated: 11 October 2026')
     }
     expect(await policy(false)).not.toContain('With every question')

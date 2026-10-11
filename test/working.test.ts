@@ -753,14 +753,13 @@ describe('what the log has of a question', () => {
 
   it('counts the requests to the model and the calls of tools that it took, and how long it took in all', async () => {
     const logged = catchConsole()
-    // The model takes three seconds over each of its messages: a call of each tool, and then its answer.
+    // The model takes three seconds over each of its messages: two calls of the tool that reads, and then its answer.
     const after3s = (completion: object) => async () => {
       await vi.advanceTimersByTimeAsync(3_000)
       return Response.json(completion)
     }
-    provider
-      .mockImplementationOnce(after3s(calling(['call_1', 'get_spending_summary'], ['call_2', 'list_transactions'])))
-      .mockImplementationOnce(after3s(saying('An answer.')))
+    const calls = calling(['call_1', 'find_purchases', { limit: 1 }], ['call_2', 'find_purchases'])
+    provider.mockImplementationOnce(after3s(calls)).mockImplementationOnce(after3s(saying('An answer.')))
     const { telegramId, later } = await question()
 
     await later()
@@ -769,8 +768,8 @@ describe('what the log has of a question', () => {
     expect(logged.events('question')).toEqual([line])
     // Each call of a tool has a line of its own, under the same user.
     expect(logged.events('assistant_tool')).toEqual([
-      { event: 'assistant_tool', user: line.user, tool: 'get_spending_summary', outcome: 'ok', ms: 0 },
-      { event: 'assistant_tool', user: line.user, tool: 'list_transactions', outcome: 'ok', ms: 0 },
+      { event: 'assistant_tool', user: line.user, tool: 'find_purchases', outcome: 'ok', ms: 0 },
+      { event: 'assistant_tool', user: line.user, tool: 'find_purchases', outcome: 'ok', ms: 0 },
     ])
   })
 

@@ -466,19 +466,14 @@ const CONFIRMABLE = [...ASKED_FIRST, ...CHANGING] as const
  * The most queries that the actions of one answer may run between them, each counted at the most that it can run.
  * An action that there is no room left for is not begun, and neither is any after it: see act.
  *
- * A request may run 50 queries, and the answering has run its own by the time anything is done. They are two when
- * no tool had read anything for the model: one for the user, and one for their cards. Calls that were told what
- * was wrong with them can have run two each besides, which is twelve. So the actions of such an answer leave a
- * request inside the 50.
+ * A request may run 50 queries, and the answering has run its own by the time anything is done. Two of them are
+ * run for every answer: one for the user, and one for their cards. The calls of the tool that reads can have run
+ * twelve besides, whether they gave the model a listing or were told what was wrong with them: six of them are
+ * answered, and a listing is two queries. See MAX_TOOL_CALLS in ../ai/assistant. That is 14 at the most, so the
+ * actions of an answer leave a request inside the 50, whether or not anything was read for the model before it
+ * asked for them.
  */
 const ACTION_QUERIES = 30
-
-/**
- * The same for an answer that the model gave after a tool had read for it. The calls of those tools can have run 31
- * queries: the summary, which is one for every card and one more, and five listings of two each. With the two for
- * the user and their cards, that leaves these 17 of the 50. See MAX_TOOL_CALLS in ../ai/assistant, and MAX_CARDS.
- */
-const ACTION_QUERIES_AFTER_READING = 17
 
 /**
  * The most queries that the adding of a reading's purchases runs: the cards, the two that look whether the message
@@ -493,6 +488,13 @@ const ADD_QUERIES = 8
  * statement for each category that a rule of the product gives, of which the one product that there is has two.
  */
 const COMMAND_QUERIES = 6
+
+/**
+ * The most cards that are each shown in full when the assistant is asked to show what was spent on every card: see
+ * showAsked. Each is a rich message of its own, and five of those are as many as one message of the user's should
+ * set off. A user with more cards is shown what /spend with no card named shows, which is one message.
+ */
+const SHOWN_IN_FULL = 5
 
 export const ADD_CARD_USAGE = `/addcard <nickname> <last4> statement <day>
 /addcard <nickname> <last4> calendar`
@@ -1297,7 +1299,7 @@ function ask(
           // message that things are done for.
           await instead(DOING)
           const { actions, afterReading, dropped } = result
-          const room: Room = { left: afterReading ? ACTION_QUERIES_AFTER_READING : ACTION_QUERIES }
+          const room: Room = { left: ACTION_QUERIES }
           const replies = await act(deps, { user, telegramId, messageId, doing, room, afterReading }, actions)
           if (!replies) return outOfTime()
           // What the model asked for and the assistant did not hand on was not done either, and is not passed over
@@ -1392,6 +1394,8 @@ async function act(deps: Deps, how: Asking, actions: Action[]): Promise<Sent[] |
 /** Carries out one action: see act. */
 function carriedOut(deps: Deps, how: Asking, action: Action): Promise<Came> {
   switch (action.kind) {
+    case 'show':
+      return showAsked(deps, how, action.card)
     case 'add':
       return addAsked(deps, how, action.reading)
     case 'category':
@@ -1431,6 +1435,44 @@ function wentWrong(answered: number, asked: number): string {
     `${first} of the ${asked} things that you asked for ${are} answered above. Something then went wrong on the ` +
     "bot's side, and the rest may not have been done. Check /spend before you ask for the rest again."
   )
+}
+
+/**
+ * Shows a user what they have spent, when that is what the assistant made of their message. What is shown is what
+ * /spend shows, in the bot's own tables: none of it is a model's writing.
+ *
+ * `nickname` is the card to show, as the assistant gave it, or nothing for every card. One card is shown as /spend
+ * with its nickname shows it: see spendDetail. Every card is shown so too, each in a reply of its own and in the
+ * order that /cards lists them in, when their user has no more of them than SHOWN_IN_FULL. A user with more is
+ * shown what /spend with no card named shows: a line for each card, in one message.
+ *
+ * The assistant gives the nickname of a card that the model was told of, and of no other. When that card is there no
+ * longer, the reply is that something could not be done. It does not say the nickname back, which is a model's text.
+ *
+ * Nothing here waits for a button, whatever the model had read: it only shows.
+ */
+async function showAsked(deps: Deps, how: Asking, nickname?: string): Promise<Came> {
+  const { user, telegramId, messageId, room } = how
+  if (!take(room, 1)) return 'full'
+  const store = storeFor(deps.db, user.id)
+  const cards = await store.listCards()
+  if (cards.length === 0) return declined(NO_CARDS)
+
+  if (nickname === undefined && cards.length > SHOWN_IN_FULL) {
+    // The command reads the user and their cards for itself, and then the total of each card.
+    if (!take(room, MAX_CARDS + 2)) return 'full'
+    const said = await ran(deps, telegramId, messageId, '/spend')
+    return said ? { replies: [said], outcome: 'done' } : declined(NOT_DONE)
+  }
+
+  // The cards that are each shown in full: every card, or the one of that nickname, when there is one.
+  const shown = nickname === undefined ? cards : cards.filter((card) => card.nickname === nickname)
+  if (shown.length === 0) return declined(NOT_DONE)
+  // Two queries for each card: see spendDetail.
+  if (!take(room, 2 * shown.length)) return 'full'
+  const now = deps.now()
+  const replies = await Promise.all(shown.map((card) => spendDetail(store, card, now, user.timezone)))
+  return { replies, outcome: 'done' }
 }
 
 /**
