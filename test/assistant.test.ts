@@ -47,8 +47,8 @@ function user(question: string): ChatMessage {
 }
 
 /**
- * The five tools as the model is to be offered them, with what is said of each left out: see `withoutDescriptions`.
- * Each argument of the one that reads may be null, and nothing says that it takes no other: see TOOLS in
+ * The six tools as the model is to be offered them, with what is said of each left out: see `withoutDescriptions`.
+ * Each argument of the two that read may be null, and nothing says that either takes no other: see TOOLS in
  * src/ai/assistant.ts for why.
  */
 const TOOLS = [
@@ -75,6 +75,16 @@ const TOOLS = [
           to: { type: ['string', 'null'] },
           limit: { type: ['integer', 'null'], minimum: 1, maximum: 50, default: 50 },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'card_rules',
+      parameters: {
+        type: 'object',
+        properties: { mcc: { type: ['integer', 'null'] }, merchant: { type: ['string', 'null'] } },
       },
     },
   },
@@ -196,7 +206,7 @@ function refusedWith(status: number) {
 }
 
 describe('a question', () => {
-  it('is answered by the model, which is offered the five tools and told what its call of the one that reads came to', async () => {
+  it('is answered by the model, which is offered the six tools and told what its call of one that reads came to', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
     await buy(userId, { at: '2026-08-31T10:00:00+08:00', merchant: 'THE MONTH BEFORE' })
@@ -247,6 +257,21 @@ describe('a question', () => {
       skip_entity_detection: true,
       blocks: [{ type: 'paragraph', text: 'You spent SGD 1,234.56 at BOOK SHOP in September, in 1 purchase.' }],
     })
+  })
+
+  it('is answered from the card rules when the model calls for those: its call is posted back with what came of it', async () => {
+    const chat = openChat()
+    const question = 'Does a made-up card count the code 5812?'
+    const call: [string, string, object] = ['call_1', 'card_rules', { mcc: 5812, merchant: null }]
+    outside.model = [calling(call), saying('A made-up answer.')]
+
+    const answer = await chat.rich(question)
+
+    // test/assistant-actions.test.ts has what the tool gives.
+    const rules = toolResult('call_1', 'card_rules', expect.any(String))
+    expect(outside.completions).toHaveLength(2)
+    expect(messagesOf(2)).toEqual([SYSTEM, user(question), called(call), rules])
+    expect(linesOf(answer)).toEqual(['A made-up answer.'])
   })
 
   it('is answered with what the model says at once, when the model calls no tool', async () => {

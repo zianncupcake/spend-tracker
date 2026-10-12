@@ -60,8 +60,8 @@ interface Asking {
   doing: Doing
   room: Room
   /**
-   * Whether a tool that reads had given the model anything before it asked for these: see `Answer` in
-   * ../ai/assistant. What a tool returns holds text that somebody else wrote, as the name of a merchant is, and a
+   * Whether find_purchases had given the model anything before it asked for these: see `Answer` in
+   * ../ai/assistant. What it returns holds text that somebody else wrote, as the name of a merchant is, and a
    * model can take such text for its user's wish. So what it asks for after it has read is trusted less: see act.
    */
   afterReading: boolean
@@ -131,7 +131,7 @@ const ASKED_FIRST = CONFIRMABLE.filter((name) => !CHANGING.some((changing) => ch
  * not begun, and neither is any after it: see act.
  *
  * A request may run 50 queries, and the answering runs its own. Two of them are run for every message: one for the
- * user, and one for their cards. The calls of the tool that reads can run twelve besides, whether they give the
+ * user, and one for their cards. The calls of the tools that read can run twelve besides, whether they give the
  * model a listing or are told what is wrong with them: six of them are answered for a question, however many
  * answers it has, and a listing is two queries. See MAX_TOOL_CALLS in ../ai/assistant. That is 14 at the most, so
  * the actions leave a request inside the 50, whether or not anything was read for the model before it asked for

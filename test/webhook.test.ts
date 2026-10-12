@@ -593,11 +593,12 @@ describe('POST /telegram with a question', () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       model: DEFAULT_MODEL,
       messages: [{ role: 'system' }, { role: 'user', content: 'How much have I spent?' }],
-      // The tool that reads, and the four by which the model says what it was asked to have done: the one that
-      // shows what was spent is the first of the five.
+      // The two tools that read, and the four by which the model says what it was asked to have done: the one that
+      // shows what was spent is the first of the six.
       tools: [
         { function: { name: 'show_spending' } },
         { function: { name: 'find_purchases' } },
+        { function: { name: 'card_rules' } },
         { function: { name: 'add_purchases' } },
         { function: { name: 'set_category' } },
         { function: { name: 'run_command' } },

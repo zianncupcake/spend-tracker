@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { answerQuestion, MAX_ACTIONS, type Answer, type Taken } from '../src/ai/assistant'
 import type { AiProvider } from '../src/ai/provider'
+import { rulesFor } from '../src/catalogue'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { depsFor, type Deps } from '../src/deps'
 import { findOrCreateUser, storeFor, type User } from '../src/store'
@@ -446,8 +447,33 @@ describe('a question that is only a question', () => {
   })
 })
 
+describe('a call of card_rules', () => {
+  it('is answered with what the catalogue has for it, as JSON, or with what was wrong with it, and is logged as any call is', async () => {
+    const user = await userWithCards()
+    model(
+      calling(
+        ['call_1', 'card_rules', { mcc: 5812, merchant: null }],
+        ['call_2', 'card_rules'],
+        ['call_3', 'card_rules', { mcc: 12345 }],
+      ),
+      saying('A made-up answer.'),
+    )
+    const logged = catchConsole()
+
+    await ask(user, 'A made-up asking.')
+
+    const [rules, neither, noSuchCode] = requests()[1].messages.slice(3).map(({ content }) => content)
+    expect(rules).toBe(JSON.stringify(rulesFor({ mcc: 5812 })))
+    // A call with neither argument, and one whose code is no code, are each told which argument was wrong.
+    for (const wrong of [neither, noSuchCode]) expect(wrong).toMatch(/^Error: .*`mcc`/)
+    expect(neither).toContain('`merchant`')
+    const outcomes = ['ok', 'invalid', 'invalid'] as const
+    expect(logged.events('assistant_tool')).toEqual(outcomes.map((outcome) => toolLine(user, 'card_rules', outcome)))
+  })
+})
+
 describe('the request that a question sends', () => {
-  it('tells the model of the cards, with none of their digits, and offers it the five tools', async () => {
+  it('tells the model of the cards, with none of their digits, and offers it the six tools', async () => {
     const user = await userWithCards()
     model(saying('An answer.'))
 
@@ -468,6 +494,7 @@ describe('the request that a question sends', () => {
     expect(tools.map((tool) => [tool.type, tool.function.name])).toEqual([
       ['function', 'show_spending'],
       ['function', 'find_purchases'],
+      ['function', 'card_rules'],
       ['function', 'add_purchases'],
       ['function', 'set_category'],
       ['function', 'run_command'],
