@@ -57,7 +57,15 @@ export interface Category {
    * that the text of its merchant matches the pattern.
    */
   automatic?: 'foreign-currency' | RegExp
+  /**
+   * The merchant category codes that put a purchase here, when the code of its merchant is known: those that the
+   * terms list, or 'unlisted' for every code that no other category of the product lists.
+   */
+  mccs?: Mcc[] | 'unlisted'
 }
+
+/** A merchant category code, or a run of them: its first and its last, which are both in it. */
+export type Mcc = number | [from: number, to: number]
 
 /** A category that a user can put a purchase in: one with a button. */
 export type Choice = Category & { label: string }

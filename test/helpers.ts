@@ -12,7 +12,7 @@ import type { RichBlock, RichMessage, TableCell } from '../src/telegram/api'
 /**
  * A made-up product whose terms count a purchase by the day that it was made: a window of its cards counts the
  * purchases of its own days, and no others. In all else it is the UOB EVOL Card. The catalogue has no product like
- * it, so a test file that needs one puts it there: see `inCatalogue`.
+ * it with that card's groups, so a test file that needs one puts it there: see `inCatalogue`.
  */
 export const BY_PURCHASE_DAY: Product = {
   ...uobEvol,

@@ -52,6 +52,7 @@ describe('/products', () => {
           [{ text: 'uob-evol' }, { text: 'UOB EVOL Card' }],
           [{ text: 'hsbc-revolution' }, { text: 'HSBC Revolution Credit Card' }],
           [{ text: 'ocbc-rewards' }, { text: 'OCBC Rewards Card' }],
+          [{ text: 'dbs-womans-world' }, { text: "DBS Woman's World Card" }],
         ),
         plain(HOW),
       ],
@@ -68,6 +69,7 @@ describe('/products', () => {
         'uob-evol - UOB EVOL Card',
         'hsbc-revolution - HSBC Revolution Credit Card',
         'ocbc-rewards - OCBC Rewards Card',
+        "dbs-womans-world - DBS Woman's World Card",
         '',
         HOW,
       ].join('\n'),
@@ -278,7 +280,8 @@ describe('a card that is linked to the HSBC Revolution Credit Card', () => {
         'Eligible Transactions are online and contactless purchases in travel, department and retail stores, ' +
         'dining, taxis and membership clubs. Anything else is Other Transactions. ' +
         'A travel agency such as Trip.com, Agoda or Klook is not travel to the bank, so a purchase there starts in ' +
-        'Other Transactions. To mark one, send /sort <purchase id>. /spend hsbc shows the ids.',
+        'Other Transactions. A purchase at a merchant whose category code the bot knows starts where that code ' +
+        'puts it. To mark one, send /sort <purchase id>. /spend hsbc shows the ids.',
     )
     const [message] = await chat.ask(`/sort ${id}`)
     expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${ELIGIBLE}`)
@@ -401,6 +404,7 @@ describe('a card that is linked to the OCBC Rewards Card', () => {
         'Shopping Spend is spend at department, clothing, shoe, bag, sports and duty-free shops, and at Shopee, ' +
         'Lazada, Taobao, TikTok Shop, Amazon, AliExpress, Alibaba, Ezbuy, Watsons, Guardian, Mustafa Centre and ' +
         'NTUC Unity. Anything else is Other Spend, and so are groceries and Shopee Pay. ' +
+        'A purchase at a merchant whose category code the bot knows starts where that code puts it. ' +
         'To mark one, send /sort <purchase id>. /spend ocbc shows the ids.',
     )
     const [message] = await chat.ask(`/sort ${id}`)
@@ -443,12 +447,12 @@ describe('a card that is linked to the OCBC Rewards Card', () => {
     expect(marketplace.text).toMatch(/\nID \d+: Shopping Spend$/)
     expect(labels(marketplace)).toEqual([`Mark as ${OTHER}`])
 
-    // The rule stores where the first three are. Nothing is stored for the last, as at any other merchant.
+    // A rule stores where each of them is: the last is at a merchant that the terms name for Shopping Spend.
     expect(await categoriesOf(userId)).toEqual({
       'SHOPEE PAY': 'other',
       ShopeePay: 'other',
       'SHOPEEPAY SG': 'other',
-      'SHOPEE SINGAPORE MP': null,
+      'SHOPEE SINGAPORE MP': 'shopping',
     })
 
     expect((await chat.press(wallet[0], `Mark as ${SHOPPING}`)).answer).toMatch(/^ID \d+: Shopping Spend$/)
@@ -457,7 +461,7 @@ describe('a card that is linked to the OCBC Rewards Card', () => {
 })
 
 describe('a card of a product whose terms count a purchase by the day that it was made', () => {
-  // The catalogue has no such product, so a made-up one is put there.
+  // The catalogue has no such product with the groups of the UOB EVOL Card, so a made-up one is put there.
   inCatalogue(BY_PURCHASE_DAY)
 
   it('has a window that counts the purchases of its own days, and nothing said of which days those are', async () => {

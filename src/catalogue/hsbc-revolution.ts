@@ -1,4 +1,4 @@
-import type { Product } from './types'
+import type { Mcc, Product } from './types'
 
 // The HSBC Revolution Credit Card, from the terms that the bank publishes for its reward points: the "Terms and
 // Conditions governing the HSBC Revolution Credit Card Reward Points Programme", which are marked "Effective from 1
@@ -22,8 +22,8 @@ import type { Product } from './types'
 //    checks that it was.
 // 3. Whether a purchase is an Eligible Transaction goes by how it was made and by a category code of its merchant,
 //    and an alert email says neither. So a purchase is taken for one until its user marks it otherwise: it is the
-//    limit that a user watches, and to count too much against it is the safer mistake. One rule places a purchase
-//    with nobody choosing, which is the rule for travel agencies below.
+//    limit that a user watches, and to count too much against it is the safer mistake. Two things place a purchase
+//    with nobody choosing: the rule for travel agencies below, and the code of a merchant that ./merchants knows.
 //
 // A purchase at a travel agency is no Eligible Transaction. The travel codes of the terms are those of airlines (3000
 // to 3350, 4511), car rental (3351 to 3500), lodging (3501 to 3999, 7011) and cruise lines (4411), and the code of
@@ -56,6 +56,15 @@ const TRAVEL_AGENCIES = [
   'Airbnb',
 ]
 
+// The codes of clause 7, in the order of its 49 rows, with a new line at each of its four headings.
+const ELIGIBLE_MCCS: Mcc[] = [
+  [3000, 3350], 4511, [3351, 3500], [3501, 3999], 7011, 4411,
+  4816, 5045, 5262, 5309, 5310, 5311, 5331, 5399, 5611, 5621, 5631, 5641, 5651, 5655, 5661, 5691, 5699, 5732, 5733,
+  5734, 5735, 5912, 5942, 5944, 5945, 5946, 5947, 5948, 5949, 5964, 5965, 5966, 5967, 5968, 5969, 5970, 5992, 5999,
+  5441, 5462, 5811, 5812, 5813,
+  4121, 7997,
+]
+
 export const hsbcRevolution: Product = {
   key: 'hsbc-revolution',
   name: 'HSBC Revolution Credit Card',
@@ -73,7 +82,7 @@ export const hsbcRevolution: Product = {
       name: 'Eligible Transactions',
       // 9,000 Bonus Points, at 9 for every SGD1.
       limitMinor: 100000,
-      categories: [{ key: 'eligible', label: 'Eligible Transactions' }],
+      categories: [{ key: 'eligible', label: 'Eligible Transactions', mccs: ELIGIBLE_MCCS }],
     },
     // All other Qualifying Transactions, as the bank has it. A purchase is put here when its user marks it, and when
     // it is at one of the travel agencies above. The category has its button as well as its rule, so a purchase that
@@ -81,7 +90,12 @@ export const hsbcRevolution: Product = {
     {
       name: 'Other Transactions',
       categories: [
-        { key: 'other', label: 'Other Transactions', automatic: new RegExp(TRAVEL_AGENCIES.join('|'), 'i') },
+        {
+          key: 'other',
+          label: 'Other Transactions',
+          automatic: new RegExp(TRAVEL_AGENCIES.join('|'), 'i'),
+          mccs: 'unlisted',
+        },
       ],
     },
   ],
@@ -89,5 +103,6 @@ export const hsbcRevolution: Product = {
   sortingNote:
     'Eligible Transactions are online and contactless purchases in travel, department and retail stores, dining, ' +
     'taxis and membership clubs. Anything else is Other Transactions. A travel agency such as Trip.com, Agoda or ' +
-    'Klook is not travel to the bank, so a purchase there starts in Other Transactions.',
+    'Klook is not travel to the bank, so a purchase there starts in Other Transactions. A purchase at a merchant ' +
+    'whose category code the bot knows starts where that code puts it.',
 }

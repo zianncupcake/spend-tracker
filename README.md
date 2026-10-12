@@ -22,7 +22,8 @@ A card's window is its statement cycle or the calendar month. Windows are counte
 Singapore's until they set another with `/timezone`. The bot knows a purchase by the day that it was made, and a
 bank counts one by the day that it is posted, usually a day or two later. So a purchase made on the last two days
 of a window is counted in the next window, and on those two days a card's current window is the next one. The
-window is still shown as the bank has it, and the bot says which days a total counts, and why.
+window is still shown as the bank has it, and the bot says which days a total counts, and why. A card product can
+say otherwise, as the DBS Woman's World Card does: its terms count a purchase by the day that it was made.
 
 ### Commands
 
@@ -88,7 +89,7 @@ is stored even when its card has not been added yet: the bot then says how to ad
 
 ### Card products
 
-The bot knows the reward rules of three card products. A card that is linked to one has its purchases sorted into
+The bot knows the reward rules of four card products. A card that is linked to one has its purchases sorted into
 the product's groups, and `/spend <nickname>` then shows each group with its total, its cap and what is left of
 the cap. A limit below is the spend in a month that earns the bank's cap on the bonus.
 
@@ -97,9 +98,12 @@ the cap. A limit below is the spend in a month that earns the bank's cap on the 
 | `uob-evol` | UOB EVOL Card | Online and Mobile Contactless Spend: SGD 300. Selected Gym, Telco and Streaming Spend: SGD 200. Other Spend and Overseas Foreign Currency Spend: no limit. | statement month | SGD 800 |
 | `hsbc-revolution` | HSBC Revolution Credit Card | Eligible Transactions: SGD 1,000. Other Transactions: no limit. | calendar month | none |
 | `ocbc-rewards` | OCBC Rewards Card | Shopping Spend: SGD 1,110. Other Spend: no limit. | calendar month | none |
+| `dbs-womans-world` | DBS Woman's World Card | Online Spend: SGD 1,000. Other Spend: no limit. | calendar month | none |
 
-An alert says neither how a purchase was made nor the category code of its merchant. So each product takes a
-purchase for one group, which has a cap, until something says otherwise:
+An alert says neither how a purchase was made nor the category code of its merchant. Only for the merchants listed
+in `src/catalogue/merchants.ts` is the code known, and a purchase there starts where the code puts it on the HSBC,
+OCBC and DBS products. Any other purchase is taken by its product for one group, which has a cap, until something
+says otherwise:
 
 - UOB EVOL Card: a purchase is Online and Mobile Contactless Spend. One in another currency is Overseas Foreign
   Currency Spend, and one at a gym, telco or streaming service that the bank names is Selected Gym, Telco and
@@ -108,6 +112,9 @@ purchase for one group, which has a cap, until something says otherwise:
   names, such as Trip.com, Agoda or Klook, starts in Other Transactions.
 - OCBC Rewards Card: a purchase is Shopping Spend. One with "Shopee Pay" in its merchant's name starts in Other
   Spend, and groceries are for its user to mark as Other Spend.
+- DBS Woman's World Card: a purchase is Online Spend. One that the bank's terms take out of online spend by name,
+  such as a top-up of YouTrip or EZ-Link, starts in Other Spend. One made in a shop is for its user to mark as
+  Other Spend.
 
 A purchase is marked with the "Mark as ..." buttons under the bot's message about it, which `/sort <purchase id>`
 shows again. `/sort <nickname>` says what belongs where. The rules are data in `src/catalogue/`, a file to each
@@ -345,13 +352,14 @@ a minute with no `check` line, or an `update` that was `deferred` with nothing a
 
 - The totals are estimates, made of what the banks' alerts say. A purchase that no alert came for, or whose alert
   the parser cannot read, is not counted until it is added by hand, and nothing takes a refund off a total.
-- The last two days of a window are counted in the next one, on every card. That a bank counts a purchase by the
-  day that it is posted is from the terms of the three products, and is taken to hold for other cards. The two
-  days are the owner's choice: how long a posting takes was not measured.
+- The last two days of a window are counted in the next one, on every card but one of the DBS product, whose terms
+  count a purchase by its own day. That a bank counts a purchase by the day that it is posted is from the terms of
+  the other three products, and is taken to hold for other cards. The two days are the owner's choice: how long a
+  posting takes was not measured.
 - A cap counts the card's own currency only. A purchase in another currency is listed and totalled in its own
   currency, is not taken off what is left of a cap, and is left out of the minimum spend: an alert does not say
   what it comes to in the card's currency.
-- A product's limits are held against the card's window as the card was added. The terms of the HSBC and OCBC
+- A product's limits are held against the card's window as the card was added. The terms of the HSBC, OCBC and DBS
   products count by the calendar month, and those of the UOB product by the statement month: a card has to be
   added with `calendar`, or with its statement day, for its limit to be counted as the bank counts it. Nothing
   checks that it was.
