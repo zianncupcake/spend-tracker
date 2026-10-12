@@ -86,3 +86,34 @@ export function startingCategory(
   const byCode = code === undefined ? undefined : ruledByCode(product, code)
   return byCurrency ?? byName ?? byCode ?? null
 }
+
+/**
+ * Where each product counts a purchase in its own currency, at a merchant of the code or of the name: what the
+ * assistant's card_rules answers. A name that the product lists comes before a code, as in `startingCategory`. The
+ * code is the one that was given or, with none, the one that ./merchants knows for the name: `mcc` is that, or null.
+ * `bonus` is 'yes' or 'no' when a rule of the product put the purchase in its group: a group with a limit is one
+ * that earns the bonus, on every product here. It is 'depends' when no rule did: the group is then only the one
+ * that a purchase starts in, and is null on a product that leaves such a purchase not sorted.
+ */
+export function rulesFor(asked: { mcc?: number; merchant?: string }) {
+  const { merchant } = asked
+  const mcc = asked.mcc ?? (merchant === undefined ? undefined : codeOf(merchant))
+  return {
+    mcc: mcc ?? null,
+    products: products.map((product) => {
+      const byName = merchant === undefined ? undefined : ruledByName(product, merchant)
+      const byCode = mcc === undefined ? undefined : ruledByCode(product, mcc)
+      const ruled = byName ?? byCode
+      const key = categoryOf(product, ruled ?? null)
+      const group = product.groups.find(({ categories }) => categories.some((category) => category.key === key))
+      const limit = group?.limitMinor
+      return {
+        product: product.name,
+        group: group?.name ?? null,
+        // Hundredths as a decimal number in a string, which is how find_purchases gives the model an amount.
+        monthlyCap: limit === undefined ? null : { amount: (limit / 100).toFixed(2), currency: product.homeCurrency },
+        bonus: ruled === undefined ? 'depends' : limit === undefined ? 'no' : 'yes',
+      }
+    }),
+  }
+}

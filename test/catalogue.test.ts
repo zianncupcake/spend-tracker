@@ -8,6 +8,7 @@ import {
   products,
   ruledByCode,
   ruledByName,
+  rulesFor,
   startingCategory,
 } from '../src/catalogue'
 import { dbsWomansWorld } from '../src/catalogue/dbs-womans-world'
@@ -275,6 +276,33 @@ describe('the category code of a merchant', () => {
     { product: dbsWomansWorld, merchant: 'EZ LINK', category: 'other' },
   ])('starts a purchase at $merchant in $category on $product.key', ({ product, merchant, category }) => {
     expect(at(merchant, product)).toBe(category)
+  })
+})
+
+describe('where the products count a purchase, by the code or the name of its merchant', () => {
+  type Asked = Parameters<typeof rulesFor>[0]
+
+  it.each<[key: string, asked: Asked, mcc: number | null, group: string, cap: string | null, bonus: string]>([
+    // A code that the product lists, and one that falls to its category for the codes that it does not list.
+    ['hsbc-revolution', { mcc: 5812 }, 5812, 'Eligible Transactions', '1000.00', 'yes'],
+    ['dbs-womans-world', { mcc: 6300 }, 6300, 'Other Spend', null, 'no'],
+    ['ocbc-rewards', { mcc: 5812 }, 5812, 'Other Spend', null, 'no'],
+    // The product lists other codes and has no such category, or lists none: the group is where a purchase starts.
+    ['dbs-womans-world', { mcc: 5812 }, 5812, 'Online Spend', '1000.00', 'depends'],
+    ['uob-evol', { mcc: 5812 }, 5812, 'Online and Mobile Contactless Spend', '300.00', 'depends'],
+    // A name that the product lists comes before the merchant's code, which the product does not list.
+    ['ocbc-rewards', { merchant: 'SHOPEE SINGAPORE' }, 5262, 'Shopping Spend', '1110.00', 'yes'],
+    // A merchant that nothing knows.
+    ['ocbc-rewards', { merchant: 'A MADE-UP SHOP' }, null, 'Shopping Spend', '1110.00', 'depends'],
+  ])('on %s, has %j, with the code %s, in %s', (key, asked, mcc, group, cap, bonus) => {
+    const at = products.findIndex((product) => product.key === key)
+
+    const rules = rulesFor(asked)
+
+    // The code and the products, and nothing of the name that was asked about.
+    expect(rules).toEqual({ mcc, products: expect.any(Array) })
+    const monthlyCap = cap && { amount: cap, currency: 'SGD' }
+    expect(rules.products[at]).toEqual({ product: products[at].name, group, monthlyCap, bonus })
   })
 })
 

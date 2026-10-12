@@ -61,9 +61,10 @@ answers only in a user's own private chat with it.
 
 A text message that is not a command, and is not the 6-digit code of a sign-in, goes to the bot's assistant, where
 the service has an AI provider. A question such as "how much did I spend at the book shop last month?" is answered
-in a model's words, from the user's purchases. A message can also ask for what the commands do, as in "add 5.20
-lunch to evol as other spend" or "set my time zone to Tokyo", and for several things at once. The model only works
-out what was asked for: the bot's own code does it, and the reply is the bot's.
+in a model's words, from the user's purchases. So is one about what earns a card's bonus, such as "does the OCBC
+Rewards Card include MCC 5812?", from the rules of the card products below. A message can also ask for what the
+commands do, as in "add 5.20 lunch to evol as other spend" or "set my time zone to Tokyo", and for several things
+at once. The model only works out what was asked for: the bot's own code does it, and the reply is the bot's.
 
 What removes or revokes something waits for a tap on "Do it" under the bot's message: taking out a purchase or a
 card, disconnecting the Gmail, making or removing the token of `/mcp`, and starting a new sign-in. So does a change

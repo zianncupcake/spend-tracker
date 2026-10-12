@@ -69,7 +69,14 @@ export const CONFIRMABLE = [
  * The names of the assistant's tools. What a model calls a tool is text from outside, so the log has it only as the
  * name that it is known to be.
  */
-export const TOOL_NAMES = ['show_spending', 'find_purchases', 'add_purchases', 'set_category', 'run_command'] as const
+export const TOOL_NAMES = [
+  'show_spending',
+  'find_purchases',
+  'card_rules',
+  'add_purchases',
+  'set_category',
+  'run_command',
+] as const
 
 /** Every event, with what its line holds besides its name. The README says what each of them means. */
 export interface Events {
