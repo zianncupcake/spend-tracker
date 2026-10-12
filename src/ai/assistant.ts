@@ -481,7 +481,7 @@ function acts(name: string): boolean {
  *
  * It is told of the user's `cards` in the words that the reading of a photo is told of them in, and then what it can
  * have done, with which tool, and what to give that tool. The lines for run_command are those that `reply` in
- * ../telegram/handler takes, but for the ones that a tool of their own stands in for, which are /spend, /add and
+ * ../telegram/commands takes, but for the ones that a tool of their own stands in for, which are /spend, /add and
  * /sort, and for /start and /code. All of this is sent with every request, and the provider takes only so many
  * tokens in a minute: so it is said in as few words as will do.
  */

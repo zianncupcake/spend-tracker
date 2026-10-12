@@ -114,7 +114,7 @@ const MAX_CAPTION_LENGTH = 500
 /** What the model is sent in the place of a caption, for a photo that came with none. */
 const NO_CAPTION = 'The photo came with no caption.'
 
-// What /add takes for an amount, which has its own pattern in ../telegram/handler. The amount here is that one
+// What /add takes for an amount, which has its own pattern in ../telegram/arguments. The amount here is that one
 // without the currency that can go before it, which the model is asked for apart.
 const AMOUNT = /^(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12})(\.\d{1,2}|)$/
 

@@ -26,8 +26,8 @@ import { storeFor, type Card, type Transaction } from './store'
 import { mailStoreFor, removeExpiredAttempts, removeExpiredBatches, takeNextMailbox, type Mailbox } from './store-mail'
 import { ChatBlockedError, type MessageEntity } from './telegram/api'
 import { carriedNotes, describeTotals, formatMoney, formatShortDate, maskLast4 } from './telegram/format'
-import { ADD_CARD_USAGE } from './telegram/handler'
 import { sortEnd } from './telegram/purchases'
+import { ADD_CARD_USAGE } from './telegram/texts'
 
 /**
  * How many alerts one run reads: the messages it fetches whole. A run that read three took 14 ms of CPU time, which

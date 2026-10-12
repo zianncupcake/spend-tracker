@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, vi, type MockInstance } from 'vitest'
 import * as photo from '../src/ai/photo'
 import type { PhotoReading, ReadPurchase } from '../src/ai/photo'
 import type { RichMessage } from '../src/telegram/api'
-import type { Reading } from '../src/telegram/handler'
+import type { Reading } from '../src/telegram/adding'
 import { deps, openChat, posted, type Posted } from './connect-helpers'
 import { linesOf, plain, seconds } from './helpers'
 
