@@ -1,11 +1,19 @@
 // What a user types after a command, and the reading of it: the patterns that the words are held to, the card
-// that /addcard's words describe, the purchase that /add's describe, and the name of a time zone.
+// that /addcard's words describe, the purchase that /add's describe, what /pattern's ask for, and the name of a
+// time zone.
 
 import { productOf } from '../catalogue'
-import { CURRENCY, dayStart, ISO_DATE, noonOf } from '../domain/by-hand'
+import { lettersOf } from '../catalogue/merchants'
+import { CURRENCY, dayStart, isRealDay, ISO_DATE, noonOf } from '../domain/by-hand'
 import { countedIn, currentWindow, dayOf } from '../domain/window'
 import { hundredths, MAX_MERCHANT_LENGTH } from '../parsers/shared'
-import type { Card } from '../store'
+import {
+  MAX_PATTERN_MERCHANT,
+  MAX_PATTERN_SKIPS,
+  MIN_PATTERN_LETTERS,
+  type Card,
+  type Pattern,
+} from '../store'
 import { ADD_CARD_USAGE, ADD_USAGE } from './texts'
 
 /** What /add is told of a purchase, after the card that it was made with. */
@@ -15,6 +23,13 @@ export interface Entry {
   merchant: string
   /** Unix seconds. */
   occurredAt: number
+}
+
+/** What /pattern is asked for: to save a pattern for a card's merchant or, with nothing to `save`, to remove it. */
+interface PatternAsked {
+  nickname: string
+  merchant: string
+  save?: Pick<Pattern, 'amountMinor' | 'skips'>
 }
 
 export const NICKNAME = /^[A-Za-z0-9_-]{1,20}$/
@@ -28,6 +43,8 @@ export const PURCHASE_ID = /^#?(\d{1,15})$/
 const AMOUNT = /^([A-Za-z]{3})?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12})(\.\d{1,2}|)$/
 /** Day and month, and after them the year or the last two digits of it. */
 const SHORT_DATE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d\d|\d{4}))?$/
+/** What an alert is written in. A name with any other character, as "café" has, is in the merchant of no purchase. */
+const PRINTABLE_ASCII = /^[\x20-\x7e]*$/
 
 /** The time zone of the name, spelt as Intl spells it. Null when Intl knows no time zone of that name. */
 export function timeZoneNamed(name: string): string | null {
@@ -95,6 +112,49 @@ export function parseEntry(
   if (typeof dated === 'string') return dated
   const occurredAt = dated ?? Math.floor(now.getTime() / 1000)
   return { amountMinor, currency: currency.toUpperCase(), merchant, occurredAt }
+}
+
+/**
+ * What /pattern's arguments ask for, or null when they are none of what it takes. A line that ends with "none"
+ * removes, whatever comes before that: a merchant can begin with a number, as "247 fitness" does. Any other line
+ * saves: an amount as /add reads one, with no currency, then the merchant and, after "except", the skipped days.
+ */
+export function parsePattern(args: string[]): PatternAsked | null {
+  const [nickname = '', ...rest] = args
+  if (!NICKNAME.test(nickname)) return null
+  if (rest.at(-1)?.toLowerCase() === 'none') {
+    const merchant = patternMerchant(rest.slice(0, -1))
+    return merchant === null ? null : { nickname, merchant }
+  }
+  const [, currency, whole, decimals] = AMOUNT.exec(rest[0] ?? '') ?? []
+  if (whole === undefined || currency !== undefined) return null
+  const amountMinor = hundredths(whole, decimals)
+  // The word "except" ends the merchant, and a day at the least comes after it.
+  const except = rest.findIndex((word) => word.toLowerCase() === 'except')
+  const [named, days] = except < 0 ? [rest.slice(1), []] : [rest.slice(1, except), rest.slice(except + 1)]
+  const merchant = patternMerchant(named)
+  // Each day once, in the order of the calendar: days that are written so sort into it as text.
+  const skips = [...new Set(days)].sort()
+  const dated = days.every(isDay) && skips.length <= MAX_PATTERN_SKIPS && (except < 0 || skips.length > 0)
+  if (amountMinor === 0 || merchant === null || !dated) return null
+  return { nickname, merchant, save: { amountMinor, skips } }
+}
+
+/**
+ * The merchant of a pattern as it is stored, from what its user called it: see the migration that added the table.
+ * Null for a name that is too long, for one with too few letters and digits to tell a merchant by, and for one
+ * with a character that no alert is written with.
+ */
+function patternMerchant(given: string[]): string | null {
+  const name = given.join(' ')
+  const sized = lettersOf(name).length >= MIN_PATTERN_LETTERS && name.length <= MAX_PATTERN_MERCHANT
+  return sized && PRINTABLE_ASCII.test(name) ? name.toLowerCase() : null
+}
+
+/** Whether the text is a day that a calendar has, written YYYY-MM-DD. */
+function isDay(text: string): boolean {
+  const [, year, month, day] = ISO_DATE.exec(text) ?? []
+  return year !== undefined && isRealDay(Number(year), Number(month), Number(day))
 }
 
 /**

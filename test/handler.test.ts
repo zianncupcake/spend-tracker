@@ -801,7 +801,7 @@ describe('what the log has of an update', () => {
     // The names at the start of the lines of the list, each of them once: /spend is there with and without a card.
     const lines = (await chat.say('/help')).split('\n')
     const listed = [...new Set(lines.flatMap((line) => /^\/([a-z]+)/.exec(line)?.[1] ?? []))]
-    expect(listed).toHaveLength(16)
+    expect(listed).toHaveLength(18)
     const logged = catchConsole()
 
     for (const name of listed) await chat.reply(`/${name}`)

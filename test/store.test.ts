@@ -122,7 +122,7 @@ describe('a store', () => {
     expect(await second.sumByCurrency('1234', ...ANY_TIME)).toEqual([{ currency: 'SGD', amountMinor: 7000, count: 1 }])
 
     // Removing a card by a nickname both users have removes only the caller's.
-    expect(await first.removeCard('main')).toBe(true)
+    expect(await first.removeCard('main')).toBe(0)
     expect(await first.listCards()).toEqual([])
     expect(await second.listCards()).toEqual([secondCard])
   })
@@ -155,7 +155,7 @@ describe('a store', () => {
     expect(await other.addCard(card(1))).toBe(true)
 
     // Removing a card makes room for one, and only for one.
-    expect(await store.removeCard('card-1')).toBe(true)
+    expect(await store.removeCard('card-1')).toBe(0)
     const together = await Promise.all([store.addCard(card(MAX_CARDS + 1)), store.addCard(card(MAX_CARDS + 2))])
     expect(together.filter((added) => added)).toHaveLength(1)
     expect(await store.listCards()).toHaveLength(MAX_CARDS)
@@ -167,8 +167,8 @@ describe('a store', () => {
     await store.addCard({ nickname: 'apple', last4: '0001', windowType: 'statement', statementDay: 31 })
 
     expect((await store.listCards()).map((card) => card.nickname)).toEqual(['zebra', 'apple'])
-    expect(await store.removeCard('zebra')).toBe(true)
-    expect(await store.removeCard('zebra')).toBe(false)
+    expect(await store.removeCard('zebra')).toBe(0)
+    expect(await store.removeCard('zebra')).toBeNull()
     expect((await store.listCards()).map((card) => card.nickname)).toEqual(['apple'])
   })
 

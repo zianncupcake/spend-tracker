@@ -21,13 +21,25 @@ import {
   noSuchProduct,
   parseCard,
   parseEntry,
+  parsePattern,
   PRODUCT_KEY,
   PURCHASE_ID,
   timeZoneNamed,
 } from './arguments'
 import { formatShortDate, maskLast4 } from './format'
 import { inMessages, purchaseLine, sortEnd, whereSorted } from './purchases'
-import { cardsReply, describeCard, label, productsReply, spendDetail, spendReply, statusReply } from './replies'
+import {
+  cardsReply,
+  describeCard,
+  heldAgainst,
+  label,
+  patternLine,
+  patternsReply,
+  productsReply,
+  spendDetail,
+  spendReply,
+  statusReply,
+} from './replies'
 import type { Reply, Sent } from './sending'
 import { DEFAULT_CURRENCY, type Seen } from './shared'
 import {
@@ -38,7 +50,12 @@ import {
   CONNECT_HEADS_UP,
   DO,
   NO_CARDS,
+  NO_PATTERNS,
   NO_SIGN_IN,
+  NO_SUCH_PATTERN,
+  PATTERN_REMOVED,
+  PATTERN_SAVED,
+  PATTERN_USAGE,
   PHOTO,
   PRODUCT_USAGE,
   RENAME_CARD_USAGE,
@@ -46,6 +63,7 @@ import {
   STATUS_DAYS,
   TIMEZONE_USAGE,
   TOO_MANY_CARDS,
+  TOO_MANY_PATTERNS,
   WELCOME,
 } from './texts'
 
@@ -122,8 +140,10 @@ export async function reply(
     case '/removecard': {
       const [nickname = ''] = args
       if (args.length !== 1 || !NICKNAME.test(nickname)) return 'Usage: /removecard <nickname>'
-      const removed = await storeFor(db, (await user()).id).removeCard(nickname)
-      return removed ? `Removed ${nickname}.` : `You have no card called ${nickname}.`
+      const patterns = await storeFor(db, (await user()).id).removeCard(nickname)
+      if (patterns === null) return `You have no card called ${nickname}.`
+      if (patterns === 0) return `Removed ${nickname}.`
+      return `Removed ${nickname}, and the ${patterns} ${patterns === 1 ? 'pattern' : 'patterns'} that it had.`
     }
 
     case '/renamecard': {
@@ -147,7 +167,8 @@ export async function reply(
       if (cards.length === 0) return NO_CARDS
       if (args.length === 1) {
         const card = cards.find((each) => each.nickname === nickname)
-        return card ? spendDetail(store, card, now(), timezone) : `You have no card called ${nickname}.`
+        if (!card) return `You have no card called ${nickname}.`
+        return spendDetail(store, card, await store.listPatterns(), now(), timezone)
       }
       return spendReply(await cardTotals(store, cards, now(), timezone), timezone)
     }
@@ -205,6 +226,33 @@ export async function reply(
       const product = productOf(cards.find((each) => each.last4 === purchase.cardLast4)?.product)
       if (product) return [sortPrompt(product, purchase, timezone)]
       return `ID ${purchase.id} is on a card that is linked to no product, so there is nothing to sort it into.`
+    }
+
+    case '/patterns': {
+      const store = storeFor(db, (await user()).id)
+      const [cards, patterns] = await Promise.all([store.listCards(), store.listPatterns()])
+      return patterns.length > 0 ? patternsReply(cards, patterns) : NO_PATTERNS
+    }
+
+    case '/pattern': {
+      const asked = parsePattern(args)
+      if (!asked) return PATTERN_USAGE
+      const { nickname, merchant, save } = asked
+      const store = storeFor(db, (await user()).id)
+      const card = (await store.listCards()).find((each) => each.nickname === nickname)
+      if (!card) return `You have no card called ${nickname}.`
+      if (save) {
+        if (!(await store.setPattern({ cardLast4: card.last4, merchant, ...save }))) {
+          // The store saves no pattern past the limit and none for a card that was removed in the meantime. Which
+          // of the two it was is looked up only now that one of them has happened.
+          const there = (await store.listCards()).some((each) => each.last4 === card.last4)
+          return there ? TOO_MANY_PATTERNS : `You have no card called ${nickname}.`
+        }
+        const held = { text: heldAgainst(card, merchant) }
+        return inMessages([{ text: PATTERN_SAVED }, patternLine(card, merchant, save), held])
+      }
+      if (!(await store.removePattern(card.last4, merchant))) return NO_SUCH_PATTERN
+      return inMessages([{ text: PATTERN_REMOVED }, patternLine(card, merchant)])
     }
 
     case '/timezone': {

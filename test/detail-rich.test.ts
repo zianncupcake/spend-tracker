@@ -227,7 +227,7 @@ describe('a window with many purchases', () => {
   /** A merchant's name of the 80 characters that a name can have. */
   const merchant = (index: number) => `MERCHANT ${String(index).padStart(3, '0')} `.padEnd(80, 'X')
 
-  it(`lists the latest ${WINDOW_LIMIT} of them in one message, and totals them all, in four queries`, async () => {
+  it(`lists the latest ${WINDOW_LIMIT} of them in one message, and totals them all, in five queries`, async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
     const ids: number[] = []
@@ -239,8 +239,8 @@ describe('a window with many purchases', () => {
 
     const message = await chat.rich('/spend evol')
 
-    // One for the user and one for the cards, and then the two for the window.
-    expect(queried).toHaveBeenCalledTimes(4)
+    // One for the user, one for the cards and one for the patterns, and then the two for the window.
+    expect(queried).toHaveBeenCalledTimes(5)
     const lines = linesOf(message)
     expect(lines.slice(0, 3)).toEqual([
       'evol ••••1234: 1 Oct to 31 Oct',

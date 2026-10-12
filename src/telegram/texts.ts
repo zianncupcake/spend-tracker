@@ -2,7 +2,14 @@
 // texts are made from. What a model is told is not here: see toldOf in ./actions.
 
 import { ATTEMPT_MINUTES } from '../connect'
-import { MAX_BY_HAND_PER_DAY, MAX_CARDS } from '../store'
+import {
+  MAX_BY_HAND_PER_DAY,
+  MAX_CARDS,
+  MAX_PATTERN_MERCHANT,
+  MAX_PATTERN_SKIPS,
+  MAX_PATTERNS,
+  MIN_PATTERN_LETTERS,
+} from '../store'
 
 /** How far back /status counts. */
 export const STATUS_DAYS = 30
@@ -29,6 +36,14 @@ export const PRODUCT_USAGE = 'Usage:\n/product <nickname> <product key>\n/produc
 
 export const RENAME_CARD_USAGE = 'Usage: /renamecard <nickname> <new nickname>'
 
+export const PATTERN_USAGE = `Usage:
+/pattern <nickname> <amount> <merchant>
+/pattern <nickname> <amount> <merchant> except <YYYY-MM-DD> ...
+/pattern <nickname> <merchant> none
+The amount is what you spend at the merchant in a month, in the card's own currency.
+The merchant has ${MIN_PATTERN_LETTERS} letters or digits or more, in ${MAX_PATTERN_MERCHANT} plain characters at most.
+After "except" come the days on which no charge will come, ${MAX_PATTERN_SKIPS} of them at most.`
+
 export const COMMANDS = `Commands:
 /addcard <nickname> <last4> statement <day> - track a card by statement cycle; <day> is the day of the month it closes
 /addcard <nickname> <last4> calendar - track a card by calendar month
@@ -43,6 +58,8 @@ export const COMMANDS = `Commands:
 /product <nickname> <product key> - link a card to a product, or to none
 /sort <nickname> - how a card's purchases are sorted into the reward categories of its product
 /sort <purchase id> - move one purchase to another category
+/patterns - list what you spend every month at a merchant, which is held back from what is left of a cap
+/pattern <nickname> <amount> <merchant> - save such a monthly amount for a card, or remove it with none
 /timezone - show the time zone that your cards' windows are counted in
 /timezone <name> - change it, for example /timezone Asia/Tokyo
 /connect - connect your Gmail, so that your bank's alerts can be read
@@ -203,6 +220,30 @@ export const NO_CARDS = `You have no cards yet. Add one with:\n${ADD_CARD_USAGE}
 export const TOO_MANY_CARDS =
   `You have ${MAX_CARDS} cards, which is as many as can be tracked. To add another, first remove one with ` +
   '/removecard <nickname>.'
+
+export const NO_PATTERNS =
+  'You have no monthly patterns. To have what you spend at a merchant every month held back from what is left of ' +
+  "a card's cap, send /pattern <nickname> <amount> <merchant>."
+
+export const TOO_MANY_PATTERNS =
+  `You have ${MAX_PATTERNS} patterns, which is as many as can be kept. To save another, first remove one with ` +
+  '/pattern <nickname> <merchant> none.'
+
+export const NO_SUCH_PATTERN = 'That card has no such pattern. Send /patterns for the ones that you have.'
+
+/** How the reply to a save begins what it says of a pattern that holds nothing back of any cap, before why. */
+export const HOLDS_NOTHING = 'It holds nothing back:'
+
+// What goes over the line that shows a pattern: what /pattern did with it, and what is asked before /pattern is run
+// for the assistant.
+
+export const PATTERN_SAVED = 'Saved this pattern:'
+
+export const PATTERN_REMOVED = 'Removed this pattern:'
+
+export const SAVE_PATTERN = 'Save this pattern? It replaces the one that the card has for this merchant, if it has one.'
+
+export const REMOVE_PATTERN = 'Remove this pattern?'
 
 export const TOO_MANY_BY_HAND =
   `You have added ${MAX_BY_HAND_PER_DAY} purchases by hand in the last 24 hours, which is as many as can be added ` +

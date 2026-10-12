@@ -1,12 +1,13 @@
-// What builds a reply from what it is given: the tables that /cards, /spend, /products and /status show, a card's
-// window in full, the lines that name a card, and what is said when the AI provider is busy.
+// What builds a reply from what it is given: the tables that /cards, /spend, /products, /patterns and /status show,
+// a card's window in full, the lines that name a card or a pattern, and what is said when the AI provider is busy.
 
 import { productOf, products } from '../catalogue'
 import { breakDown, perCurrency } from '../domain/breakdown'
+import { groupFor, toComeByGroup } from '../domain/patterns'
 import { WINDOW_LIMIT } from '../domain/sorting'
 import type { CardTotals } from '../domain/totals'
 import { countedIn, currentWindow } from '../domain/window'
-import { MANUAL, type Card, type Store } from '../store'
+import { MANUAL, type Card, type Pattern, type Store } from '../store'
 import type { Connection } from '../store-connect'
 import type { MailSummary } from '../store-mail'
 import type { RichBlock, RichText, TableCell } from './api'
@@ -16,6 +17,7 @@ import {
   describeCounted,
   describeTotals,
   describeWindow,
+  formatMoney,
   formatShortDateTime,
   formatTotals,
   maskLast4,
@@ -25,16 +27,18 @@ import {
   BY_HAND_NOTE,
   breakdownLines,
   inMessages,
+  lineOf,
   purchaseBlocks,
   purchaseTables,
   sectionsOf,
+  TO_COME_NOTE,
   type Line,
   type Section,
   type Table,
 } from './purchases'
 import type { Tabled } from './sending'
 import { DEFAULT_CURRENCY } from './shared'
-import { STATUS_DAYS } from './texts'
+import { HOLDS_NOTHING, STATUS_DAYS } from './texts'
 
 /**
  * What a question is answered with when the AI provider has had as many requests as it takes for now. It says when
@@ -117,6 +121,52 @@ export function cardsReply(cards: Card[]): Tabled {
 }
 
 /**
+ * A pattern on one line, such as "evol ••••1234 · SGD 60.00 a month · sample gym · not on 2026-11-15": its card,
+ * its amount in the card's own currency, its merchant, and its skipped days when it has any. One that is removed
+ * is told of with nothing to `save`, and its line is its card and its merchant.
+ */
+export function patternLine(card: Card, merchant: string, save?: Pick<Pattern, 'amountMinor' | 'skips'>): Line {
+  if (!save) return lineOf([label(card)], merchant, [])
+  const currency = productOf(card.product)?.homeCurrency ?? DEFAULT_CURRENCY
+  const notOn = save.skips.length > 0 ? [`not on ${save.skips.join(', ')}`] : []
+  return lineOf([label(card), `${formatMoney(save.amountMinor, currency)} a month`], merchant, notOn)
+}
+
+/**
+ * What the reply to a save says of where the pattern counts: the group of the card's product that it is held
+ * against, with the group's cap, or that it holds nothing back, and why. A name that is shortened, as "anytime" is,
+ * can be held against another group than its purchases go to, and this is how its user finds out.
+ */
+export function heldAgainst(card: Card, merchant: string): string {
+  const product = productOf(card.product)
+  if (!product) return `${HOLDS_NOTHING} ${label(card)} is linked to no product.`
+  const group = groupFor(product, merchant)
+  if (group?.limitMinor === undefined) {
+    return `${HOLDS_NOTHING} purchases there count as ${group?.name ?? 'not sorted'}, which has no cap.`
+  }
+  return `It is held against ${group.name}, which has a cap of ${formatMoney(group.limitMinor, product.homeCurrency)}.`
+}
+
+/**
+ * A user's patterns, as /patterns shows them: one table, with a row for each pattern, in the order of the cards. A
+ * pattern with no skipped days has a dash for them. As text, it is a line for each pattern: see patternLine.
+ */
+export function patternsReply(cards: Card[], patterns: Pattern[]): Tabled {
+  const listed = cards.flatMap((card) =>
+    patterns.filter(({ cardLast4 }) => cardLast4 === card.last4).map((pattern) => ({ card, pattern })),
+  )
+  const rows = listed.map(({ card, pattern }) => {
+    const currency = productOf(card.product)?.homeCurrency ?? DEFAULT_CURRENCY
+    return [label(card), pattern.merchant, formatMoney(pattern.amountMinor, currency), pattern.skips.join(', ') || '-']
+  })
+  return {
+    rich: { blocks: [tableOf(['Card', 'Merchant', 'A month', 'Not on'], rows, [2])], skip_entity_detection: true },
+    // A merchant's name is text that its user typed, so each is marked as code: see ./purchases.
+    asText: () => inMessages(listed.map(({ card, pattern }) => patternLine(card, pattern.merchant, pattern))),
+  }
+}
+
+/**
  * What a user has spent on each of their cards in its current window, as /spend with no card named shows it: one
  * table, with a row for each card, and under it why some days are counted and that the totals are estimates.
  *
@@ -167,13 +217,20 @@ export function productsReply(): Tabled {
  * and after the tables what the whole window comes to. A card with a product has a table for each group of the
  * product, which ends with the group's limit where it has one, and then how far the spend is towards the product's
  * minimum, when it has one. A card with no product has one table, of all its purchases. It is one rich message. As
- * text, it can come to more than one message takes.
+ * text, it can come to more than one message takes. `patterns` are the user's, on whichever card: what those of
+ * this card hold back is taken off what is left of a group's limit.
  *
  * The purchases are those that the window counts, which begin some days before the window does: see currentWindow.
  * The heading has the window as its bank has it, each purchase has its own day, and the line under the total says
  * which days are counted, and why.
  */
-export async function spendDetail(store: Store, card: Card, now: Date, timeZone: string): Promise<Tabled> {
+export async function spendDetail(
+  store: Store,
+  card: Card,
+  patterns: Pattern[],
+  now: Date,
+  timeZone: string,
+): Promise<Tabled> {
   const window = currentWindow(card, now, timeZone)
   const { start, end } = countedIn(window)
   // Two queries, however many purchases there are: the sums, which take in all of them, and the latest to list.
@@ -183,6 +240,9 @@ export async function spendDetail(store: Store, card: Card, now: Date, timeZone:
   ])
   const product = productOf(card.product)
   const breakdown = product && breakDown(product, sums)
+  // What was spent at a pattern's merchant is counted from the purchases that are listed.
+  const onCard = patterns.filter(({ cardLast4 }) => cardLast4 === card.last4)
+  const toCome = product ? toComeByGroup(product, onCard, latest, window, timeZone) : []
   const count = sums.reduce((total, sum) => total + sum.count, 0)
   // One formatter for all the dates: see shortDateIn.
   const shortDate = shortDateIn(timeZone)
@@ -193,14 +253,17 @@ export async function spendDetail(store: Store, card: Card, now: Date, timeZone:
   // A card with a product has a table for each group of the product. A card with none has one table, of all that
   // is listed, when anything is.
   const whole: Section[] = listed.length > 0 ? [{ purchases: listed, spent: perCurrency(sums) }] : []
-  const sections = product && breakdown ? sectionsOf(product, breakdown, listed) : whole
+  const sections = product && breakdown ? sectionsOf(product, breakdown, listed, toCome) : whole
   const homeCurrency = product?.homeCurrency ?? DEFAULT_CURRENCY
 
   // What is said around the tables: a heading, and the lines above the tables and below them, a part at a time.
   const heading = `${label(card)}: ${shortDate(window.start)} to ${shortDate(new Date(window.end.getTime() - 1))}`
   const above = count > listed.length ? [`The latest ${listed.length} of ${count} purchases:`] : []
   const below = [
-    listed.some((purchase) => purchase.parser === MANUAL) ? [BY_HAND_NOTE] : [],
+    [
+      ...(listed.some((purchase) => purchase.parser === MANUAL) ? [BY_HAND_NOTE] : []),
+      ...(toCome.some((minor) => minor > 0) ? [TO_COME_NOTE] : []),
+    ],
     [
       `Total: ${describeTotals({ card, window, totals: perCurrency(sums), count }, timeZone)}`,
       ...describeCounted(card, window, shortDate),

@@ -2,7 +2,7 @@ import { dbsWomansWorld } from './dbs-womans-world'
 import { hsbcRevolution } from './hsbc-revolution'
 import { codeOf } from './merchants'
 import { ocbcRewards } from './ocbc-rewards'
-import type { Category, Choice, Mcc, Product } from './types'
+import type { Category, Choice, Group, Mcc, Product } from './types'
 import { uobEvol } from './uob-evol'
 
 /** The card products whose reward rules are known. A user links a card to one by its key. */
@@ -44,6 +44,11 @@ export function categoryName(product: Product, key: string | null): string | und
 export function categoryOf(product: Product, stored: string | null): string | null {
   const known = categoriesOf(product).some((category) => category.key === stored)
   return known ? stored : (product.defaultCategory ?? null)
+}
+
+/** The group of the product that the category with the key is in. Undefined for a key that is none of the product's. */
+export function groupOf(product: Product, key: string | null): Group | undefined {
+  return product.groups.find(({ categories }) => categories.some((category) => category.key === key))
 }
 
 /**
@@ -105,7 +110,7 @@ export function rulesFor(asked: { mcc?: number; merchant?: string }) {
       const byCode = mcc === undefined ? undefined : ruledByCode(product, mcc)
       const ruled = byName ?? byCode
       const key = categoryOf(product, ruled ?? null)
-      const group = product.groups.find(({ categories }) => categories.some((category) => category.key === key))
+      const group = groupOf(product, key)
       const limit = group?.limitMinor
       return {
         product: product.name,

@@ -42,6 +42,9 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/product <nickname> <product key>` | Links a card to a product. With `none` for the key, it links the card to none. |
 | `/sort <nickname>` | Says how a card's purchases are sorted into the reward categories of its product. |
 | `/sort <purchase id>` | Shows one purchase with the buttons that move it to another category. |
+| `/patterns` | Lists your monthly patterns. |
+| `/pattern <nickname> <amount> <merchant>` | Saves what you spend with a card at a merchant in a month. `except <YYYY-MM-DD> ...` after the merchant gives the days on which a charge will not come. |
+| `/pattern <nickname> <merchant> none` | Removes a pattern. |
 | `/timezone` | Shows the time zone that your cards' windows are counted in. |
 | `/timezone <name>` | Changes it. The name is an IANA one, such as `Asia/Tokyo`. |
 | `/connect` | Connects your Gmail, so that your bank's alerts can be read. |
@@ -54,8 +57,9 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 `/start` sends a welcome and this list, and a command that the bot does not know is answered with the list. A
 nickname is 1 to 20 letters, digits, `_` or `-`. `/addcard` takes a product key as a last word, which links the
 card as `/product` does. The amount of `/add` can have a currency before it, as in `USD 12.50`, and its date is
-written `YYYY-MM-DD`. `/remove` and `/sort` take the id of a purchase, which `/spend <nickname>` shows. The bot
-answers only in a user's own private chat with it.
+written `YYYY-MM-DD`. `/remove` and `/sort` take the id of a purchase, which `/spend <nickname>` shows. The
+merchant of `/pattern` is 40 plain characters at most, 3 of them letters or digits at the least, and 12 days can
+follow `except`. The bot answers only in a user's own private chat with it.
 
 ### Plain messages
 
@@ -67,7 +71,8 @@ commands do, as in "add 5.20 lunch to evol as other spend" or "set my time zone 
 at once. The model only works out what was asked for: the bot's own code does it, and the reply is the bot's.
 
 What removes or revokes something waits for a tap on "Do it" under the bot's message: taking out a purchase or a
-card, disconnecting the Gmail, making or removing the token of `/mcp`, and starting a new sign-in. So does a change
+card, disconnecting the Gmail, making or removing the token of `/mcp`, starting a new sign-in, and saving or
+removing a pattern, as one that is saved takes the place of the one that there is. So does a change
 that the model asks for after it has looked purchases up, as a merchant's name is text that somebody else wrote.
 `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
 
@@ -120,6 +125,13 @@ says otherwise:
 A purchase is marked with the "Mark as ..." buttons under the bot's message about it, which `/sort <purchase id>`
 shows again. `/sort <nickname>` says what belongs where. The rules are data in `src/catalogue/`, a file to each
 product, with the date that the bank's terms are as of and, in a comment, where the bank publishes them.
+
+### Monthly patterns
+
+A pattern is what a user spends with one card at one merchant in a month: one charge, as a gym's, or many small
+ones, as bus and train fares. Until it is spent, `/spend <nickname>` holds what is still to come of it back from
+what is left of a cap, in a row called `To come`. It counts against the group that a purchase at its merchant
+would start in, which the reply to `/pattern` names, and it goes when its card is removed.
 
 ## Setting it up
 
@@ -379,9 +391,9 @@ a minute with no `check` line, or an `update` that was `deferred` with nothing a
   outbound requests and 50 database queries. So the mail check, which runs once a minute, checks one mailbox in a
   run and reads one alert at the most. With N mailboxes connected, each has its turn every N minutes: a purchase
   can be told of some minutes after it was made, and a new connection takes a while to get through its 35 days.
-- A user can have 20 cards, and can add 100 purchases by hand in 24 hours, those that are read from a photo or
-  added by the assistant among them. `/spend <nickname>` lists the latest 200 purchases of a window, and still
-  totals them all.
+- A user can have 20 cards and 50 patterns, and can add 100 purchases by hand in 24 hours, those that are read
+  from a photo or added by the assistant among them. `/spend <nickname>` lists the latest 200 purchases of a
+  window, and still totals them all. What was spent at a pattern's merchant is counted from those 200.
 - A purchase that was taken out cannot be put back, and its alert is not read again. It can be added again by hand.
 - The assistant does four things for one message at the most, and three when it looked purchases up first. A
   message for it can be 500 characters long, and nothing of an earlier message or answer is kept.
