@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { spendingSummary } from '../src/mcp/tools'
 import { storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
+import { BY_HAND_NOTE } from '../src/telegram/purchases'
+import { NO_CARDS, PRODUCT_USAGE } from '../src/telegram/texts'
 import { clock, deps, NOW, openChat } from './connect-helpers'
 import {
   BY_PURCHASE_DAY,
@@ -116,10 +118,10 @@ describe('/product', () => {
   })
 
   it.each([
-    ['/product', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
-    ['/product evol uob-evol now', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
-    ['/product my!card uob-evol', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
-    ['/product evol uob/evol', 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'],
+    ['/product', PRODUCT_USAGE],
+    ['/product evol uob-evol now', PRODUCT_USAGE],
+    ['/product my!card uob-evol', PRODUCT_USAGE],
+    ['/product evol uob/evol', PRODUCT_USAGE],
     ['/product evol visa-infinite', 'There is no product called visa-infinite. Send /products for the ones there are.'],
     ['/product spare uob-evol', 'You have no card called spare.'],
   ])('answers "%s" with what is wrong, and links nothing', async (message, reply) => {
@@ -210,7 +212,7 @@ describe('/addcard with the key of a product', () => {
       'There is no product called visa-infinite. Send /products for the ones there are.',
     )
 
-    expect(await chat.say('/cards')).toContain('You have no cards yet')
+    expect(await chat.say('/cards')).toBe(NO_CARDS)
   })
 
   it('sorts the purchases that were stored for the card before it was added', async () => {
@@ -346,7 +348,7 @@ describe('a card that is linked to the HSBC Revolution Credit Card', () => {
       'Left | SGD 999.00',
       OTHER,
       'Total | 0.00',
-      '* = added by hand',
+      BY_HAND_NOTE,
       'Total: SGD 1.00 + USD 1.00 in 2 purchases, resets 1 Nov',
       expect.stringMatching(/^The total counts purchases made from 29 Sep to 29 Oct\./),
       'A table has a Total for each currency. A Cap counts SGD only, so USD 1.00 is not taken off what is Left: ' +

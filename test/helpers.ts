@@ -172,10 +172,7 @@ export function linesOf({ blocks }: RichMessage): string[] {
 export const CARDS_HEADER = 'Nickname | Card | Window | Product'
 export const SPEND_HEADER = 'Nickname | Spent | Purchases | Counted | Resets'
 
-/** What /spend with no card named says under its table: why some days are counted, and that totals are estimates. */
-export const COUNTED_BY_POSTING =
-  'A bank counts a purchase by the day it is posted, so one made in the last days of a cycle or a month is counted ' +
-  'in the next one.'
+/** What /spend with no card named says last under its table: that totals are estimates. */
 export const ESTIMATED = 'Totals are estimated from bank alerts.'
 
 // The two counts below read the tables directly, so they also see rows that a

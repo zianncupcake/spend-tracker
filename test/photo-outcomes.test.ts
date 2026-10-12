@@ -6,6 +6,23 @@ import { Failure } from '../src/log'
 import { findUser } from '../src/store'
 import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
+import {
+  ASK,
+  ASK_TOO,
+  COMMANDS,
+  DO,
+  NO_CARDS,
+  NO_PURCHASES,
+  NOT_TEXT,
+  NOT_TEXT_OR_PHOTO,
+  PHOTO as PHOTO_TOO,
+  PHOTO_NOT_READ,
+  PHOTO_READ_NO_REPLY,
+  PHOTO_TOO_LARGE,
+  PHOTO_TOOK_TOO_LONG,
+  READING,
+  WELCOME,
+} from '../src/telegram/texts'
 import { clock, deps, openChat, PHOTO, posted, sent, sentRich } from './connect-helpers'
 import { seconds } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -17,18 +34,12 @@ import {
   heldFor,
   leftSince,
   MESSAGE,
-  NO_PURCHASES,
-  NOT_READ,
   noticeFor,
   photoLine,
   read,
   reader,
   reading,
-  READING,
   rowsOf,
-  STORED_NO_REPLY,
-  TOO_LARGE,
-  TOOK_TOO_LONG,
   unsure,
   type Chat,
 } from './photo-helpers'
@@ -37,12 +48,6 @@ import {
 // told when nothing is added from it or when something fails, what the log has of it, and what the bot does not
 // read at all. test/photo.test.ts has what is added, test/photo-held.test.ts what the bot asks about first, and
 // ./photo-helpers what the three share.
-
-const NO_CARDS = [
-  'You have no cards yet. Add one with:',
-  '/addcard <nickname> <last4> statement <day>',
-  '/addcard <nickname> <last4> calendar',
-].join('\n')
 
 describe('a photo that nothing is added from', () => {
   /** The line that the log has of a photo that was read with one request and that nothing came of, in no time. */
@@ -90,7 +95,7 @@ describe('a photo that nothing is added from', () => {
     reading({ status: 'timeout', error })
     const logged = catchConsole()
 
-    expect(await noticeFor(chat)).toBe(TOOK_TOO_LONG)
+    expect(await noticeFor(chat)).toBe(PHOTO_TOOK_TOO_LONG)
 
     expect(logged.events('photo')).toEqual([{ ...nothingLine(await chat.userId(), 'timeout'), error: 'TimeoutError' }])
   })
@@ -100,7 +105,7 @@ describe('a photo that nothing is added from', () => {
     reading({ status: 'failed', error: new Failure('bad_reading', 'A made-up reading that quotes: COFFEE PLACE') })
     const logged = catchConsole()
 
-    expect(await noticeFor(chat)).toBe(NOT_READ)
+    expect(await noticeFor(chat)).toBe(PHOTO_NOT_READ)
 
     const failure = { error: 'Error', reason: 'bad_reading' }
     expect(logged.events('photo')).toEqual([{ ...nothingLine(await chat.userId(), 'failed'), ...failure }])
@@ -113,7 +118,7 @@ describe('a photo that nothing is added from', () => {
     reader.mockRejectedValue(new TypeError('A made-up failure of the network'))
     const logged = catchConsole()
 
-    expect(await noticeFor(chat)).toBe(NOT_READ)
+    expect(await noticeFor(chat)).toBe(PHOTO_NOT_READ)
 
     const line = { ...nothingLine(await chat.userId(), 'failed'), requests: 0 }
     expect(logged.events('photo')).toEqual([{ ...line, error: 'TypeError' }])
@@ -124,7 +129,7 @@ describe('a photo that nothing is added from', () => {
     file.mockRejectedValue(new Failure('file_too_large', 'A made-up file of too many bytes'))
     const logged = catchConsole()
 
-    expect(await noticeFor(chat)).toBe(TOO_LARGE)
+    expect(await noticeFor(chat)).toBe(PHOTO_TOO_LARGE)
 
     // The model is asked nothing. A photo that is too large is no failure of the service's.
     expect(reader).not.toHaveBeenCalled()
@@ -138,7 +143,7 @@ describe('a photo that nothing is added from', () => {
     file.mockRejectedValue(new TelegramError('getFile', 502))
     const logged = catchConsole()
 
-    expect(await noticeFor(chat)).toBe(NOT_READ)
+    expect(await noticeFor(chat)).toBe(PHOTO_NOT_READ)
 
     expect(reader).not.toHaveBeenCalled()
     const line = { ...nothingLine(await chat.userId(), 'failed'), bytes: 0, requests: 0 }
@@ -170,7 +175,7 @@ describe('a photo that nothing is added from', () => {
     })
     const logged = catchConsole()
 
-    expect(await noticeFor(chat, 'add these to evol')).toBe(NOT_READ)
+    expect(await noticeFor(chat, 'add these to evol')).toBe(PHOTO_NOT_READ)
 
     expect(logged.events('photo')).toEqual([
       { ...nothingLine(0, 'failed'), user: null, bytes: 0, requests: 0, error: 'Error' },
@@ -228,7 +233,7 @@ describe('the size of a photo that is fetched', () => {
 
     expect(file).not.toHaveBeenCalled()
     expect(reader).not.toHaveBeenCalled()
-    expect(leftSince(beforePosted)).toEqual([TOO_LARGE])
+    expect(leftSince(beforePosted)).toEqual([PHOTO_TOO_LARGE])
     expect(sent).toHaveLength(before)
   })
 })
@@ -317,7 +322,7 @@ describe('a photo that takes too long', () => {
     await done
 
     // Nothing of the photo is stored, so it can be sent again.
-    expect(leftSince(mark)).toEqual([TOOK_TOO_LONG])
+    expect(leftSince(mark)).toEqual([PHOTO_TOOK_TOO_LONG])
     expect(vi.getTimerCount()).toBe(0)
     const line = { ...photoLine(userId, { read: 0, stored: 0 }), outcome: 'timeout', sent: 'edit' }
     expect(logged.events('photo')).toEqual([{ ...line, error: 'Error', reason: 'took_too_long' }])
@@ -344,7 +349,7 @@ describe('a photo that takes too long', () => {
     expect(await rowsOf(userId)).toEqual([])
     expect(await heldFor(userId)).toEqual([])
     // And nothing more is said.
-    expect(leftSince(mark)).toEqual([TOOK_TOO_LONG])
+    expect(leftSince(mark)).toEqual([PHOTO_TOOK_TOO_LONG])
     expect(sentRich).toEqual([])
   })
 
@@ -371,7 +376,7 @@ describe('a photo that takes too long', () => {
     stalling.mockRestore()
 
     // What is said does not say to try again, or to send the photo again without a look at what is stored.
-    expect(leftSince(mark)).toEqual([STORED_NO_REPLY])
+    expect(leftSince(mark)).toEqual([PHOTO_READ_NO_REPLY])
     expect(await rowsOf(userId)).toHaveLength(1)
     const line = { ...photoLine(userId, { read: 1, stored: 1 }), outcome: 'timeout', sent: 'edit' }
     expect(logged.events('photo')).toEqual([{ ...line, error: 'Error', reason: 'took_too_long' }])
@@ -398,7 +403,7 @@ describe('a photo whose purchases are stored, when something fails after that', 
     const notice = await noticeFor(chat)
     queried.mockRestore()
 
-    expect(notice).toBe(STORED_NO_REPLY)
+    expect(notice).toBe(PHOTO_READ_NO_REPLY)
     expect(notice).not.toMatch(/try again|clearer/i)
     expect(await rowsOf(userId)).toHaveLength(1)
     // The log has that the photo failed with a purchase stored, and nothing of the purchase.
@@ -424,7 +429,7 @@ describe('a photo whose purchases are stored, when something fails after that', 
     vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(error)
     const logged = catchConsole()
 
-    expect(await noticeFor(chat)).toBe(STORED_NO_REPLY)
+    expect(await noticeFor(chat)).toBe(PHOTO_READ_NO_REPLY)
 
     expect(await rowsOf(userId)).toHaveLength(1)
     expect(logged.events('photo')).toEqual([{ ...storedLine(userId), ...failure }])
@@ -438,7 +443,7 @@ describe('a photo whose purchases are stored, when something fails after that', 
     vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 400))
     const logged = catchConsole()
 
-    expect(await noticeFor(chat)).toBe(STORED_NO_REPLY)
+    expect(await noticeFor(chat)).toBe(PHOTO_READ_NO_REPLY)
 
     const failure = { error: 'Error', reason: 'http_error', status: 400 }
     expect(logged.events('photo')).toEqual([{ ...storedLine(userId), ...failure }])
@@ -458,7 +463,7 @@ describe('a photo whose purchases are stored, when something fails after that', 
     const notice = await noticeFor(chat)
     queried.mockRestore()
 
-    expect(notice).toBe(STORED_NO_REPLY)
+    expect(notice).toBe(PHOTO_READ_NO_REPLY)
     expect(await rowsOf(userId)).toMatchObject([{ merchant: 'COFFEE PLACE' }])
     expect(logged.events('photo')).toEqual([{ ...storedLine(userId), read: 2, error: 'Error' }])
   })
@@ -478,7 +483,7 @@ describe('a photo whose purchases are stored, when something fails after that', 
     // A photo that is sent again would be asked about a second time, under buttons that add its purchases as these
     // do. So what is said in the place of the placeholder does not say to send a clearer photo.
     const [notice, asking] = posted.slice(mark)
-    expect(notice.text).toBe(STORED_NO_REPLY)
+    expect(notice.text).toBe(PHOTO_READ_NO_REPLY)
     expect(notice.text).not.toMatch(/clearer|could not be read/i)
     expect(asking.buttons?.flat().map((button) => button.text)).toEqual(['Add this one', 'Skip'])
     expect(await rowsOf(userId)).toEqual([])
@@ -523,7 +528,7 @@ describe('a photo that fails with nothing stored', () => {
     const notice = await noticeFor(chat)
     queried.mockRestore()
 
-    expect(notice).toBe(NOT_READ)
+    expect(notice).toBe(PHOTO_NOT_READ)
     expect(await rowsOf(userId)).toEqual([])
     expect(logged.events('photo')).toMatchObject([{ user: userId, outcome: 'failed', stored: 0, error: 'Error' }])
   })
@@ -536,7 +541,7 @@ describe('a photo that fails with nothing stored', () => {
     const logged = catchConsole()
 
     // Its purchases are held from before the message that asks is sent, and whether Telegram took that is not known.
-    expect(await noticeFor(chat)).toBe(STORED_NO_REPLY)
+    expect(await noticeFor(chat)).toBe(PHOTO_READ_NO_REPLY)
 
     expect(await rowsOf(userId)).toEqual([])
     const line = { ...photoLine(userId, { read: 1, stored: 0, held: 1 }), outcome: 'failed', sent: 'edit' }
@@ -676,29 +681,6 @@ describe('a photo that the bot does not read', () => {
 })
 
 describe('a service that reads photos', () => {
-  const ASK =
-    'You can also just ask a question in your own words, and it is answered by an AI service, which is sent your ' +
-    'question and the card and purchase details needed to answer it.'
-  const ASK_TOO =
-    'Any other message is read as a question, and is answered by an AI service, which is sent your question and the ' +
-    'card and purchase details needed to answer it.'
-  // What a service with an assistant says after either: that it can be told what to do in the same way.
-  const DO =
-    'You can say what you want done in your own words too, as in "add 5.20 lunch to evol as other spend" or "set my ' +
-    'time zone to Tokyo": the same AI service works out what you asked for, and the bot does it.'
-  const PHOTO_TOO =
-    "You can send a photo of your card transactions too, such as a screenshot from your bank's app, and the " +
-    'purchases in it are added. A caption can name the card and the category, as in "add these to evol as other ' +
-    'spend". The photo is read by the same AI service, which is sent the photo, its caption, your time zone, and ' +
-    'the nicknames and category names of your cards.'
-  const NOT_READ_HERE =
-    'The bot reads text messages and photos. It cannot read any other attachment, such as a file or a voice message, ' +
-    'or the caption under one. Please send your question or command as text, and a picture of your card ' +
-    'transactions as a photo and not as a file.'
-  const NOT_TEXT =
-    'The bot only reads text messages. It cannot read an attachment, such as a photo, a file or a voice message, or ' +
-    'the caption under one. Please send your question or command as text.'
-
   /** A service that has an assistant, and no model that reads photos. */
   function noVision() {
     deps.ai = deps.ai && { ...deps.ai, visionModel: undefined }
@@ -715,16 +697,15 @@ describe('a service that reads photos', () => {
     const [welcome, commands, ...more] = (await openChat().say('/start')).split('\n\n')
 
     // After what it says of a question and of what it can be told to do, and before the list of the commands.
-    expect(welcome.startsWith('Welcome to Spend Tracker. ')).toBe(true)
-    expect(welcome.endsWith(` with /timezone. ${ASK} ${DO} ${PHOTO_TOO}`)).toBe(true)
-    expect(commands).toMatch(/^Commands:\n\/addcard .*\n\/delete - delete everything stored about you$/s)
+    expect(welcome).toBe(`${WELCOME} ${ASK} ${DO} ${PHOTO_TOO}`)
+    expect(commands).toBe(COMMANDS)
     expect(more).toEqual([])
   })
 
   it.each(['/help', '/', '/unknown'])('says the same under the list of its commands, sent for "%s"', async (text) => {
     const [commands, asking, ...more] = (await openChat().say(text)).split('\n\n')
 
-    expect(commands).toMatch(/^Commands:\n\/addcard .*\n\/delete - delete everything stored about you$/s)
+    expect(commands).toBe(COMMANDS)
     expect(asking).toBe(`${ASK_TOO} ${DO} ${PHOTO_TOO}`)
     expect(more).toEqual([])
   })
@@ -735,7 +716,7 @@ describe('a service that reads photos', () => {
 
     const [welcome, commands] = [await chat.say('/start'), await chat.say('/help')]
 
-    expect(welcome.split('\n\n')[0].endsWith(` with /timezone. ${ASK} ${DO}`)).toBe(true)
+    expect(welcome.split('\n\n')[0]).toBe(`${WELCOME} ${ASK} ${DO}`)
     expect(commands.split('\n\n')[1]).toBe(`${ASK_TOO} ${DO}`)
     for (const reply of [welcome, commands]) expect(reply).not.toMatch(/photo|caption/i)
   })
@@ -751,7 +732,7 @@ describe('a service that reads photos', () => {
     const later = await attachment(chat, content)
 
     expect(later).toBeUndefined()
-    expect(sent).toEqual([{ chatId: chat.telegramId, text: NOT_READ_HERE }])
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: NOT_TEXT_OR_PHOTO }])
     expect([file, reader].map((spy) => spy.mock.calls.length)).toEqual([0, 0])
     expect(logged.events()).toEqual([{ event: 'update', kind: 'not_text', outcome: 'replied', ms: 0 }])
   })

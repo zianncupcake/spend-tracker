@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { refreshAccessToken } from '../src/google/gmail'
+import { NO_SIGN_IN } from '../src/telegram/texts'
 import { saying } from './ai-helpers'
 import {
   approve,
@@ -23,9 +24,6 @@ import {
 } from './connect-helpers'
 import { linesOf } from './helpers'
 import { catchConsole } from './log-helpers'
-
-const NOTHING_WAITING =
-  'No sign-in is waiting for a code. It may have expired, or had too many wrong codes. Send /connect to start again.'
 
 describe('the confirmation code', () => {
   it.each([
@@ -75,11 +73,11 @@ describe('the confirmation code', () => {
 
     const reply = await chat.say(wrong)
 
-    expect(reply).toBe(NOTHING_WAITING)
+    expect(reply).toBe(NO_SIGN_IN)
     expect(await attemptOf(userId)).toBeNull()
     expect(outside.revoked).toEqual([outside.issued[0]])
     // The right code is no use any more.
-    expect(await chat.say(code)).toBe(NOTHING_WAITING)
+    expect(await chat.say(code)).toBe(NO_SIGN_IN)
     expect(await connectionOf(userId)).toBeNull()
   })
 
@@ -91,7 +89,7 @@ describe('the confirmation code', () => {
 
     const replies = sent.map((message) => message.text)
     expect(replies.filter((reply) => reply.startsWith('That code is not right'))).toHaveLength(4)
-    expect(replies.filter((reply) => reply === NOTHING_WAITING)).toHaveLength(8)
+    expect(replies.filter((reply) => reply === NO_SIGN_IN)).toHaveLength(8)
     expect(await attemptOf(await chat.userId())).toBeNull()
     expect(outside.revoked).toEqual([outside.issued[0]])
   })
@@ -103,7 +101,7 @@ describe('the confirmation code', () => {
     // An attempt is only ever like this between its fifth wrong code being counted and its being deleted.
     await env.DB.prepare('UPDATE connect_attempts SET confirm_tries = 5 WHERE owner_id = ?').bind(userId).run()
 
-    expect(await chat.say(code)).toBe(NOTHING_WAITING)
+    expect(await chat.say(code)).toBe(NO_SIGN_IN)
 
     expect(await connectionOf(userId)).toBeNull()
   })
@@ -124,7 +122,7 @@ describe('the confirmation code', () => {
 
     const reply = await chat.say(code)
 
-    expect(reply).toBe(NOTHING_WAITING)
+    expect(reply).toBe(NO_SIGN_IN)
     expect(await attemptOf(userId)).toBeNull()
     expect(await connectionOf(userId)).toBeNull()
     expect(outside.revoked).toEqual([outside.issued[0]])
@@ -132,10 +130,10 @@ describe('the confirmation code', () => {
 
   it('has nothing to confirm before Google has redirected back, and leaves the open link alone', async () => {
     const chat = openChat()
-    expect(await chat.say('123456')).toBe(NOTHING_WAITING)
+    expect(await chat.say('123456')).toBe(NO_SIGN_IN)
 
     const link = linkIn(await chat.say('/connect'))
-    expect(await chat.say('123456')).toBe(NOTHING_WAITING)
+    expect(await chat.say('123456')).toBe(NO_SIGN_IN)
 
     // Six digits are a code whether or not one is waited for, and never a question for the assistant.
     expect(outside.completions).toEqual([])
@@ -270,7 +268,7 @@ describe('a link opened by somebody else', () => {
     sent.length = 0
 
     // The victim does what the page says, in their own chat with the bot.
-    expect(await victim.say(code)).toBe(NOTHING_WAITING)
+    expect(await victim.say(code)).toBe(NO_SIGN_IN)
 
     expect(await connectionOf(await victim.userId())).toBeNull()
     expect(await connectionOf(await attacker.userId())).toBeNull()

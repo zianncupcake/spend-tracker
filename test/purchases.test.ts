@@ -16,7 +16,6 @@ import {
   readPress,
   sectionsOf,
   sortEnd,
-  UNSURE_NOTE,
   whereSorted,
   type Dated,
   type Line,
@@ -832,10 +831,6 @@ describe('the line of a purchase that is held', () => {
     expect(line.text).toBe(`31 Oct · SGD 1,234,567.89 · ${merchant} · not sure`)
     expect(markedIn(line)).toBe(merchant)
     expect(line.marked?.length).toBe(merchant.length)
-  })
-
-  it('is what a message says to look for, in the words of its note', () => {
-    expect(UNSURE_NOTE).toBe('Check the amount and the date of each one that is marked "not sure".')
   })
 })
 

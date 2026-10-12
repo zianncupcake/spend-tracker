@@ -3,25 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { ingestAlert } from '../src/ingest'
 import { serveMcp } from '../src/mcp/server'
 import { storeFor } from '../src/store'
+import { ADD_USAGE, TOO_MANY_BY_HAND } from '../src/telegram/texts'
 import { clock, deps, NOW, openChat, type Posted } from './connect-helpers'
 import { alertEmail, buy, linesOf, seconds } from './helpers'
 import { dataIn, mcpRequest, messageIn, toolCall } from './mcp-helpers'
 
 // Purchases that a user adds by hand, and purchases that a user takes out. The clock stands at 12:00 on 9 October
 // 2026 in Singapore, unless a test moves it.
-
-const USAGE = [
-  'Usage:',
-  '/add <nickname> <amount> <merchant>',
-  '/add <nickname> <amount> <date> <merchant>',
-  'The amount can have a currency before it, as in USD 12.50. The date is written YYYY-MM-DD.',
-  "A day of the card's current window, up to today, can be written D/M or D/M/YY too.",
-  'Any other D/M is read as part of the merchant.',
-].join('\n')
-
-const TOO_MANY =
-  'You have added 100 purchases by hand in the last 24 hours, which is as many as can be added in that time. ' +
-  'Try again later.'
 
 const NOW_SECONDS = NOW.getTime() / 1000
 
@@ -243,18 +231,18 @@ describe('/add', () => {
   })
 
   it.each([
-    ['/add', USAGE],
-    ['/add my!card 12.50 Lunch', USAGE],
-    ['/add visa twelve Lunch', USAGE],
-    ['/add visa 12.505 Lunch', USAGE],
-    ['/add visa -12.50 Lunch', USAGE],
-    ['/add visa $12.50 Lunch', USAGE],
-    ['/add visa 12,50 Lunch', USAGE],
-    ['/add visa .50 Lunch', USAGE],
-    ['/add visa US12.50 Lunch', USAGE],
-    ['/add visa USD USD12.50 Lunch', USAGE],
+    ['/add', ADD_USAGE],
+    ['/add my!card 12.50 Lunch', ADD_USAGE],
+    ['/add visa twelve Lunch', ADD_USAGE],
+    ['/add visa 12.505 Lunch', ADD_USAGE],
+    ['/add visa -12.50 Lunch', ADD_USAGE],
+    ['/add visa $12.50 Lunch', ADD_USAGE],
+    ['/add visa 12,50 Lunch', ADD_USAGE],
+    ['/add visa .50 Lunch', ADD_USAGE],
+    ['/add visa US12.50 Lunch', ADD_USAGE],
+    ['/add visa USD USD12.50 Lunch', ADD_USAGE],
     // What is taken for a date is a date, so a merchant has to come after it.
-    ['/add visa 12.50 3/10', USAGE],
+    ['/add visa 12.50 3/10', ADD_USAGE],
     ['/add visa 0.00 Lunch', 'The amount must be more than zero.'],
     // With its year first it is always a date, and one that has to be a day that has come.
     ['/add visa 12.50 2026-02-29 Lunch', 'There is no such date.'],
@@ -345,7 +333,7 @@ describe('/add', () => {
     for (let added = 2; added <= 99; added++) await buy(userId, { parser: 'manual' })
 
     expect((await ask(chat, '/add visa 1 The hundredth')).text).toContain('The hundredth')
-    expect(await chat.say('/add visa 1 One too many')).toBe(TOO_MANY)
+    expect(await chat.say('/add visa 1 One too many')).toBe(TOO_MANY_BY_HAND)
 
     expect(await rowsOf(userId)).toHaveLength(100)
     // The limit is each user's own.
@@ -354,7 +342,7 @@ describe('/add', () => {
     // Once the earliest of them is 24 hours old, there is room for one more, and only for one.
     await env.DB.prepare('UPDATE transactions SET created_at = unixepoch() - 86400 WHERE id = ?').bind(earliest).run()
     expect((await ask(chat, '/add visa 1 Room for one')).text).toContain('Room for one')
-    expect(await chat.say('/add visa 1 One too many')).toBe(TOO_MANY)
+    expect(await chat.say('/add visa 1 One too many')).toBe(TOO_MANY_BY_HAND)
     expect(await rowsOf(userId)).toHaveLength(101)
   })
 })

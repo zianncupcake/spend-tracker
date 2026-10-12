@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { storeFor } from '../src/store'
 import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
+import { PRESS_FAILED, SORT_USAGE } from '../src/telegram/texts'
 import { answered, deps, openChat, sent, type Posted } from './connect-helpers'
 import { buy, userCount } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -187,8 +188,8 @@ describe('/sort with the id of a purchase', () => {
   })
 
   it.each([
-    ['/sort evol 57', 'Usage:\n/sort <nickname>\n/sort <purchase id>'],
-    ['/sort #evol', 'Usage:\n/sort <nickname>\n/sort <purchase id>'],
+    ['/sort evol 57', SORT_USAGE],
+    ['/sort #evol', SORT_USAGE],
     ['/sort visa', 'You have no card called visa.'],
     ['/sort 999999999', 'You have no purchase with ID 999999999.'],
   ])('answers "%s" with what is wrong', async (message, reply) => {
@@ -376,8 +377,6 @@ describe('a press that is ignored', () => {
 })
 
 describe('a press that fails', () => {
-  const PRESS_FAILED = 'Something went wrong. Please try again in a moment.'
-
   it('is answered with that something went wrong when it fails before it is answered, so that its button stops waiting', async () => {
     const chat = await chatWithCard()
     const id = await buy(await chat.userId(), { merchant: 'PRIVATE CLINIC' })

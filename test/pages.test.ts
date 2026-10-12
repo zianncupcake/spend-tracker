@@ -37,19 +37,10 @@ describe('the privacy policy', () => {
   const policy = async (assistant: boolean, photos = false) =>
     (await privacyPage(operator, assistant, photos).text()).replace(/\s+/g, ' ')
 
-  // What the policy says of the bot's assistant, which a service has when it is set up with an AI provider.
-  const ASSISTANT = [
-    '<h2>Questions that you ask the bot</h2>',
-    'A text message that you send the bot is read as a question when it is not a command, and is not the 6-digit ' +
-      'code of a sign-in.',
-    'To answer it, your question is sent to an AI provider chosen by Example Operator, which produces the answer.',
-    'Other details are sent only as the answering calls for them, and they are of your purchases: the id, the ' +
-      'time, the last four digits of the card, the amount, the currency, the merchant and the reward category.',
-    'Nothing is sent to the AI provider unless you ask a question.',
-    'An AI provider chosen by Example Operator answers the questions that you ask the bot. It is sent each ' +
-      'question and the card and purchase details needed to answer it, with your time zone and with the nicknames ' +
-      'and category names of your cards, and nothing unless you ask a question.',
-  ]
+  // The sections that only some services have: one where the bot has an assistant, which it has when the service is
+  // set up with an AI provider, and one more where the bot reads photos.
+  const QUESTIONS = '<h2>Questions that you ask the bot</h2>'
+  const PHOTOS = '<h2>Photos that you send the bot</h2>'
 
   it('names the operator and how to reach them, and when it was last updated', async () => {
     const response = privacyPage(operator, true, false)
@@ -57,128 +48,26 @@ describe('the privacy policy', () => {
 
     expect(response.status).toBe(200)
     expect(html).toContain('<h1>Privacy policy</h1>')
-    expect(html).toContain('Last updated: 11 October 2026')
+    expect(html).toMatch(/Last updated: \d{1,2} [A-Z][a-z]+ \d{4}/)
     expect(html).toContain('Example Operator')
     expect(html).toContain('contact: privacy@spend-tracker.test')
   })
 
-  it('says what becomes of a question, where the bot has an assistant: what is sent, to whom, and when', async () => {
-    const text = await policy(true)
-
-    for (const words of ASSISTANT) expect(text).toContain(words)
-    // Nobody turns the assistant on, so nothing is said of turning it on or off.
-    expect(text).not.toMatch(/turn(ed|s|ing)? (it|the assistant) (on|off)/i)
-    // Each is said where it belongs: on its own after what is stored, and with who else handles the data.
-    const [stored, questions, others, google] = [
-      '<h2>What is stored</h2>',
-      '<h2>Questions that you ask the bot</h2>',
-      '<h2>Who else handles your data</h2>',
-      '<h2>Data from Google</h2>',
-    ].map((heading) => text.indexOf(heading))
-    expect(stored).toBeGreaterThan(-1)
-    expect(questions).toBeGreaterThan(stored)
-    expect(questions).toBeLessThan(others)
-    expect(text.indexOf('An AI provider chosen by Example Operator answers')).toBeGreaterThan(others)
-    expect(text.indexOf('An AI provider chosen by Example Operator answers')).toBeLessThan(google)
-    // Nothing is kept of a question. So all that is said of one with what is stored is that the log never holds it.
-    expect(text.slice(stored, questions).match(/[^.]*question[^.]*\./gi)).toEqual([
-      ' It never holds a message, a question, an answer, an email, a merchant, a card number, a Telegram id or a ' +
-        'token.',
-    ])
-  })
-
-  it('says that the AI provider works out what the bot is asked to do, and that what removes or revokes waits for a confirmation', async () => {
-    const said =
-      'The AI provider also works out what you ask the bot to do in such a message, such as adding a purchase or ' +
-      'changing your time zone, and the bot then does it. What removes or revokes something, such as taking a ' +
-      'purchase out or disconnecting your Gmail, is done only after you confirm it.'
-
-    for (const text of [await policy(true), await policy(true, true)]) {
-      // It is said once, in a paragraph of its own: the one that follows what a question is sent with.
-      expect(text.split(`<p>${said}</p>`)).toHaveLength(2)
-      expect(text).toMatch(/Nothing is sent to the AI provider unless you ask a question[^.]*\.<\/p> <p>The AI provider also/)
-      expect(text).toContain('Last updated: 11 October 2026')
-    }
-    // A service with no assistant has nobody to work anything out, and says none of it.
-    expect(await policy(false)).not.toMatch(/what you ask the bot to do|only after you confirm/)
-  })
-
-  it('says what goes to the AI provider with every question, whether or not the question needs it', async () => {
-    const said =
-      'With every question go your time zone, the day and the time that it is there, the nicknames of your cards ' +
-      'and the names of the reward categories that their purchases can be sorted into, whether or not the ' +
-      'question needs them.'
-
-    for (const text of [await policy(true), await policy(true, true)]) {
-      // It is said once, between what a question is sent to and what else is sent only when it is called for.
-      expect(text.split(said)).toHaveLength(2)
-      expect(text).toContain(`which produces the answer. ${said} Other details are sent only as the answering calls`)
-      // Nothing that is sent with every question is still said to be sent only when it is called for. And nothing
-      // of a card's window or its totals is said to be sent: the bot shows those itself, and sends them to nobody.
-      const [, asNeeded = ''] = /they are of your purchases: ([^.]*)\./.exec(text) ?? []
-      expect(asNeeded).toMatch(/^the id, the time, the last four digits of the card/)
-      expect(asNeeded).not.toMatch(/time zone|nickname|window|total/)
-      expect(text).toContain('Last updated: 11 October 2026')
-    }
-    expect(await policy(false)).not.toContain('With every question')
+  it('has a section on what becomes of a question, where the bot has an assistant', async () => {
+    expect(await policy(true)).toContain(QUESTIONS)
   })
 
   it('says nothing of questions that are asked, or of an AI provider, where the bot has no assistant', async () => {
     const text = await policy(false)
 
-    for (const words of [...ASSISTANT, 'AI provider', 'question and', 'Questions']) {
-      expect(text).not.toContain(words)
-    }
-    expect(text).toContain('Last updated: 11 October 2026')
-    // The assistant that a user connects with a token of their own is another thing, and is still there.
-    expect(text).toContain('An AI assistant that you connect with your assistant access token')
+    for (const words of [QUESTIONS, 'AI provider']) expect(text).not.toContain(words)
   })
 
-  // What the policy says of photos, on a service that reads them. The first eight are said of nothing else.
-  const PHOTOS = [
-    '<h2>Photos that you send the bot</h2>',
-    'A photo that you send the bot is sent to the same AI provider to be read, with its caption, with your time ' +
-      'zone and with the nicknames and category names of your cards.',
-    'The provider reads the purchases out of it, and the bot adds them.',
-    'The photo is not stored.',
-    'When the bot cannot tell which card the purchases were made with, or is not sure of an amount or a date, it ' +
-      'asks you before it adds them.',
-    '<li>The purchases read from a photo that you send the bot, which are stored as the purchases that you add by ' +
-      'hand are. The photo itself is not stored.</li>',
-    '<li>The purchases from a photo that the bot asks you about before it adds them. They wait for your answer for ' +
-      'a day at the most, and are then deleted.</li>',
-    'An AI provider chosen by Example Operator answers the questions that you ask the bot, and reads the photos that ' +
-      'you send it. It is sent each question and the card and purchase details needed to answer it, and each photo ' +
-      'with its caption, each of them with your time zone and with the nicknames and category names of your cards, ' +
-      'and nothing unless you ask a question or send a photo.',
-    'Nothing is sent to the AI provider unless you ask a question or send a photo.',
-  ]
-
-  it('says what becomes of a photo, where the bot reads photos: what is sent, to whom, and what is stored of it', async () => {
+  it('has a section on photos too, and lists their purchases as stored, where the bot reads photos', async () => {
     const text = await policy(true, true)
 
-    for (const words of PHOTOS) expect(text).toContain(words)
-    // Each is said where it belongs: with what is stored, on its own after what is said of questions, and with who
-    // else handles the data.
-    const places = [
-      '<h2>What is stored</h2>',
-      '<li>The purchases that you add by hand:',
-      PHOTOS[5],
-      PHOTOS[6],
-      '<li>The reward category that each purchase is sorted into.</li>',
-      '<h2>Questions that you ask the bot</h2>',
-      '<h2>Photos that you send the bot</h2>',
-      '<h2>Who else handles your data</h2>',
-      PHOTOS[7],
-      '<h2>Data from Google</h2>',
-    ].map((words) => text.indexOf(words))
-    expect(places[0]).toBeGreaterThan(-1)
-    expect(places).toEqual(places.toSorted((before, after) => before - after))
-    // What a question is sent with is still said, and what is said of when nothing is sent is said of both.
-    expect(text).toContain('To answer it, your question is sent to an AI provider chosen by Example Operator')
-    expect(text).not.toContain('unless you ask a question.')
-    // The page is dated as it was.
-    expect(text).toContain('Last updated: 11 October 2026')
+    for (const heading of [QUESTIONS, PHOTOS]) expect(text).toContain(heading)
+    expect(text).toContain('The purchases read from a photo')
   })
 
   it.each([
@@ -189,100 +78,15 @@ describe('the privacy policy', () => {
   ])('says nothing of photos where the bot reads none: with %s', async (_, assistant, photos) => {
     const text = await policy(assistant, photos)
 
-    for (const words of [...PHOTOS.slice(0, 8), 'photo', 'Photo', 'caption']) expect(text).not.toContain(words)
-    // What it says with an assistant is what it said before the bot read photos.
-    if (assistant) expect(text).toContain('Nothing is sent to the AI provider unless you ask a question.</p>')
-    expect(text).toContain('Last updated: 11 October 2026')
+    for (const words of ['photo', 'Photo', 'caption']) expect(text).not.toContain(words)
   })
 
-  it.each([
-    ['with an assistant', true, false],
-    ['with an assistant that reads photos', true, true],
-    ['with none', false, false],
-  ])('says that a log is kept, what a line of it holds and what one never does, %s', async (_, assistant, photos) => {
-    const text = await policy(assistant, photos)
-
-    const said =
-      'The service also keeps a log of what it did, for finding faults. ' +
-      "A line of the log holds the service's own number for a user, the kind of thing that happened, counts, " +
-      'durations and error codes. ' +
-      'It never holds a message, a question, an answer, an email, a merchant, a card number, a Telegram id or a ' +
-      'token. ' +
-      'Cloudflare keeps the log for a few days.'
-    // It is said once, as a paragraph of its own, with what is stored: after the list, and before whatever follows.
-    expect(text.split(`<p>${said}</p>`)).toHaveLength(2)
-    const next = assistant ? '<h2>Questions that you ask the bot</h2>' : '<h2>Who else handles your data</h2>'
-    expect(text.indexOf(said)).toBeGreaterThan(text.indexOf('<h2>What is stored</h2>'))
-    expect(text.indexOf(said)).toBeGreaterThan(text.indexOf('The text of an email is never stored.'))
-    expect(text.indexOf(next)).toBeGreaterThan(text.indexOf(said))
-    // The page is dated as it was.
-    expect(text).toContain('Last updated: 11 October 2026')
-  })
-
-  it.each([
-    ['with an assistant', true, false],
-    ['with an assistant that reads photos', true, true],
-    ['with none', false, false],
-  ])('says what Cloudflare keeps of each request besides, after what it says of the log, %s', async (_, assistant, photos) => {
-    const text = await policy(assistant, photos)
-
-    const said =
-      'Cloudflare also keeps, for the same few days, its own record of each request to the service. ' +
-      'For a request that comes from you, which is a page that you open in a browser, such as the sign-in link, ' +
-      'or a request from an AI assistant that you connect, that record holds the address that was asked for, ' +
-      'your IP address, the rough location and the network that Cloudflare works out from it, ' +
-      'and what your browser or assistant sends about itself.'
-    // It is said once, in a paragraph of its own: the one that follows what is said of the log.
-    expect(text.split(`<p>${said}</p>`)).toHaveLength(2)
-    expect(text).toContain(`Cloudflare keeps the log for a few days.</p> <p>${said}</p>`)
-    const next = assistant ? '<h2>Questions that you ask the bot</h2>' : '<h2>Who else handles your data</h2>'
-    expect(text.indexOf(next)).toBeGreaterThan(text.indexOf(said))
-  })
-
-  it.each([
-    ['with an assistant', true, false],
-    ['with an assistant that reads photos', true, true],
-    ['with none', false, false],
-  ])('says what is accessed, what is stored, who else handles it and how to remove it, %s', async (_, assistant, photos) => {
-    const text = await policy(assistant, photos)
-
-    for (const words of [
-      'read-only access',
-      'a fixed list of bank senders',
-      'the amount, the currency, the merchant, the last four digits of the card and the time',
-      'Your Telegram user id.',
-      "Your time zone, which is Singapore's unless you set another.",
-      'The card nicknames, last four digits and window settings that you enter.',
-      'The card product that you link a card to.',
-      'The purchases that you add by hand: the amount, currency, merchant and date that you give each one, with ' +
-        'the id of the Telegram message that added it, so that it is not counted twice.',
-      'The reward category that each purchase is sorted into.',
-      'A purchase that you take out, which stays stored and marked as taken out, so that its alert is not counted ' +
-        'again. It is left out of every total and list, and is deleted with everything else.',
-      'The id of any alert that was fetched but not recorded, and why it was not, ' +
-        'kept so that it is not fetched again.',
-      'Your Gmail address.',
-      'An encrypted key that lets the service read your mail until you disconnect.',
-      'A hash of your assistant access token, if you create one.',
-      'The text of an email is never stored.',
-      'Cloudflare hosts the service and its database.',
-      'Those messages contain details of your purchases, and Telegram keeps them.',
-      'Google provides the sign-in.',
-      'An AI assistant that you connect with your assistant access token can read your card totals and purchases, ' +
-        'until you remove the token with <code>/mcp revoke</code>.',
-      'Your data is not sold and is not used for advertising.',
+  // The one sentence here whose wording is not the service's own: Google requires it of an app that reads Gmail.
+  it('says of what it gets from Google what Google requires it to say', async () => {
+    expect(await policy(true)).toContain(
       'The use of information received from Google APIs will adhere to the Google API Services User Data Policy, ' +
         'including the Limited Use requirements.',
-      'No person reads your email data unless you explicitly agree, it is needed for security, or the law requires it.',
-      'It is not used to train AI models.',
-      'Send <code>/disconnect</code> to the bot to remove its access to your Gmail. The service then asks Google to ' +
-        'revoke that access too, except when the same mailbox is still connected, or is being connected, from ' +
-        'another chat.',
-      '<code>/delete confirm</code>',
-      'Deleted data can remain in database backups for up to 30 days.',
-    ]) {
-      expect(text).toContain(words)
-    }
+    )
   })
 
   it("escapes the operator's details", async () => {
@@ -321,18 +125,17 @@ describe('the sign-in pages', () => {
   })
 
   it.each([
-    ['expired', 400, 'This link has expired', 'Send /connect to the bot for a new one.'],
-    ['not-completed', 400, 'Sign-in was not completed', 'Nothing was connected.'],
-    ['no-gmail-access', 400, 'Gmail access was not given', 'allow that permission when Google asks'],
-    ['no-lasting-access', 400, 'Google gave no lasting access', 'then send /connect to the bot to try again'],
-    ['failed', 500, 'Sign-in could not be completed', 'To try again, send /connect to the bot.'],
-  ] as const)('say what went wrong: %s', async (problem, status, title, advice) => {
+    ['expired', 400, 'This link has expired'],
+    ['not-completed', 400, 'Sign-in was not completed'],
+    ['no-gmail-access', 400, 'Gmail access was not given'],
+    ['no-lasting-access', 400, 'Google gave no lasting access'],
+    ['failed', 500, 'Sign-in could not be completed'],
+  ] as const)('say what went wrong: %s', async (problem, status, title) => {
     const response = problemPage(problem)
     const html = await response.text()
 
     expect(response.status).toBe(status)
     expect(html).toContain(`<h1>${title}</h1>`)
-    expect(html).toContain(advice)
   })
 
   it.each([

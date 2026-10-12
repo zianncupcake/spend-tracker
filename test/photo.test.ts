@@ -2,9 +2,12 @@ import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
 import * as assistant from '../src/ai/assistant'
 import type { ReadPurchase } from '../src/ai/photo'
+import { DEFAULT_VISION_MODEL } from '../src/ai/provider'
 import { findUser, storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
 import { addRead, type Adding, type Reading } from '../src/telegram/adding'
+import { BY_HAND_NOTE, UNSURE_NOTE } from '../src/telegram/purchases'
+import { READ_ALREADY } from '../src/telegram/texts'
 import { deps, NOW, openChat } from './connect-helpers'
 import { bold, buy, headerRow, plain, purchaseRow, seconds, sumRow, tableOf } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -24,7 +27,6 @@ import {
   OTHER,
   photoLine,
   read,
-  READ_ALREADY,
   reader,
   reading,
   REFUSED,
@@ -107,7 +109,7 @@ describe('a photo with a caption that names the card', () => {
             [{ text: 'Total', colspan: 2 }, { text: '16.35', align: 'right' }, { text: '' }],
           ],
         },
-        { type: 'paragraph', text: '* = added by hand' },
+        { type: 'paragraph', text: BY_HAND_NOTE },
         // The line that the reply to /add has for where its card then stands.
         { type: 'paragraph', text: 'evol ••••5678: SGD 16.35 in 3 purchases, resets 1 Nov' },
       ],
@@ -136,7 +138,7 @@ describe('a photo with a caption that names the card', () => {
     const [given, provider, input] = reader.mock.calls[0]
     expect(given).toBe(deps)
     expect(provider).toBe(deps.ai)
-    expect(provider.visionModel).toBe('qwen/qwen3.8-27b')
+    expect(provider.visionModel).toBe(DEFAULT_VISION_MODEL)
     expect(input).toEqual({
       image: BYTES,
       mime: 'image/jpeg',
@@ -335,7 +337,7 @@ describe('a photo as text, when Telegram does not take the rich message', () => 
         `${id(second)} 5 Oct   9.90  AIRLINE`,
         total(' 9.90'),
         '',
-        '* = added by hand',
+        BY_HAND_NOTE,
         '',
         'evol ••••5678: SGD 12.40 + USD 9.90 in 2 purchases, resets 1 Nov',
       ].join('\n'),
@@ -404,7 +406,7 @@ describe('a photo with no caption', () => {
         '5 Oct · SGD 12.40 · COFFEE PLACE',
         '5 Oct · SGD 3.00 · TEA HOUSE · not sure',
         '5 Oct · SGD 9.90',
-        'Check the amount and the date of each one that is marked "not sure".',
+        UNSURE_NOTE,
       ].join('\n'),
     )
     expect(markedIn(asking)).toEqual(['COFFEE PLACE', 'TEA HOUSE'])
@@ -643,7 +645,7 @@ describe('the hundred purchases that a user may add by hand in 24 hours', () => 
       `${rows[1].id}* | 5 Oct | 2.00 | SHOP 2`,
       `${rows[2].id}* | 5 Oct | 3.00 | SHOP 3`,
       'Total | 6.00',
-      '* = added by hand',
+      BY_HAND_NOTE,
       'evol ••••5678: SGD 6.00 in 3 purchases, resets 1 Nov',
     ])
     expect(texts.map((message) => message.text)).toEqual([LEFT_OUT('2 purchases were', 'them')])

@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
+import { CONNECT_HEADS_UP, NO_SIGN_IN } from '../src/telegram/texts'
 import {
   approve,
   attemptOf,
@@ -27,14 +28,7 @@ describe('/connect', () => {
 
     const reply = await chat.say('/connect')
 
-    for (const words of [
-      'Google will warn that it has not verified this app',
-      'choose "Advanced", then "Go to ... (unsafe)"',
-      'If the page says that sign-in is not allowed in this browser, open the link in Safari or Chrome instead',
-      'the page shows a 6-digit code. Send that code here',
-    ]) {
-      expect(reply).toContain(words)
-    }
+    expect(reply).toContain(CONNECT_HEADS_UP)
     const link = linkIn(reply)
     expect(reply.endsWith(`\n${link.href}`)).toBe(true)
     expect(link.origin + link.pathname).toBe('https://spend-tracker.test/oauth/start')
@@ -77,7 +71,7 @@ describe('/connect', () => {
 
     expect(outside.revoked).toEqual([outside.issued[0]])
     expect(await attemptOf(await chat.userId())).toMatchObject({ email: null, refresh_token_enc: null })
-    expect(await chat.say(code)).toContain('No sign-in is waiting for a code')
+    expect(await chat.say(code)).toBe(NO_SIGN_IN)
   })
 
   it('says so when Gmail is already connected, and starts nothing', async () => {

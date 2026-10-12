@@ -4,6 +4,7 @@ import * as photo from '../src/ai/photo'
 import type { PhotoReading, ReadPurchase } from '../src/ai/photo'
 import type { RichMessage } from '../src/telegram/api'
 import type { Reading } from '../src/telegram/adding'
+import { BY_HAND_NOTE } from '../src/telegram/purchases'
 import { deps, openChat, posted, type Posted } from './connect-helpers'
 import { linesOf, plain, seconds } from './helpers'
 
@@ -14,23 +15,6 @@ import { linesOf, plain, seconds } from './helpers'
 // before each of its tests. It shares the chats, the clock and the service of ./connect-helpers: the clock stands at
 // 12:00 on 9 October 2026 in Singapore, and every card here is tracked by the calendar month.
 
-// What a photo is answered with at once, and what one that nothing was added from is answered with in its place.
-
-export const READING =
-  'Reading your photo… If this message is still here in half a minute, something went wrong. Check /spend before ' +
-  'you send the photo again.'
-export const NO_PURCHASES = 'No purchases to add were found in that photo.'
-export const NOT_READ = 'That photo could not be read. Send a clearer photo, or add its purchases with /add.'
-export const TOOK_TOO_LONG = 'That photo took too long to read. Try again later, or add its purchases with /add.'
-export const TOO_LARGE = 'That photo is too large to read. Crop it to the purchases, and send it again.'
-export const STORED_NO_REPLY =
-  "The purchases in your photo were read, but the bot could not finish its reply. Check /spend and the bot's " +
-  'other messages before you send the photo again.'
-
-/** What a message that was read before is answered with, when Telegram delivers it again. */
-export const READ_ALREADY =
-  "That message was read already. Look at /spend, and at the bot's earlier messages, for what came of it."
-
 /** What a press is answered with when its button is under nothing that can be added or skipped any more. */
 export const REFUSED = 'That button no longer works.'
 
@@ -39,7 +23,7 @@ export const ONLINE = 'Online / Mobile Contactless Spend'
 export const OTHER = 'Other Spend'
 
 /** What a reply says under its tables: every purchase from a photo is one that was added by hand. */
-export const BY_HAND = plain('* = added by hand')
+export const BY_HAND = plain(BY_HAND_NOTE)
 
 /** The id of the message that a test's photo comes in, where the test goes by it. Each test has a user of its own. */
 export const MESSAGE = 7001

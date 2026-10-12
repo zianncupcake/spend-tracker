@@ -3,9 +3,12 @@ import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import * as photo from '../src/ai/photo'
 import type { PhotoReading, ReadPurchase } from '../src/ai/photo'
+import { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai/provider'
 import worker from '../src/index'
 import { findUser } from '../src/store'
 import * as api from '../src/telegram/api'
+import { BY_HAND_NOTE, UNSURE_NOTE } from '../src/telegram/purchases'
+import { READING } from '../src/telegram/texts'
 import { newTelegramId, withoutCarried } from './helpers'
 import { catchConsole } from './log-helpers'
 
@@ -19,10 +22,6 @@ import { catchConsole } from './log-helpers'
 
 const SECRET = env.TELEGRAM_WEBHOOK_SECRET
 const API = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/`
-
-const READING =
-  'Reading your photo… If this message is still here in half a minute, something went wrong. Check /spend before ' +
-  'you send the photo again.'
 
 /** How long something took, which is whatever it took: the Worker goes by the real clock. */
 const took = expect.any(Number)
@@ -185,9 +184,9 @@ describe('POST /telegram with a photo', () => {
     const [, provider, input] = reader.mock.calls[0]
     expect(provider).toEqual({
       apiKey: 'test-ai-key',
-      baseUrl: 'https://api.groq.com/openai/v1',
-      model: 'openai/gpt-oss-120b',
-      visionModel: 'qwen/qwen3.8-27b',
+      baseUrl: DEFAULT_BASE_URL,
+      model: DEFAULT_MODEL,
+      visionModel: DEFAULT_VISION_MODEL,
     })
     expect(input).toEqual({
       image: BYTES,
@@ -249,7 +248,7 @@ describe('POST /telegram with a photo', () => {
                   [{ text: 'Total', colspan: 2 }, { text: '14.50', align: 'right' }, { text: '' }],
                 ],
               },
-              { type: 'paragraph', text: '* = added by hand' },
+              { type: 'paragraph', text: BY_HAND_NOTE },
               {
                 type: 'paragraph',
                 text: expect.stringMatching(/^evol ••••5678: SGD 14\.50 in 2 purchases, resets 1 \w+$/),
@@ -298,7 +297,7 @@ describe('POST /telegram with a photo', () => {
     expect(text.split('\n')).toEqual([
       'Which card was this purchase made with? The bot could not tell.',
       expect.stringMatching(/^\d+ \w+ · SGD 3\.00 · TEA HOUSE · not sure$/),
-      'Check the amount and the date of each one that is marked "not sure".',
+      UNSURE_NOTE,
     ])
     expect(asking).toEqual({
       chat_id: telegramId,

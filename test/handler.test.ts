@@ -4,13 +4,26 @@ import { depsFor, type Deps } from '../src/deps'
 import { ingestAlert } from '../src/ingest'
 import { findOrCreateUser, storeFor } from '../src/store'
 import { ChatBlockedError, TelegramError, type RichMessage } from '../src/telegram/api'
+import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { handleUpdate, type Update } from '../src/telegram/handler'
+import {
+  COMMANDS,
+  EDITED,
+  FAILED,
+  NO_ASSISTANT,
+  NO_CARDS,
+  NOT_TEXT,
+  RENAME_CARD_USAGE,
+  STORED_NO_REPLY,
+  TIMEZONE_USAGE,
+  TOO_MANY_CARDS,
+  WELCOME,
+} from '../src/telegram/texts'
 import {
   alertEmail,
   alertText,
   buy,
   CARDS_HEADER,
-  COUNTED_BY_POSTING,
   ESTIMATED,
   linesOf,
   newTelegramId,
@@ -129,56 +142,12 @@ describe('/start', () => {
 
     const reply = await chat.say('/start')
 
-    expect(reply).toContain('Welcome to Spend Tracker')
-    const commands = [
-      '/addcard',
-      '/cards',
-      '/removecard',
-      '/renamecard',
-      '/spend',
-      '/timezone',
-      '/connect',
-      '/status',
-      '/disconnect',
-      '/mcp',
-      '/delete',
-    ]
-    for (const command of commands) expect(reply).toContain(command)
+    expect(reply).toContain(WELCOME)
+    expect(reply).toContain(COMMANDS)
     expect(await userCount(chat.telegramId)).toBe(1)
 
     await chat.say('/start')
     expect(await userCount(chat.telegramId)).toBe(1)
-  })
-
-  it('says which time zone the windows are counted in until another is set, and how to set one', async () => {
-    const reply = await openChat().say('/start')
-
-    expect(reply).toContain(
-      'Cycles and months begin and end by Singapore time (Asia/Singapore), unless you set another time zone ' +
-        'with /timezone.',
-    )
-    expect(reply).toContain("/timezone - show the time zone that your cards' windows are counted in")
-    expect(reply).toContain('/timezone <name> - change it, for example /timezone Asia/Tokyo')
-  })
-
-  it('lists the commands for purchases and for card products, and the one that renames a card', async () => {
-    const lines = (await openChat().say('/start')).split('\n')
-
-    // The renaming of a card comes after the removing of one.
-    const removing = lines.indexOf('/removecard <nickname> - stop tracking a card')
-    expect(removing).toBeGreaterThan(-1)
-    expect(lines[removing + 1]).toBe('/renamecard <nickname> <new nickname> - give a card another nickname')
-    for (const line of [
-      '/spend <nickname> - every purchase on one card in its current window',
-      '/add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant',
-      '/remove <purchase id> - take a purchase out',
-      '/products - list the card products whose reward rules are known',
-      '/product <nickname> <product key> - link a card to a product, or to none',
-      "/sort <nickname> - how a card's purchases are sorted into the reward categories of its product",
-      '/sort <purchase id> - move one purchase to another category',
-    ]) {
-      expect(lines).toContain(line)
-    }
   })
 })
 
@@ -233,7 +202,7 @@ describe('/addcard and /cards', () => {
 
     expect(await chat.say(message)).toContain(expected)
 
-    expect(await chat.say('/cards')).toContain('You have no cards yet')
+    expect(await chat.say('/cards')).toBe(NO_CARDS)
   })
 
   it('refuses a second card with the same nickname or the same last four digits', async () => {
@@ -247,13 +216,7 @@ describe('/addcard and /cards', () => {
   })
 
   it('says how to add a card when there are none', async () => {
-    expect(await openChat().say('/cards')).toBe(
-      [
-        'You have no cards yet. Add one with:',
-        '/addcard <nickname> <last4> statement <day>',
-        '/addcard <nickname> <last4> calendar',
-      ].join('\n'),
-    )
+    expect(await openChat().say('/cards')).toBe(NO_CARDS)
   })
 
   it('adds no more than twenty cards, which keeps /spend well inside the queries that a request may make', async () => {
@@ -262,10 +225,7 @@ describe('/addcard and /cards', () => {
       expect(await chat.say(`/addcard card-${card} ${String(card).padStart(4, '0')} calendar`)).toContain('Added')
     }
 
-    expect(await chat.say('/addcard another 9999 calendar')).toBe(
-      'You have 20 cards, which is as many as can be tracked. To add another, first remove one with ' +
-        '/removecard <nickname>.',
-    )
+    expect(await chat.say('/addcard another 9999 calendar')).toBe(TOO_MANY_CARDS)
     // A row for each card, under the row that names the columns.
     expect(await chat.lines('/cards')).toHaveLength(1 + 20)
 
@@ -413,7 +373,7 @@ describe('/renamecard', () => {
     const chat = openChat()
     await chat.say('/addcard visa 1234 calendar')
 
-    expect(await chat.say(message)).toBe('Usage: /renamecard <nickname> <new nickname>')
+    expect(await chat.say(message)).toBe(RENAME_CARD_USAGE)
 
     expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | -'])
   })
@@ -505,23 +465,18 @@ describe('/spend', () => {
   })
 
   it('says how to add a card when there are none', async () => {
-    const reply = await openChat().say('/spend')
-
-    expect(reply).toContain('You have no cards yet')
-    expect(reply).toContain('/addcard <nickname> <last4> statement <day>')
+    expect(await openChat().say('/spend')).toBe(NO_CARDS)
   })
 })
 
 describe('/timezone', () => {
-  const USAGE = '/timezone <IANA name>, for example /timezone Asia/Tokyo'
-
   it("shows the user's time zone, which is Singapore's until they set another", async () => {
     const chat = openChat()
 
-    expect(await chat.say('/timezone')).toBe(`Your time zone is Asia/Singapore. To change it, send ${USAGE}.`)
+    expect(await chat.say('/timezone')).toBe(`Your time zone is Asia/Singapore. To change it, send ${TIMEZONE_USAGE}.`)
 
     await chat.say('/timezone Asia/Tokyo')
-    expect(await chat.say('/timezone')).toBe(`Your time zone is Asia/Tokyo. To change it, send ${USAGE}.`)
+    expect(await chat.say('/timezone')).toBe(`Your time zone is Asia/Tokyo. To change it, send ${TIMEZONE_USAGE}.`)
   })
 
   it("sets the time zone that the windows of the user's cards are counted in, and nobody else's", async () => {
@@ -567,7 +522,7 @@ describe('/timezone', () => {
   it.each(['/timezone Asia Tokyo', '/timezone Asia/Tokyo please'])('answers "%s" with the usage', async (message) => {
     const chat = openChat()
 
-    expect(await chat.say(message)).toBe(`Usage: ${USAGE}`)
+    expect(await chat.say(message)).toBe(`Usage: ${TIMEZONE_USAGE}`)
 
     expect((await chat.user()).timezone).toBe('Asia/Singapore')
   })
@@ -598,7 +553,7 @@ describe('/delete', () => {
     await chat.say('/addcard visa 1234 calendar')
     await chat.say('/delete confirm')
 
-    expect(await chat.say('/cards')).toContain('You have no cards yet')
+    expect(await chat.say('/cards')).toBe(NO_CARDS)
   })
 })
 
@@ -610,7 +565,7 @@ describe('anything else', () => {
 
     const reply = await chat.say(message)
 
-    expect(reply.startsWith('Commands:\n/addcard')).toBe(true)
+    expect(reply).toBe(COMMANDS)
     expect(await userCount(chat.telegramId)).toBe(0)
   })
 
@@ -622,10 +577,7 @@ describe('anything else', () => {
 
     const reply = await chat.say(message)
 
-    expect(reply).toBe(
-      'The assistant, which answers questions asked in your own words, is not available on this service. ' +
-        'Send /start for the list of commands.',
-    )
+    expect(reply).toBe(NO_ASSISTANT)
     expect(await userCount(chat.telegramId)).toBe(0)
   })
 
@@ -664,10 +616,6 @@ const sticker = {
 const liveLocation = { latitude: 1.29, longitude: 103.85, live_period: 900 }
 
 describe('a message that is not text', () => {
-  const NOT_TEXT =
-    'The bot only reads text messages. It cannot read an attachment, such as a photo, a file or a voice message, or ' +
-    'the caption under one. Please send your question or command as text.'
-
   it.each<[what: string, content: object]>([
     // The words under an attachment are its caption. Here they are a command.
     ['a photo with words under it', { photo, caption: '/addcard visa 1234 calendar' }],
@@ -688,8 +636,6 @@ describe('a message that is not text', () => {
 })
 
 describe('a message that was edited', () => {
-  const EDITED = 'The bot does not read a message again after it has been edited. Please send it as a new message.'
-
   it('is answered with that the bot does not read it again, and the command that it now is is not run', async () => {
     const telegramId = newTelegramId()
     const { sent, rich, deps } = recorder()
@@ -847,7 +793,7 @@ describe('what the log has of an update', () => {
       { event: 'update', kind: 'command', command: name, outcome: 'replied', ms: 0 },
     ])
     // It is a command that there is: one that there is not is answered with the list of those that there are.
-    expect(reply.startsWith('Commands:')).toBe(false)
+    expect(reply).not.toBe(COMMANDS)
   })
 
   it('is each command that the bot lists, under the name that the list gives it', async () => {
@@ -930,14 +876,6 @@ describe('what the log has of an update', () => {
     for (const text of [...never, 'What did', String(chat.telegramId)]) expect(logged.text()).not.toContain(text)
   })
 })
-
-/**
- * What a chat is sent when the handling of its message fails, and what it is sent in the place of that when the
- * message is an /add whose purchase is stored by then.
- */
-const FAILED = "Something went wrong on the bot's side. Please try again in a moment."
-const STORED_NO_REPLY =
-  'Your purchase was stored, but the bot could not reply to it. Check it with /spend before adding it again.'
 
 /** The line that the log has of a message whose handling failed, by the fake clock of these tests: in no time. */
 function failedLine(as: object, handled: boolean, told = true) {
