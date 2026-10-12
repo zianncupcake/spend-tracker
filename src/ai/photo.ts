@@ -14,9 +14,10 @@
 
 import { choicesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
+import { CURRENCY, dayStart, ISO_DATE, noonOf } from '../domain/by-hand'
 import { dayOf, startOfDay } from '../domain/window'
 import { Failure } from '../log'
-import { hundredths } from '../parsers/shared'
+import { hundredths, MAX_MERCHANT_LENGTH } from '../parsers/shared'
 import type { Card } from '../store'
 import { completeJson, ProviderError, type AiProvider, type ChatMessage } from './provider'
 
@@ -55,9 +56,10 @@ export type PhotoReading =
    * `card` is one of the nicknames given, and one that the user named, or null. `unknownCard` is whether the model
    * gave a card that is none of the user's, as "amex" is for a user with evol and visa: their user named a card
    * that they have not got, which is not the same as naming none. `category` is a key of that card's, whether the
-   * model gave the key or what the category is called, or null. `unreadable` is how many purchases the model gave
-   * that failed the checks, and are left out. `more` is whether the photo held more purchases than are taken from
-   * one.
+   * model gave the key or what the category is called, or null. With no card it is a key of any of the user's cards,
+   * and one that the user named: it is for whoever stores the purchases to hold against the card that they go to.
+   * `unreadable` is how many purchases the model gave that failed the checks, and are left out. `more` is whether
+   * the photo held more purchases than are taken from one.
    */
   | {
       status: 'read'
@@ -95,9 +97,6 @@ const MAX_COMPLETION_TOKENS = 1_600
  */
 const TEMPERATURE = 0
 
-/** How long after the start of a day its noon is, in seconds. */
-const NOON = 12 * 3600
-
 /**
  * How many days before today a purchase can be dated and still be taken on the model's word. One that is dated
  * longer ago is doubted, whatever the model said of it, so that its user is asked before it is stored.
@@ -115,15 +114,9 @@ const MAX_CAPTION_LENGTH = 500
 /** What the model is sent in the place of a caption, for a photo that came with none. */
 const NO_CAPTION = 'The photo came with no caption.'
 
-/** As long as the merchant that /add takes may be. */
-const MAX_MERCHANT_LENGTH = 80
-
-// What /add takes for an amount, for the code of a currency and for a date. Its own patterns are in
-// ../telegram/handler. The amount here is that one without the currency that can go before it, which the model is
-// asked for apart.
+// What /add takes for an amount, which has its own pattern in ../telegram/handler. The amount here is that one
+// without the currency that can go before it, which the model is asked for apart.
 const AMOUNT = /^(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12})(\.\d{1,2}|)$/
-const CURRENCY = /^[A-Za-z]{3}$/
-const ISO_DATE = /^(\d{4})-(\d\d)-(\d\d)$/
 
 /** A run of blanks. A control character counts as one, so that none of them is left in a merchant's name. */
 const BLANKS = /[\s\p{Cc}]+/gu
@@ -134,9 +127,6 @@ const BLANKS = /[\s\p{Cc}]+/gu
  * mostly written with no blanks between their words, and a nickname that stands among them is a word of its own.
  */
 const WORD = /[\p{Script=Latin}0-9_-]+/gu
-
-/** How many bytes are made a string of at a time, where the runtime has no encoder of its own: see `base64Of`. */
-const ENCODED_AT_ONCE = 8192
 
 /** The JSON that the model is asked for, as it is told of it. */
 const SHAPE =
@@ -192,7 +182,7 @@ async function read(
       role: 'user',
       content: [
         { type: 'text', text: written || NO_CAPTION },
-        { type: 'image_url', image_url: { url: `data:${mime};base64,${base64Of(image)}` } },
+        { type: 'image_url', image_url: { url: `data:${mime};base64,${image.toBase64()}` } },
       ],
     },
   ]
@@ -271,22 +261,6 @@ function described({ nickname, categories, note }: PhotoCard): string {
 }
 
 /**
- * The bytes in base64, made the cheapest way that the runtime has: a photo is hundreds of thousands of bytes, and a
- * Worker has little time to compute in. The Workers runtime has an encoder of its own, which was measured in it at
- * about a fifth of a millisecond for each MB. Where there is none, the bytes are made a string of some thousands at
- * a time, for btoa to encode: about 3 milliseconds for each MB, which is a fifth of what it takes when the string
- * is made of one byte at a time.
- */
-function base64Of(bytes: Uint8Array): string {
-  if (typeof bytes.toBase64 === 'function') return bytes.toBase64()
-  let binary = ''
-  for (let at = 0; at < bytes.length; at += ENCODED_AT_ONCE) {
-    binary += Reflect.apply(String.fromCharCode, null, bytes.subarray(at, at + ENCODED_AT_ONCE))
-  }
-  return btoa(binary)
-}
-
-/**
  * The text, cut to `most` code units, with no half of a character left in it. A character that a string holds as
  * two code units is not cut in half. And a half that the text held on its own, as a model can write one, is made
  * U+FFFD, which stands for what cannot be read: a string with such a half in it is not text that everything takes.
@@ -309,9 +283,10 @@ function cutTo(text: string, most: number): string {
  * that the user named in what they wrote: see `names`. A model can take a card from what a photo shows, such as the
  * logo of a bank, and purchases are stored on no card that nobody named: with none, their user is asked. A card
  * that is none of the user's is no card either, and is told apart from none: see `isUnknown`. The category is kept
- * only when it is one of that card's, so there is none without a card: see `categoryKey` for what a model can give
- * as one. Nothing else in the answer is read: what the model gives as the problem with a photo is its own text, and
- * is shown to nobody.
+ * only when it is one of that card's: see `categoryKey` for what a model can give as one. With no card it is kept
+ * when it is one of any card's and the user named it too, as `namesCategory` has it: a model is not to make one up,
+ * so there is none with nothing written. Nothing else in the answer is read: what the model gives as the problem
+ * with a photo is its own text, and is shown to nobody.
  *
  * No more than MAX_PURCHASES_PER_PHOTO of the purchases are looked at, however many the answer holds, so that the
  * checking of an answer takes no longer for one that is very long. There were more purchases than are taken when
@@ -338,7 +313,10 @@ export function checkPurchases(
   const longAgo = startOfDay(year, month, day - MAX_DAYS_AGO, timeZone).getTime() / 1000
   const purchases = given.flatMap((each) => purchaseIn(each, timeOf, longAgo) ?? [])
   const card = cards.find(({ nickname }) => nickname === answer.card && names(written, nickname))
-  const category = card ? categoryKey(card.categories, answer.category) : undefined
+  const categories = card
+    ? card.categories
+    : cards.flatMap((each) => each.categories).filter((each) => namesCategory(written, each))
+  const category = categoryKey(categories, answer.category)
   return {
     status: 'read',
     card: card?.nickname ?? null,
@@ -371,6 +349,14 @@ function isUnknown(cards: PhotoCard[], given: unknown): boolean {
 function names(written: string, nickname: string): boolean {
   const words: string[] = written.toLowerCase().match(WORD) ?? []
   return words.includes(nickname.toLowerCase())
+}
+
+/**
+ * Whether what a user wrote names a category: its key stands in it as a word of its own, as a nickname does, or what
+ * the category is called stands in it, whatever the case of the letters and however the blanks are written.
+ */
+function namesCategory(written: string, { key, label }: PhotoCard['categories'][number]): boolean {
+  return names(written, key) || spelt(written).includes(spelt(label))
 }
 
 /**
@@ -463,9 +449,7 @@ function merchantIn(text: string): string | null {
  * the dates that /add refuses. It sets no limit on how long ago a day may be, as /add sets none.
  *
  * The time is the one that /add stores, so that a purchase is stored at the same time whichever way it was added:
- * see `timeNamed` in ../telegram/handler. No time comes with a date, so noon stands in for it, or the time that it
- * is now, on a day that has not got to its noon yet. A time in the middle of its day is still of that day when its
- * user moves to another time zone, which the start of the day would not be.
+ * see `noonOf` in ../domain/by-hand.
  *
  * A photo's purchases are of a few days, and to find where a day begins takes more computing than the rest of a
  * check does. So each date is worked out once.
@@ -478,17 +462,9 @@ function timesOfDays(now: Date, timeZone: string): (date: string) => number | nu
     if (time === undefined) {
       const [, year, month, day] = ISO_DATE.exec(date) ?? []
       const start = year === undefined ? null : dayStart(Number(year), Number(month), Number(day), timeZone)
-      time = start === null || start > at ? null : Math.min(start + NOON, at)
+      time = start === null || start > at ? null : noonOf(start, at)
       found.set(date, time)
     }
     return time
   }
-}
-
-/** Unix seconds of the instant at which a day begins in the time zone. Null for a day that no calendar has. */
-function dayStart(year: number, month: number, day: number, timeZone: string): number | null {
-  // A date that no calendar has rolls over into one that a calendar has, and then does not read back as it was given.
-  const given = new Date(Date.UTC(year, month - 1, day))
-  const exists = given.getUTCFullYear() === year && given.getUTCMonth() === month - 1 && given.getUTCDate() === day
-  return exists ? startOfDay(year, month, day, timeZone).getTime() / 1000 : null
 }

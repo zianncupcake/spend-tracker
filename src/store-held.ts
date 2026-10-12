@@ -68,13 +68,9 @@ export function heldStoreFor(db: D1Database, ownerId: number) {
       return row && { ...row, purchases: JSON.parse(row.purchases) }
     },
 
-    /** Lets go of the batch that is held for the message. False when none was held for it. */
-    async remove(messageId: number): Promise<boolean> {
-      const result = await db
-        .prepare('DELETE FROM held_batches WHERE owner_id = ? AND message_id = ?')
-        .bind(ownerId, messageId)
-        .run()
-      return result.meta.changes > 0
+    /** Lets go of the batch that is held for the message. */
+    async remove(messageId: number): Promise<void> {
+      await db.prepare('DELETE FROM held_batches WHERE owner_id = ? AND message_id = ?').bind(ownerId, messageId).run()
     },
   }
 }

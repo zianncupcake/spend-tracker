@@ -1559,12 +1559,12 @@ describe('the line that a run logs of itself', () => {
     const logged = catchConsole()
     const chat = await connectedChat(JANE)
     await chat.say('/addcard visa 4321 calendar uob-evol')
-    const [subject, receivedAt] = ['A made-up subject', now() - 60]
+    const receivedAt = now() - 60
     const purchase = textPart(alertText('SGD 98.76', '4321', 'PRIVATE CLINIC'))
     outside.mailboxes[JANE] = [
       lookalike('made-up-id-3'),
-      gmailMessage({ id: 'made-up-id-2', subject, receivedAt, content: textPart('A made-up notice.') }),
-      gmailMessage({ id: 'made-up-id-1', subject, receivedAt, content: purchase }),
+      gmailMessage({ id: 'made-up-id-2', receivedAt, content: textPart('A made-up notice.') }),
+      gmailMessage({ id: 'made-up-id-1', receivedAt, content: purchase }),
     ]
 
     await runCheck(posting)
@@ -1578,7 +1578,7 @@ describe('the line that a run logs of itself', () => {
       { rejected: 1, unparsed: 1 },
       { stored: 1, notified: 1 },
     ])
-    const mail = [JANE, 'example.test', 'examplebank.test', 'made-up', 'subject', 'notice', 'PRIVATE CLINIC', 'visa']
+    const mail = [JANE, 'example.test', 'examplebank.test', 'made-up', 'notice', 'PRIVATE CLINIC', 'visa']
     const numbers = ['4321', '98.76', '9876', 'SGD', String(chat.telegramId)]
     const tokens = [outside.issued[0], 'refresh-token', 'access-token', env.TELEGRAM_BOT_TOKEN]
     for (const text of [...mail, ...numbers, ...tokens]) expect(logged.text()).not.toContain(text)

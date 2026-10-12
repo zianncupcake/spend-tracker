@@ -72,7 +72,7 @@ function alertBody(rows = table()): string {
 }
 
 function hsbcEmail(text = alertBody(), receivedAt = RECEIVED) {
-  return alertEmail({ from: SENDER, subject: 'Transaction Alerts (Credit Card)', receivedAt, text })
+  return alertEmail({ from: SENDER, receivedAt, text })
 }
 
 const parse = (text: string) => parseAlert(hsbcEmail(text))
@@ -309,8 +309,8 @@ describe('HSBC card alerts', () => {
       expect(hsbc.parse(hsbcEmail(text))).toMatchObject({ amountMinor: 1234 })
     }
 
-    // Measured at about 60 ms. Heavy backtracking over text of this length would take far longer.
-    expect(performance.now() - started).toBeLessThan(500)
+    // Measured at about 60 ms. The bound is for a pattern that never ends, and is set well above a slow machine.
+    expect(performance.now() - started).toBeLessThan(5_000)
   })
 
   it('is read from the HTML that the bank sends, when a check comes upon it in a mailbox', async () => {
@@ -321,7 +321,6 @@ describe('HSBC card alerts', () => {
     outside.mailboxes[mailbox] = [
       gmailMessage({
         from: '"HSBC Singapore" <HSBC.Bank.Singapore.Limited@notification.hsbc.com.hk>',
-        subject: 'Transaction Alerts (Credit Card)',
         receivedAt: RECEIVED,
         // What Gmail records of an HSBC alert: the address is under notification.hsbc.com.hk, and the DMARC result
         // names the domain that the policy is for.

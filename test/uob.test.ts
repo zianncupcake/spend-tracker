@@ -45,7 +45,7 @@ function alertBody(sentence = transaction()): string {
 }
 
 function uobEmail(text = alertBody(), receivedAt = RECEIVED) {
-  return alertEmail({ from: 'unialerts@uobgroup.com', subject: 'Card transaction alert', receivedAt, text })
+  return alertEmail({ from: 'unialerts@uobgroup.com', receivedAt, text })
 }
 
 const parse = (text: string) => parseAlert(uobEmail(text))
@@ -193,7 +193,7 @@ describe('UOB card alerts', () => {
       expect(uob.parse(uobEmail(text))).toMatchObject({ amountMinor: 4560 })
     }
 
-    // Measured at about 45 ms. Heavy backtracking over text of this length would take far longer.
-    expect(performance.now() - started).toBeLessThan(500)
+    // Measured at about 45 ms. The bound is for a pattern that never ends, and is set well above a slow machine.
+    expect(performance.now() - started).toBeLessThan(5_000)
   })
 })

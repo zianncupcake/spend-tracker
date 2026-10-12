@@ -1,5 +1,5 @@
-import { hundredths } from './shared'
-import type { Parser } from './types'
+import { hundredths } from '../src/parsers/shared'
+import type { Parser } from '../src/parsers/types'
 
 // Example Bank is invented. The tests use it in place of a real bank, and it
 // shows the shape of a parser. Its alert is one whole line of the email:

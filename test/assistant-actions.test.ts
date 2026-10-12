@@ -203,8 +203,9 @@ describe('a call of a tool that acts', () => {
   it('has a purchase that the checking refuses left out and counted, as one of a photo is', async () => {
     const user = await userWithCards()
     const purchases = [{ ...GIVEN, amount: '-5.20' }, GIVEN, { ...GIVEN, date: '2026-10-10' }, 'LUNCH PLACE 5.20']
-    // A card that is not the user's is no card, as for a photo, and a category with no card is none. The reading
-    // says that the card was one that the user has not got, which is not the same as their naming none.
+    // A card that is not the user's is no card, as for a photo, and a category that the message does not name is
+    // none. The reading says that the card was one that the user has not got, which is not the same as their naming
+    // none.
     model(calling(['call_1', 'add_purchases', { card: 'amex', category: 'other', purchases }]))
 
     const { answer } = await ask(user, 'A made-up asking, which names amex.')
@@ -215,12 +216,13 @@ describe('a call of a tool that acts', () => {
   })
 
   // The model is told to give no card that its user did not name, and is not taken at its word: the card is kept
-  // only when the message names it, as the card of a photo is only when the caption does.
+  // only when the message names it, as the card of a photo is only when the caption does. The category is kept
+  // without the card when the message names the category.
   it.each<[what: string, written: string, kept: [card: string | null, category: string | null]]>([
     ['names it', 'Add 5.20 at LUNCH PLACE to evol as other spend.', ['evol', 'other']],
     ['names it in other letters', 'add 5.20 lunch place, EVOL, other spend', ['evol', 'other']],
-    ['names no card', 'Add 5.20 at LUNCH PLACE as other spend.', [null, null]],
-    ['names another card', 'Add 5.20 at LUNCH PLACE to visa as other spend.', [null, null]],
+    ['names no card', 'Add 5.20 at LUNCH PLACE as other spend.', [null, 'other']],
+    ['names another card', 'Add 5.20 at LUNCH PLACE to visa as other spend.', [null, 'other']],
     ['holds its nickname inside a longer word', 'Add 5.20 at LUNCH PLACE, paid by revolut.', [null, null]],
   ])('has the card of its purchases kept only when the message names it: one that %s', async (_, written, kept) => {
     const user = await userWithCards()
@@ -419,15 +421,33 @@ describe('a message that asks for several things', () => {
     expect(answer).toMatchObject(acting([{ kind: 'command', line: '/renamecard visa travel' }], { more: true }))
     if (answer.status !== 'acting' || !answer.next) throw new Error('The answer cannot be gone on from')
     expect(posted).toHaveBeenCalledTimes(1)
+    const queried = vi.spyOn(env.DB, 'prepare')
 
-    const next = await answer.next(['Done.'])
+    const next = await answer.next(['Done.'], false)
 
     // The model was asked again with its call and, as the answer to it, what whoever carried it out said came of it.
     expect(requests()[1].messages.slice(2)).toEqual([called(RENAME), toolResult('call_1', 'run_command', 'Done.')])
     // The second thing is the last, as the model said: there is nothing to go on with.
     expect(next).toEqual(acting([{ kind: 'show', card: 'evol' }]))
-    // What the question took is counted over both.
+    // What the question took is counted over both. Nothing was read again, as nothing was said to have changed.
     expect(taken).toEqual({ requests: 2, tool_calls: 2 })
+    expect(queried).not.toHaveBeenCalled()
+  })
+
+  it('has the next call checked against the cards as they then are, when it is told that what was done may have changed them', async () => {
+    const user = await userWithCards()
+    model(calling(RENAME), calling(['call_2', 'show_spending', { card: 'travel', more: false }]))
+    const { answer } = await ask(user, 'rename visa to travel, then show me travel')
+    if (answer.status !== 'acting' || !answer.next) throw new Error('The answer cannot be gone on from')
+    // What whoever carries the renaming out does.
+    await storeFor(env.DB, user.id).renameCard('visa', 'travel')
+    const queried = vi.spyOn(env.DB, 'prepare')
+
+    const next = await answer.next(['Done.'], true)
+
+    // The model was told of no card called travel. The one query is that for the cards.
+    expect(next).toEqual(acting([{ kind: 'show', card: 'travel' }]))
+    expect(queried).toHaveBeenCalledTimes(1)
   })
 
   it('is not gone on from when the question has no request left, though the model says that there is more', async () => {

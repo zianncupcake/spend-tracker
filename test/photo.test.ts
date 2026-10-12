@@ -377,6 +377,15 @@ describe('a photo with no caption', () => {
     expect(texts).toEqual([])
   })
 
+  it('puts the purchases of a user with one card in the category that the caption named with no card', async () => {
+    const chat = await chatWithCard()
+    reading(read([bought(1240, 'COFFEE PLACE')], { category: 'other' }))
+
+    await chat.photo('other spend')
+
+    expect(await rowsOf(await chat.userId())).toMatchObject([{ card_last4: '5678', category: 'other' }])
+  })
+
   it('adds none of its purchases for a user with two cards, who is asked which card, with a button for each', async () => {
     const chat = await chatWithCards()
     const userId = await chat.userId()

@@ -309,9 +309,8 @@ describe('a card and its product', () => {
 
     expect(await store.listCards()).toEqual([linked, plain])
 
-    expect(await store.setProduct('spare', 'uob-evol')).toBe(true)
-    expect(await store.setProduct('main', null)).toBe(true)
-    expect(await store.setProduct('missing', 'uob-evol')).toBe(false)
+    await store.setProduct('spare', 'uob-evol')
+    await store.setProduct('main', null)
 
     expect(await store.listCards()).toEqual([
       { nickname: 'main', last4: '1234', windowType: 'calendar' },
@@ -407,16 +406,13 @@ describe('the purchases of a store', () => {
     expect(await store.findBySourceId('manual:7')).toEqual({ ...found, removedAt: expect.any(Number) })
   })
 
-  it('are sorted one at a time: once into a category, and by their own user only', async () => {
+  it('are sorted one at a time, into a category and then into another, and by their own user only', async () => {
     const { store, id } = await storeWith()
     const { store: other, id: theirs } = await storeWith()
 
-    expect(await store.setCategory(id, 'online')).toBe(true)
-    // It is there already. So of two requests that sort it the same way, the second changes nothing.
-    expect(await store.setCategory(id, 'online')).toBe(false)
-    expect(await store.setCategory(id, 'other')).toBe(true)
-    expect(await store.setCategory(theirs, 'online')).toBe(false)
-    expect(await store.setCategory(999_999_999, 'online')).toBe(false)
+    await store.setCategory(id, 'online')
+    await store.setCategory(id, 'other')
+    await store.setCategory(theirs, 'online')
 
     expect(await store.findTransaction(id)).toMatchObject({ category: 'other' })
     expect(await other.findTransaction(theirs)).toMatchObject({ category: null })
@@ -480,7 +476,6 @@ describe('the purchases of a store', () => {
     ])
     expect((await store.listTransactions(null, ...ANY_TIME, 10)).map((each) => each.id)).toEqual([kept])
     expect(await store.findTransaction(removed)).toBeNull()
-    expect(await store.setCategory(removed, 'other')).toBe(false)
     // The row is still there, so the alert that it was read from is not stored a second time.
     expect(await store.insertTransaction(purchase({ sourceId: 'msg-2' }))).toBeNull()
     const rows = await db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE id = ?').bind(removed).first('n')

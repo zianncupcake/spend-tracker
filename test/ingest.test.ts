@@ -79,12 +79,11 @@ it('logs what came of each alert, with the parser of the bank that sent it', asy
   ])
 })
 
-it('logs nothing else of an alert: not its sender, its subject or its text, nor the purchase in it', async () => {
+it('logs nothing else of an alert: not its sender or its text, nor the purchase in it', async () => {
   const logged = catchConsole()
   const store = await newStore()
   const email = alertEmail({
     sourceId: 'made-up-message-id',
-    subject: 'A made-up subject',
     text: `Dear Jane,\n${alertText('SGD 98.76', '4321', 'PRIVATE CLINIC')}`,
   })
 
@@ -93,6 +92,6 @@ it('logs nothing else of an alert: not its sender, its subject or its text, nor 
   await ingestAlert(store, { ...email, sourceId: 'another-made-up-id', text: 'A notice for jane@example.test.' })
 
   expect(logged.events().map((event) => event.outcome)).toEqual(['stored', 'duplicate', 'unparsed'])
-  const kept = ['made-up', 'subject', 'Jane', 'jane@', 'examplebank.test', 'PRIVATE CLINIC', '4321', '98', 'SGD']
+  const kept = ['made-up', 'Jane', 'jane@', 'examplebank.test', 'PRIVATE CLINIC', '4321', '98', 'SGD']
   for (const text of kept) expect(logged.text()).not.toContain(text)
 })

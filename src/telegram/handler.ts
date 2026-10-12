@@ -6,12 +6,13 @@ import type { Product } from '../catalogue/types'
 import { ATTEMPT_MINUTES, confirmCode, disconnect, startConnect } from '../connect'
 import type { Deps } from '../deps'
 import { breakDown, perCurrency } from '../domain/breakdown'
+import { CURRENCY, dayStart, ISO_DATE, noonOf } from '../domain/by-hand'
 import { sortByRules, startingCategoryOn, WINDOW_LIMIT } from '../domain/sorting'
 import { cardTotals, type CardTotals } from '../domain/totals'
-import { countedIn, currentWindow, dayOf, startOfDay } from '../domain/window'
-import { Failure, log, logFailure, type Events } from '../log'
+import { countedIn, currentWindow, dayOf } from '../domain/window'
+import { COMMAND_NAMES, CONFIRMABLE, Failure, log, logFailure, type Events } from '../log'
 import { issueToken } from '../mcp/tokens'
-import { hundredths } from '../parsers/shared'
+import { hundredths, MAX_MERCHANT_LENGTH } from '../parsers/shared'
 import {
   deleteUser,
   findOrCreateUser,
@@ -375,10 +376,8 @@ const CODE = /^\d{6}$/
 const PRODUCT_KEY = /^[A-Za-z0-9-]{1,30}$/
 /** A purchase's id as its user gives it: the number that it is shown as, with or without a # before it. */
 const PURCHASE_ID = /^#?(\d{1,15})$/
-const CURRENCY = /^[A-Za-z]{3}$/
 /** An amount as the parsers of the banks' alerts read one, with or without the code of its currency before it. */
 const AMOUNT = /^([A-Za-z]{3})?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12})(\.\d{1,2}|)$/
-const ISO_DATE = /^(\d{4})-(\d\d)-(\d\d)$/
 /** Day and month, and after them the year or the last two digits of it. */
 const SHORT_DATE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d\d|\d{4}))?$/
 
@@ -387,9 +386,6 @@ const STATUS_DAYS = 30
 
 /** The currency of an amount that is given without one, on a card whose product does not say. */
 const DEFAULT_CURRENCY = 'SGD'
-
-/** As long as the name that a parser reads from an alert may be. */
-const MAX_MERCHANT_LENGTH = 80
 
 /**
  * As long as a question for the assistant may be. A question is in every request that the model is sent over it,
@@ -426,31 +422,6 @@ const REPLY_TIME = 27_000
 const MAX_PARAGRAPHS = 500
 
 /**
- * The names of the bot's commands, each without its slash. What a message begins with is text from outside, so the
- * log has a command only as the name that it is known to be.
- */
-const COMMAND_NAMES = [
-  'start',
-  'addcard',
-  'cards',
-  'products',
-  'product',
-  'removecard',
-  'renamecard',
-  'spend',
-  'add',
-  'remove',
-  'sort',
-  'timezone',
-  'connect',
-  'code',
-  'status',
-  'disconnect',
-  'mcp',
-  'delete',
-] as const
-
-/**
  * The commands that the assistant has run at once, as if their user had sent them: the adding of a card, the
  * renaming of one, the linking of one to a product and the changing of the time zone, each of which is undone in
  * one step, and those that only show things. It is a list of what is run, and not of what is not: a command that the
@@ -470,8 +441,9 @@ const RUN_AT_ONCE = [
 ] as const
 
 /**
- * Those of them that change something. They are asked about first, as the commands below are, when the model had
- * read with a tool before it asked for them: see Asking.
+ * Those of them that change something: the user's cards, or the user. They are asked about first, as the commands
+ * below are, when the model had read with a tool before it asked for them: see Asking. And after one of them is
+ * run, the user and their cards are read again for what the model asks for next: see actInRounds.
  */
 const CHANGING = ['addcard', 'renamecard', 'product', 'timezone'] as const
 
@@ -479,20 +451,16 @@ const CHANGING = ['addcard', 'renamecard', 'product', 'timezone'] as const
  * The commands that are asked about first, whatever the model had read: those that remove or revoke. They are the
  * taking out of a purchase or of a card, the giving up of the access to a Gmail, the removing of an assistant's
  * token, the making of a new one, which ends the one that there is, and the starting of a sign-in, which cancels
- * one that is waiting for its code. The assistant runs none of them: each waits for its user to press a button.
+ * one that is waiting for its code. The assistant runs none of them: each waits for its user to press a button. So
+ * they are what a press may run, but for the commands above: see CONFIRMABLE in ../log.
  */
-const ASKED_FIRST = ['remove', 'removecard', 'disconnect', 'mcp', 'connect'] as const
-
-/**
- * The commands that a press of "Do it" may run: those that a message can have asked about, and no others. See
- * pressConfirm.
- */
-const CONFIRMABLE = [...ASKED_FIRST, ...CHANGING] as const
+const ASKED_FIRST = CONFIRMABLE.filter((name) => !CHANGING.some((changing) => changing === name))
 
 /**
  * The most queries that the things which are done for one message may run between them, each counted at the most
  * that it can run: the actions of all the answers that the model gives to the message, when it gives them one at a
- * time. An action that there is no room left for is not begun, and neither is any after it: see act.
+ * time, and what is read again between two of them: see actInRounds. An action that there is no room left for is
+ * not begun, and neither is any after it: see act.
  *
  * A request may run 50 queries, and the answering runs its own. Two of them are run for every message: one for the
  * user, and one for their cards. The calls of the tool that reads can run twelve besides, whether they give the
@@ -669,9 +637,10 @@ const REST_NOT_DONE = 'The rest of what you asked for was not done. Ask for it a
 const SEND_YOURSELF = 'The bot does this only when you send the command yourself:'
 
 // What the press of a button under a message that asks before a command is run is answered with, and what the
-// message then says under what it asked.
+// message then says under what it asked. After "Do it" that is where to look, and not what came of it: the command
+// may have replied that it could not be done.
 
-const CONFIRMED_DONE = 'Done.'
+const SEE_REPLY = 'See the reply below.'
 
 const CANCELLED = 'Cancelled. Nothing was changed.'
 
@@ -1383,20 +1352,26 @@ async function actInRounds(
 ): Promise<Sent[] | undefined> {
   const replies: Sent[] = []
   let [before, dropped] = [0, 0]
+  let { user } = how
   for (let answer = first; ; ) {
     const { actions, afterReading } = answer
     noted.actions = before + actions.length
     dropped += answer.dropped
-    const acted = await act(deps, { ...how, afterReading }, actions, before)
+    const acted = await act(deps, { ...how, user, afterReading }, actions, before)
     if (!acted) return undefined
     replies.push(...acted.replies)
     before += actions.length
     if (!acted.outcomes) break
-    if (!answer.next) {
+    // After a command that can change them, what the model asks for next goes by the user and their cards as they
+    // then are: two queries, the one for the user here and the assistant's for the cards. With no room left for
+    // them, the model is asked no more.
+    const changed = acted.outcomes.some((outcome, at) => outcome === 'done' && changes(actions[at]))
+    if (!answer.next || (changed && !take(how.room, 2))) {
       if (answer.more) replies.push([{ text: NO_MORE }])
       break
     }
-    const next = await answer.next(acted.outcomes.map(toldOf))
+    if (changed) user = await findOrCreateUser(deps.db, how.telegramId)
+    const next = await answer.next(acted.outcomes.map(toldOf), changed)
     if (how.doing.late) return undefined
     if (next.status !== 'acting') {
       if (next.status !== 'answered') replies.push([{ text: REST_NOT_DONE }])
@@ -1410,6 +1385,11 @@ async function actInRounds(
   const said = Array.isArray(last) ? last.at(-1)?.text : undefined
   if (dropped > 0 && said !== NOT_DONE) replies.push([{ text: NOT_DONE }])
   return replies
+}
+
+/** Whether an action is the running of a command that can change the user's cards, or the user: see CHANGING. */
+function changes(action: Action): boolean {
+  return action.kind === 'command' && CHANGING.some((each) => each === commandIn(action.line).name)
 }
 
 /**
@@ -1540,7 +1520,7 @@ function wentWrong(answered: number, asked: number): string {
  * order that /cards lists them in, when their user has no more of them than SHOWN_IN_FULL. A user with more is
  * shown what /spend with no card named shows: a row for each card, in the one table of one message.
  *
- * The assistant gives the nickname of a card that the model was told of, and of no other. When that card is there no
+ * The assistant gives the nickname of a card that its user had when it checked the call. When that card is there no
  * longer, the reply is that something could not be done. It does not say the nickname back, which is a model's text.
  *
  * Nothing here waits for a button, whatever the model had read: it only shows.
@@ -2265,8 +2245,8 @@ async function pressConfirm(
   // The reply first: it can be all that there is of what the command did. Then the press is answered and the
   // message edited, each whatever came of the other. A request that Telegram refuses has its line in the log.
   await sendReply(messenger, chatId, said)
-  await answer(CONFIRMED_DONE).catch(() => {})
-  await edited(CONFIRMED_DONE).catch(() => {})
+  await answer(SEE_REPLY).catch(() => {})
+  await edited(SEE_REPLY).catch(() => {})
 }
 
 async function confirmReply(deps: Deps, userId: number, code: string): Promise<string> {
@@ -2372,15 +2352,12 @@ function parseEntry(args: string[], card: Card, homeCurrency: string, now: Date,
  */
 function timeNamed(text: string, card: Card, now: Date, timeZone: string): number | string | null {
   const at = Math.floor(now.getTime() / 1000)
-  // No time comes with a date, so noon stands in for it: or the time that it is now, on a day that has not got to
-  // its noon yet.
-  const noonOf = (start: number) => Math.min(start + 12 * 3600, at)
 
   const iso = ISO_DATE.exec(text)
   if (iso) {
     const start = dayStart(Number(iso[1]), Number(iso[2]), Number(iso[3]), timeZone)
     if (start === null) return 'There is no such date.'
-    return start > at ? 'That date is still to come.' : noonOf(start)
+    return start > at ? 'That date is still to come.' : noonOf(start, at)
   }
 
   const [, day, month, year] = SHORT_DATE.exec(text) ?? []
@@ -2391,7 +2368,7 @@ function timeNamed(text: string, card: Card, now: Date, timeZone: string): numbe
   // is still to come.
   const fullYear = year === undefined ? today.year - (toCome ? 1 : 0) : Number(year) + (year.length === 2 ? 2000 : 0)
   const start = dayStart(fullYear, Number(month), Number(day), timeZone)
-  return start !== null && start >= firstWritten(card, now, timeZone) && start <= at ? noonOf(start) : null
+  return start !== null && start >= firstWritten(card, now, timeZone) && start <= at ? noonOf(start, at) : null
 }
 
 /**
@@ -2406,14 +2383,6 @@ function firstWritten(card: Card, now: Date, timeZone: string): number {
   if (now.getTime() >= window.start.getTime()) return counted
   // The window that is closing is the one that counts what was bought just before this one counts anything.
   return currentWindow(card, new Date(counted * 1000 - 1), timeZone).start.getTime() / 1000
-}
-
-/** Unix seconds of the instant at which a day begins in the time zone. Null for a day that no calendar has. */
-function dayStart(year: number, month: number, day: number, timeZone: string): number | null {
-  // A date that no calendar has rolls over into one that a calendar has, and then does not read back as it was given.
-  const given = new Date(Date.UTC(year, month - 1, day))
-  const exists = given.getUTCFullYear() === year && given.getUTCMonth() === month - 1 && given.getUTCDate() === day
-  return exists ? startOfDay(year, month, day, timeZone).getTime() / 1000 : null
 }
 
 /**
@@ -2519,7 +2488,9 @@ export async function addRead(
   })
   adding.kept = kept.added.length > 0
   if (unclear.length > 0) {
-    const batch = { messageId, cardLast4: card?.last4 ?? null, category: named, purchases: unclear }
+    // With the card not known, the key is held as the reading has it, for the card that a button names: see pressHeld.
+    const category = card ? named : reading.category
+    const batch = { messageId, cardLast4: card?.last4 ?? null, category, purchases: unclear }
     await heldStoreFor(db, user.id).hold(batch, Math.floor(now().getTime() / 1000))
     adding.held = unclear.length
   }

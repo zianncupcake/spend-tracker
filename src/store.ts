@@ -126,16 +126,12 @@ export function storeFor(db: D1Database, ownerId: number) {
       return results.map(toCard)
     },
 
-    /**
-     * Links the card to a product of the catalogue, by the product's key, or to none. False when the user has no
-     * card with that nickname.
-     */
-    async setProduct(nickname: string, product: string | null): Promise<boolean> {
-      const result = await db
+    /** Links the card to a product of the catalogue, by the product's key, or to none. */
+    async setProduct(nickname: string, product: string | null): Promise<void> {
+      await db
         .prepare('UPDATE cards SET product = ? WHERE owner_id = ? AND nickname = ?')
         .bind(product, ownerId, nickname)
         .run()
-      return result.meta.changes > 0
     },
 
     /**
@@ -318,19 +314,12 @@ export function storeFor(db: D1Database, ownerId: number) {
       return results
     },
 
-    /**
-     * Stores a category for a purchase. False, with nothing changed, when that category is stored for it already,
-     * and when the user has no such purchase. So of two requests that move it the same way, one finds it done.
-     */
-    async setCategory(id: number, category: string): Promise<boolean> {
-      const result = await db
-        .prepare(
-          `UPDATE transactions SET category = ?1
-           WHERE owner_id = ?2 AND id = ?3 AND removed_at IS NULL AND category IS NOT ?1`,
-        )
+    /** Stores a category for a purchase that the user has, and has not taken out. */
+    async setCategory(id: number, category: string): Promise<void> {
+      await db
+        .prepare('UPDATE transactions SET category = ? WHERE owner_id = ? AND id = ? AND removed_at IS NULL')
         .bind(category, ownerId, id)
         .run()
-      return result.meta.changes > 0
     },
 
     /** Stores a category for those of the purchases with the ids that none is stored for yet. */

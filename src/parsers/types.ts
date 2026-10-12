@@ -3,7 +3,6 @@ export interface AlertEmail {
   sourceId: string
   /** The sender's bare address, such as alerts@examplebank.test. */
   from: string
-  subject: string
   /** Unix seconds. */
   receivedAt: number
   text: string
@@ -23,7 +22,8 @@ export interface ParsedTransaction {
 export interface Parser {
   /**
    * What a purchase that the parser read is stored under, and what the log knows the bank by. The name of a new
-   * parser is added here, and to the `alert` event in src/log.ts.
+   * parser is added here, and to the `alert` event in src/log.ts. `example-bank` is the tests' stand-in for a bank,
+   * which the service has no parser of.
    */
   name: 'example-bank' | 'ocbc' | 'uob' | 'hsbc'
   /** The bare addresses that the bank sends its alerts from, in lower case. */

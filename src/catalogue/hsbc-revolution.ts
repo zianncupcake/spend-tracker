@@ -60,8 +60,8 @@ export const hsbcRevolution: Product = {
   key: 'hsbc-revolution',
   name: 'HSBC Revolution Credit Card',
   homeCurrency: 'SGD',
-  termsUrl:
-    'https://www.hsbc.com.sg/content/dam/hsbc/sg/documents/credit-cards/revolution/offers/revolution-credit-card-reward-points-terms-and-conditions.pdf',
+  // Where the bank publishes the terms that the limits are from:
+  // https://www.hsbc.com.sg/content/dam/hsbc/sg/documents/credit-cards/revolution/offers/revolution-credit-card-reward-points-terms-and-conditions.pdf
   termsAsOf: '1 April 2026',
   // Clause 7.2 of the terms counts "the total amount of Eligible Transactions posted into HSBC's credit card system
   // within each qualifying calendar month", and a purchase is usually posted a day or two after it is made. So a

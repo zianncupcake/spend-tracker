@@ -19,7 +19,7 @@
 // endpoint has, from which it was seen to write the spending out in words of its own.
 
 import type { Deps } from '../deps'
-import { Failure, log, logFailure, type Events } from '../log'
+import { Failure, log, logFailure, TOOL_NAMES, type Events } from '../log'
 import { LIST_SCHEMA, TRANSACTIONS } from '../mcp/server'
 import { DEFAULT_LIMIT, listTransactions, ToolError, type ListArguments } from '../mcp/tools'
 import { storeFor, type Store, type User } from '../store'
@@ -219,20 +219,17 @@ const TOOLS: Tool[] = [
   },
 ]
 
-/** The tools that act. A call of one is run by nobody here: it is an `Action`, for whoever asked to carry out. */
-const ACTING = ['show_spending', 'add_purchases', 'set_category', 'run_command'] as const
-
 /**
- * The names of the tools. What a model calls a tool is text from outside, so the log has it only as the name that it
- * is known to be.
+ * The tools that act: all but the one that reads. A call of one is run by nobody here: it is an `Action`, for
+ * whoever asked to carry out.
  */
-const TOOL_NAMES = ['find_purchases', ...ACTING] as const
+const ACTING = TOOL_NAMES.filter((name) => name !== 'find_purchases')
 
 /** Something that the user asked the bot to do, as the model made it out. The handler carries it out. */
 export type Action =
   /**
    * Show what the user has spent: on their card with that nickname, or on every card when there is none. The
-   * nickname is that of one of the cards that the model was told of.
+   * nickname is that of one of the user's cards, as they were when the call was checked.
    */
   | { kind: 'show'; card?: string }
   /** Add purchases. `reading` has been through `checkPurchases` in ./photo. */
@@ -268,6 +265,10 @@ export type Answer =
    * and in the order of the actions, which the model is told as the answers of its calls: so whoever carries the
    * actions out says how much the model learns of what came of them. It returns what the model then asks for, or
    * answers, as `answerQuestion` does, and counts what that takes with the rest of the question.
+   *
+   * `changed` is whether the carrying out may have changed the user's cards. They are then read again, so that
+   * what the model asks for next is checked against the cards as they are: one query, which is its caller's to
+   * count.
    */
   | {
       status: 'acting'
@@ -275,7 +276,7 @@ export type Answer =
       afterReading: boolean
       dropped: number
       more: boolean
-      next?: (came: string[]) => Promise<Answer>
+      next?: (came: string[], changed: boolean) => Promise<Answer>
     }
   /**
    * The provider has had as many requests as it takes for now. `retryAfter` is how long it said to wait before it
@@ -303,7 +304,7 @@ type Called = Events['assistant_tool']
 interface Asked {
   /** What the user wrote. A card is the user's to name, and this is where they name it. */
   question: string
-  /** The user's cards, as the model was told of them. */
+  /** The user's cards: as the model was told of them, or as they were read again since. See `next` of Answer. */
   cards: PhotoCard[]
   timeZone: string
   /** The instant that the model was told it is, which no purchase is to be after. */
@@ -386,7 +387,8 @@ async function converse(
     { role: 'system', content: systemMessage(began, user.timezone, cards) },
     { role: 'user', content: question },
   ]
-  const tools = toolsFor(deps, user, store, { question, cards, timeZone: user.timezone, now: began }, taken)
+  const asked: Asked = { question, cards, timeZone: user.timezone, now: began }
+  const tools = toolsFor(deps, user, store, asked, taken)
   // How many times the model has been asked over the question.
   let calls = 0
   const timeLeft = () => began.getTime() + ANSWER_TIME - deps.now().getTime()
@@ -441,8 +443,9 @@ async function converse(
         if (!more || calls === MAX_MODEL_CALLS || timeLeft() <= 0) return answer
         // The model is told what came of each action by whoever carried it out, what was wrong with a call that
         // did not fit, and of any other call that it was passed over. Then it is asked again.
-        const next = (came: string[]) =>
+        const next = (came: string[], changed: boolean) =>
           settled(async () => {
+            if (changed) asked.cards = (await store.listCards()).map(asPhotoCard)
             await told((call) => {
               const at = taking.indexOf(call)
               return (at < 0 ? wrong.get(call) : came[at]) ?? PASSED_OVER
@@ -601,7 +604,7 @@ function wantedBy({ name, arguments: written }: ToolCall['function'], asked: Ask
  * add_purchases, so that what is handed on is always a key: see `categoryKey` in ./photo. A line is taken with no
  * blanks around it.
  *
- * The card of show_spending is the nickname of one of the cards that the model was told of, written as it is there.
+ * The card of show_spending is the nickname of one of the user's cards, written as it is there.
  * Null stands for every card, and so does a card that is left out. The user need not have named the card, as they
  * must for add_purchases: to show what was spent on a card changes nothing. An argument that the tool has not got is
  * not passed over, as one of find_purchases is not: a model that gave a month with its call would be shown the

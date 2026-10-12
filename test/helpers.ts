@@ -84,7 +84,6 @@ export function alertEmail(overrides: Partial<AlertEmail> = {}): AlertEmail {
   return {
     sourceId: 'msg-1',
     from: 'alerts@examplebank.test',
-    subject: 'Transaction alert',
     receivedAt: seconds('2026-10-05T09:30:00+08:00'),
     text: alertText('SGD 12.40', '1234'),
     ...overrides,

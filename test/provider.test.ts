@@ -264,7 +264,7 @@ describe('a request for JSON, which can hold an image', () => {
 
   /** Asks the model that reads photos, and returns what came of it: its message, or what was thrown. */
   function askForJson(timeout = 20_000) {
-    return completeJson(provider, 'made-up-vision-model', reading, 300, timeout).catch((error: unknown) => error)
+    return completeJson(provider, 'made-up-vision-model', reading, 300, timeout, 0.5).catch((error: unknown) => error)
   }
 
   it('is posted with the model that is named, the image beside its text, and the most that may be written', async () => {
@@ -284,7 +284,7 @@ describe('a request for JSON, which can hold an image', () => {
       '{"model":"made-up-vision-model","messages":[{"role":"system","content":"Made-up instructions for the model."},' +
         '{"role":"user","content":[{"type":"text","text":"add these to evol as bus/mrt"},' +
         '{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,/9j/4AAQSkZJRg=="}}]}],' +
-        '"response_format":{"type":"json_object"},"max_completion_tokens":300}',
+        '"response_format":{"type":"json_object"},"max_completion_tokens":300,"temperature":0.5}',
     )
     expect(timeouts.mock.calls).toEqual([[1234]])
     expect(init?.signal).toBe(timeouts.mock.results[0].value)

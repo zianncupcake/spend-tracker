@@ -52,7 +52,7 @@ describe('the privacy policy', () => {
   ]
 
   it('names the operator and how to reach them, and when it was last updated', async () => {
-    const response = privacyPage(operator, true)
+    const response = privacyPage(operator, true, false)
     const html = await response.text()
 
     expect(response.status).toBe(200)
@@ -286,7 +286,7 @@ describe('the privacy policy', () => {
   })
 
   it("escapes the operator's details", async () => {
-    const html = (await privacyPage(hostile, true).text()).replace(/\s+/g, ' ')
+    const html = (await privacyPage(hostile, true, false).text()).replace(/\s+/g, ' ')
 
     expect(html).toContain(hostileNameEscaped)
     expect(html).toContain(hostileContactEscaped)

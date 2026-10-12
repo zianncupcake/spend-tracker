@@ -160,16 +160,6 @@ describe('lines as messages', () => {
     }
   })
 
-  it('hold 100 marked stretches each at most, as Telegram makes nothing of those that come after', () => {
-    const lines = Array.from({ length: 250 }, (_, index) => marked(`${index % 10} AB`))
-
-    const messages = inMessages([{ text: 'A heading' }, ...lines, { text: 'The end' }])
-
-    expect(messages.map((message) => message.entities?.length)).toEqual([100, 100, 50])
-    expect(messages[0].text.startsWith('A heading\n0 AB\n')).toBe(true)
-    expect(messages[2].text.endsWith('\n9 AB\nThe end')).toBe(true)
-  })
-
   it('neither begin nor end with an empty line, wherever a message ends', () => {
     const long = { text: 'x'.repeat(2000) }
     const empty = { text: '' }

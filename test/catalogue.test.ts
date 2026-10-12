@@ -14,10 +14,6 @@ import type { Product } from '../src/catalogue/types'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { sortEnd } from '../src/telegram/purchases'
 
-/** Where the bank publishes the terms of the UOB EVOL Card. */
-const FAQ =
-  'https://www.uob.com.sg/web-resources/personal/pdf/personal/cards/credit-cards/rebates-cards/evol/uob-evol-faq.pdf'
-
 /** The category that the product's rules give a purchase in the product's own currency. */
 function at(merchant: string | null, product: Product = uobEvol): string | null {
   return startingCategory(product, { currency: product.homeCurrency, merchant })
@@ -62,7 +58,6 @@ describe('the UOB EVOL Card', () => {
       termsAsOf: '10 June 2026',
       minimumSpendMinor: 80000,
     })
-    expect(uobEvol.termsUrl).toBe(FAQ)
     // 10% on each of the two groups with a limit: on S$300 and on S$200 of spend, which earn the S$30 and the S$20
     // of cashback that the bank caps them at.
     const groups = uobEvol.groups.map(({ name, limitMinor, categories }) => ({
@@ -226,7 +221,6 @@ describe('a product with other rules', () => {
     key: 'made-up-card',
     name: 'Made-up Card',
     homeCurrency: 'USD',
-    termsUrl: 'https://bank.example.test/terms',
     termsAsOf: '1 January 2026',
     minimumSpendMinor: 50000,
     groups: [

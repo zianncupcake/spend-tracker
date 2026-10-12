@@ -8,7 +8,7 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const MESSAGES_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages'
 
 // The headers that tell an alert from other mail. They can be asked for by themselves.
-const CHECKED_HEADERS = ['From', 'Subject', 'Authentication-Results']
+const CHECKED_HEADERS = ['From', 'Authentication-Results']
 
 // A huge email must not use up the CPU time of a run, so no more of a body
 // than this is decoded: 150,000 bytes. The count is a multiple of four, which
@@ -48,7 +48,6 @@ export interface MessagePage {
 export interface MessageHeaders {
   /** The sender's bare address, in lower case. */
   from: string
-  subject: string
   /** The domain that Gmail found the sender's address to be authentic for, or null when it found none. */
   authenticatedDomain: string | null
 }
@@ -159,7 +158,6 @@ function readHeaders(payload: MessagePart | undefined): MessageHeaders {
   const headers = payload?.headers ?? []
   return {
     from: bareAddress(headerValue(headers, 'from')),
-    subject: headerValue(headers, 'subject'),
     authenticatedDomain: authenticatedDomain(headers),
   }
 }
