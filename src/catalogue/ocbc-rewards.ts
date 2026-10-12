@@ -20,10 +20,11 @@ import type { Product } from './types'
 //
 // Four things are assumed:
 //
-// 1. A purchase is taken for Shopping Spend until its user marks it otherwise, as on the other two products. Whether
+// 1. A purchase is taken for Shopping Spend until its user marks it otherwise, as on the other products. Whether
 //    one earns the bonus goes by a category code of its merchant, which an alert does not say, and it is the limit
-//    that a user watches. Nothing puts a purchase in Shopping Spend by a merchant's name, as every purchase starts
-//    there anyway.
+//    that a user watches. Where ./merchants knows the code, the purchase goes by it: but one at a merchant that
+//    clause 2(c) names is put in Shopping Spend by that name first. So is one there under the code 5411, which the
+//    terms deny the bonus.
 // 2. The terms count by the calendar month, so a card of this product is to be added with `calendar`. Nothing
 //    checks that it was.
 // 3. The bank counts each purchase in blocks of S$5 and drops the rest, and counts nothing of one under S$5: by
@@ -42,6 +43,29 @@ import type { Product } from './types'
 // products are.
 const NOT_ELIGIBLE = ['Shopee ?Pay']
 
+// The codes of clause 2(b).
+const SHOPPING_MCCS = [5309, 5311, 5611, 5621, 5631, 5641, 5651, 5655, 5661, 5691, 5699, 5941, 5948]
+
+// The merchants of clause 2(c), as the terms name them. A purchase is taken to be at one when the text of its
+// merchant holds the name, in any case.
+const SHOPPING_MERCHANTS = [
+  'Alibaba',
+  'AliExpress',
+  'Amazon',
+  'Ezbuy',
+  'Guardian',
+  'Lazada',
+  'Mustafa Centre',
+  // NTUC Unity, which the bank's FAQ calls Unity by FairPrice. Other words hold it, so it only counts as a word of
+  // its own.
+  '\\bUnity\\b',
+  'Shopee',
+  'Taobao',
+  // TikTok Shop, which an alert can write with a mark between its two words.
+  'TikTok',
+  'Watsons',
+]
+
 export const ocbcRewards: Product = {
   key: 'ocbc-rewards',
   name: 'OCBC Rewards Card',
@@ -58,19 +82,30 @@ export const ocbcRewards: Product = {
       name: 'Shopping Spend',
       // 10,000 Bonus OCBC$, at 45 for every S$5: 222 blocks of S$5, and a part of one more.
       limitMinor: 111000,
-      categories: [{ key: 'shopping', label: 'Shopping Spend' }],
+      categories: [
+        {
+          key: 'shopping',
+          label: 'Shopping Spend',
+          // No text that names Shopee Pay, whatever else it names: this pattern is tried before that of `other`.
+          automatic: new RegExp(`^(?!.*(?:${NOT_ELIGIBLE.join('|')})).*(?:${SHOPPING_MERCHANTS.join('|')})`, 'i'),
+          mccs: SHOPPING_MCCS,
+        },
+      ],
     },
     // All other spend, as the bank has it. A purchase is put here when its user marks it, and when it has the
     // description that the terms name as earning nothing. The category has its button as well as its rule, so a
     // purchase that the rule placed has the one button, which marks it as Shopping Spend.
     {
       name: 'Other Spend',
-      categories: [{ key: 'other', label: 'Other Spend', automatic: new RegExp(NOT_ELIGIBLE.join('|'), 'i') }],
+      categories: [
+        { key: 'other', label: 'Other Spend', automatic: new RegExp(NOT_ELIGIBLE.join('|'), 'i'), mccs: 'unlisted' },
+      ],
     },
   ],
   defaultCategory: 'shopping',
   sortingNote:
     'Shopping Spend is spend at department, clothing, shoe, bag, sports and duty-free shops, and at Shopee, ' +
     'Lazada, Taobao, TikTok Shop, Amazon, AliExpress, Alibaba, Ezbuy, Watsons, Guardian, Mustafa Centre and NTUC ' +
-    'Unity. Anything else is Other Spend, and so are groceries and Shopee Pay.',
+    'Unity. Anything else is Other Spend, and so are groceries and Shopee Pay. A purchase at a merchant whose ' +
+    'category code the bot knows starts where that code puts it.',
 }

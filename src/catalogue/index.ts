@@ -1,10 +1,12 @@
+import { dbsWomansWorld } from './dbs-womans-world'
 import { hsbcRevolution } from './hsbc-revolution'
+import { codeOf } from './merchants'
 import { ocbcRewards } from './ocbc-rewards'
-import type { Category, Choice, Product } from './types'
+import type { Category, Choice, Mcc, Product } from './types'
 import { uobEvol } from './uob-evol'
 
 /** The card products whose reward rules are known. A user links a card to one by its key. */
-export const products: Product[] = [uobEvol, hsbcRevolution, ocbcRewards]
+export const products: Product[] = [uobEvol, hsbcRevolution, ocbcRewards, dbsWomansWorld]
 
 /** The product with the key. Undefined when there is none, and for the key of a card that is linked to no product. */
 export function productOf(key: string | undefined): Product | undefined {
@@ -53,12 +55,23 @@ export function ruledByName(product: Product, merchant: string): string | undefi
 }
 
 /**
+ * The category that the product puts a merchant of the code in: the one whose codes hold it or, when none does, the
+ * one that takes the unlisted. Undefined when the product has neither, as one that lists no codes at all.
+ */
+export function ruledByCode(product: Product, mcc: number): string | undefined {
+  const categories = categoriesOf(product)
+  const holds = (listed: Mcc) => (typeof listed === 'number' ? listed === mcc : listed[0] <= mcc && mcc <= listed[1])
+  const listing = categories.find(({ mccs }) => Array.isArray(mccs) && mccs.some(holds))
+  return (listing ?? categories.find(({ mccs }) => mccs === 'unlisted'))?.key
+}
+
+/**
  * The category that is stored for a new purchase, or null when none is: the purchase is then in the product's
  * default category or, on a product that has none, is left for its user to sort.
  *
- * Only a rule of the product gives one. A purchase in another currency is known by that alone, and after that come
- * the names that the product lists. Nothing that the user chose for another purchase counts, not even for one at
- * the same merchant: a purchase is where its user put it only when it was that purchase's own button they pressed.
+ * Only a rule of the product gives one. A purchase in another currency is known by that alone. After that come the
+ * names that the product lists, and then the code of the merchant, when ./merchants knows it. Nothing that the user
+ * chose for another purchase counts: a purchase is where its user put it only when its own button was pressed.
  */
 export function startingCategory(
   product: Product,
@@ -69,5 +82,7 @@ export function startingCategory(
 
   const byCurrency = currency === product.homeCurrency ? undefined : foreign
   const byName = merchant === null ? undefined : ruledByName(product, merchant)
-  return byCurrency ?? byName ?? null
+  const code = merchant === null ? undefined : codeOf(merchant)
+  const byCode = code === undefined ? undefined : ruledByCode(product, code)
+  return byCurrency ?? byName ?? byCode ?? null
 }

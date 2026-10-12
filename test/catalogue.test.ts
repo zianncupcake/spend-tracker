@@ -6,10 +6,14 @@ import {
   choicesOf,
   productOf,
   products,
+  ruledByCode,
   ruledByName,
   startingCategory,
 } from '../src/catalogue'
+import { dbsWomansWorld } from '../src/catalogue/dbs-womans-world'
 import { hsbcRevolution } from '../src/catalogue/hsbc-revolution'
+import { codeOf } from '../src/catalogue/merchants'
+import { ocbcRewards } from '../src/catalogue/ocbc-rewards'
 import type { Product } from '../src/catalogue/types'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { sortEnd } from '../src/telegram/purchases'
@@ -21,7 +25,8 @@ function at(merchant: string | null, product: Product = uobEvol): string | null 
 
 describe('the catalogue', () => {
   it('holds the products that a card can be linked to, each found by its key', () => {
-    expect(products.map((product) => product.key)).toEqual(['uob-evol', 'hsbc-revolution', 'ocbc-rewards'])
+    const keys = ['uob-evol', 'hsbc-revolution', 'ocbc-rewards', 'dbs-womans-world']
+    expect(products.map((product) => product.key)).toEqual(keys)
     expect(productOf('uob-evol')).toBe(uobEvol)
     expect(productOf('UOB-EVOL')).toBeUndefined()
     expect(productOf('none')).toBeUndefined()
@@ -211,6 +216,57 @@ describe('the HSBC Revolution Credit Card', () => {
       expect(at(merchant, hsbcRevolution)).toBeNull()
       expect(categoryOf(hsbcRevolution, at(merchant, hsbcRevolution))).toBe('eligible')
     }
+  })
+})
+
+describe("the DBS Woman's World Card", () => {
+  it('takes a purchase to be online when nothing places it, against S$1,000 of the month that it was made in', () => {
+    expect(at('COFFEE PLACE', dbsWomansWorld)).toBeNull()
+    expect(categoryOf(dbsWomansWorld, null)).toBe('online')
+    expect(dbsWomansWorld.groups[0]).toMatchObject({ limitMinor: 100000, categories: [{ key: 'online' }] })
+    expect(dbsWomansWorld.daysCountedInNext).toBe(0)
+  })
+})
+
+describe('the category code of a merchant', () => {
+  it('is that of a name that the text of the merchant holds as whole words', () => {
+    expect(codeOf('KOI THE SG')).toBe(5814)
+    expect(codeOf('KOIKE')).toBeUndefined()
+    expect(codeOf('GRAB*A-123')).toBe(4121)
+  })
+
+  it.each([
+    { product: hsbcRevolution, mcc: 2999, category: 'other' },
+    { product: hsbcRevolution, mcc: 3000, category: 'eligible' },
+    { product: hsbcRevolution, mcc: 3999, category: 'eligible' },
+    { product: hsbcRevolution, mcc: 4000, category: 'other' },
+    { product: hsbcRevolution, mcc: 4121, category: 'eligible' },
+    { product: hsbcRevolution, mcc: 5814, category: 'other' },
+    { product: ocbcRewards, mcc: 5651, category: 'shopping' },
+    { product: ocbcRewards, mcc: 5814, category: 'other' },
+    { product: dbsWomansWorld, mcc: 6300, category: 'other' },
+    // No category of the product takes a code that it does not list.
+    { product: dbsWomansWorld, mcc: 7922, category: undefined },
+    // The product lists no codes at all.
+    { product: uobEvol, mcc: 5814, category: undefined },
+  ])('puts $mcc in $category on $product.key', ({ product, mcc, category }) => {
+    expect(ruledByCode(product, mcc)).toBe(category)
+  })
+
+  it.each([
+    // A merchant that the terms name is placed by its name, whatever its code.
+    { product: ocbcRewards, merchant: 'SHOPEE SINGAPORE', category: 'shopping' },
+    { product: ocbcRewards, merchant: 'SHOPEEPAY*WATSONS', category: 'other' },
+    { product: ocbcRewards, merchant: 'NTUC FAIRPRICE', category: 'other' },
+    { product: ocbcRewards, merchant: 'UNITY BY FAIRPRICE', category: 'shopping' },
+    { product: ocbcRewards, merchant: 'TIKTOK*SHOP', category: 'shopping' },
+    { product: hsbcRevolution, merchant: 'KOI THE SG', category: 'other' },
+    { product: hsbcRevolution, merchant: 'GRAB RIDE', category: 'eligible' },
+    { product: dbsWomansWorld, merchant: 'YOUTRIP', category: 'other' },
+    { product: dbsWomansWorld, merchant: 'SHOPEE PAY', category: 'other' },
+    { product: dbsWomansWorld, merchant: 'EZ LINK', category: 'other' },
+  ])('starts a purchase at $merchant in $category on $product.key', ({ product, merchant, category }) => {
+    expect(at(merchant, product)).toBe(category)
   })
 })
 
