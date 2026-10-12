@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
 import { TelegramError } from '../src/telegram/api'
-import type { Reading } from '../src/telegram/handler'
+import type { Reading } from '../src/telegram/adding'
 import { answered, clock, deps, NOW, openChat } from './connect-helpers'
 import { bold, buy, headerRow, plain, purchaseRow, seconds, sumRow, tableOf, userCount } from './helpers'
 import { catchConsole } from './log-helpers'
