@@ -40,6 +40,8 @@ export const COMMAND_NAMES = [
   'add',
   'remove',
   'sort',
+  'patterns',
+  'pattern',
   'timezone',
   'connect',
   'code',
@@ -63,6 +65,7 @@ export const CONFIRMABLE = [
   'renamecard',
   'product',
   'timezone',
+  'pattern',
 ] as const
 
 /**

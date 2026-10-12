@@ -1,5 +1,6 @@
 // SQL is run only here and in store-connect.ts, store-held.ts, store-mail.ts and store-mcp.ts.
 
+import { lettersOf } from './catalogue/merchants'
 import type { WindowRule } from './domain/window'
 import { Failure } from './log'
 import type { ParsedTransaction } from './parsers/types'
@@ -37,6 +38,14 @@ export interface CurrencyTotal {
 
 export type CategoryTotal = CurrencyTotal & { category: string | null }
 
+/** A monthly pattern of a user's, as it is stored: see the migration that added the table for what each field is. */
+export interface Pattern {
+  cardLast4: string
+  merchant: string
+  amountMinor: number
+  skips: string[]
+}
+
 export type Store = ReturnType<typeof storeFor>
 
 /**
@@ -44,6 +53,21 @@ export type Store = ReturnType<typeof storeFor>
  * for every card.
  */
 export const MAX_CARDS = 20
+
+/** How many patterns a user may have. /spend with a card reads all of them, and has little CPU time. */
+export const MAX_PATTERNS = 50
+
+/** How many characters the merchant of a pattern may have. */
+export const MAX_PATTERN_MERCHANT = 40
+
+/**
+ * How many letters and digits the merchant of a pattern has at the least. A shorter name is held by merchants that
+ * it does not mean, as "sp" is by a streaming service and by a sports hall alike.
+ */
+export const MIN_PATTERN_LETTERS = 3
+
+/** How many skipped days a pattern may have: a year of months. All of them are in one message when it is shown. */
+export const MAX_PATTERN_SKIPS = 12
 
 /** What a transaction has for its parser when no alert was parsed for it: its user added the purchase by hand. */
 export const MANUAL = 'manual'
@@ -149,13 +173,68 @@ export function storeFor(db: D1Database, ownerId: number) {
       return result.meta.changes > 0
     },
 
-    /** False when the user has no card with that nickname. */
-    async removeCard(nickname: string): Promise<boolean> {
+    /**
+     * Removes the card, and its patterns with it. Returns how many patterns those were, or null when the user has
+     * no card with that nickname.
+     */
+    async removeCard(nickname: string): Promise<number | null> {
+      // The patterns go first, while the card is there to tell which they are.
+      const [patterns, card] = await db.batch([
+        db
+          .prepare(
+            `DELETE FROM patterns
+             WHERE owner_id = ?1 AND card_last4 = (SELECT last4 FROM cards WHERE owner_id = ?1 AND nickname = ?2)`,
+          )
+          .bind(ownerId, nickname),
+        db.prepare('DELETE FROM cards WHERE owner_id = ? AND nickname = ?').bind(ownerId, nickname),
+      ])
+      return card.meta.changes > 0 ? patterns.meta.changes : null
+    },
+
+    /**
+     * Saves the pattern, in the place of the one that the card has for that merchant, however its name was spelt
+     * there: a pattern goes by the letters and digits of its merchant's name. False, with nothing saved, when the
+     * user has no card with those digits, and when it would be one more pattern than a user may have.
+     */
+    async setPattern({ cardLast4, merchant, amountMinor, skips }: Pattern): Promise<boolean> {
+      // The card and the count are part of the statement. So a pattern that is saved as its card is removed is
+      // not left for no card, and patterns saved at the same moment cannot go past the limit together. One that
+      // takes the place of another adds none.
       const result = await db
-        .prepare('DELETE FROM cards WHERE owner_id = ? AND nickname = ?')
-        .bind(ownerId, nickname)
+        .prepare(
+          `INSERT INTO patterns (owner_id, card_last4, letters, merchant, amount_minor, skips)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6
+           WHERE EXISTS (SELECT 1 FROM cards WHERE owner_id = ?1 AND last4 = ?2)
+             AND ((SELECT COUNT(*) FROM patterns WHERE owner_id = ?1) < ?7
+               OR EXISTS (SELECT 1 FROM patterns WHERE owner_id = ?1 AND card_last4 = ?2 AND letters = ?3))
+           ON CONFLICT (owner_id, card_last4, letters) DO UPDATE SET
+             merchant = excluded.merchant, amount_minor = excluded.amount_minor, skips = excluded.skips`,
+        )
+        .bind(ownerId, cardLast4, lettersOf(merchant), merchant, amountMinor, JSON.stringify(skips), MAX_PATTERNS)
         .run()
       return result.meta.changes > 0
+    },
+
+    /** False when the card has no pattern for that merchant, however its name is spelt. */
+    async removePattern(cardLast4: string, merchant: string): Promise<boolean> {
+      const result = await db
+        .prepare('DELETE FROM patterns WHERE owner_id = ? AND card_last4 = ? AND letters = ?')
+        .bind(ownerId, cardLast4, lettersOf(merchant))
+        .run()
+      return result.meta.changes > 0
+    },
+
+    /** The user's patterns, on all their cards: those of a card by the letters of their merchants' names. */
+    async listPatterns(): Promise<Pattern[]> {
+      const { results } = await db
+        .prepare(
+          `SELECT card_last4 AS cardLast4, merchant, amount_minor AS amountMinor, skips FROM patterns
+           WHERE owner_id = ? ORDER BY card_last4, letters`,
+        )
+        .bind(ownerId)
+        .all<Omit<Pattern, 'skips'> & { skips: string }>()
+      // The days are read back as `setPattern` wrote them, which is the only thing that writes them.
+      return results.map((row) => ({ ...row, skips: JSON.parse(row.skips) }))
     },
 
     /**

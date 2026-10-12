@@ -5,14 +5,14 @@ import type { Deps } from '../deps'
 import { CONFIRMABLE, log } from '../log'
 import { findUser, storeFor, type User } from '../store'
 import { connectStoreFor } from '../store-connect'
-import { NICKNAME, parseCard, PURCHASE_ID, timeZoneNamed } from './arguments'
+import { NICKNAME, parseCard, parsePattern, PURCHASE_ID, timeZoneNamed } from './arguments'
 import { commandIn, ran } from './commands'
-import { formatShortDate, maskLast4 } from './format'
+import { formatAmount, formatShortDate, maskLast4 } from './format'
 import { confirmButtons, inMessages, purchaseLine, type Line } from './purchases'
-import { describeCard, label } from './replies'
+import { describeCard, label, patternLine } from './replies'
 import { sendReply } from './sending'
 import { codeWithin, declined, type Carried, type Handling, type Press } from './shared'
-import { CANCELLED, NOT_DONE, SEE_REPLY, SEND_YOURSELF } from './texts'
+import { CANCELLED, NOT_DONE, REMOVE_PATTERN, SAVE_PATTERN, SEE_REPLY, SEND_YOURSELF } from './texts'
 
 /**
  * Asks before a command is run: with a message that says what would be done and to what, and with a button that
@@ -121,6 +121,20 @@ export async function confirmFor(
       return confirmation(`/timezone ${zone}`, [
         { text: `Change your time zone to ${zone}? Your cards' cycles and months will begin and end by it.` },
       ])
+    }
+    case 'pattern': {
+      const asked = parsePattern(args)
+      if (!asked) return declined(NOT_DONE)
+      const { nickname, merchant, save } = asked
+      const card = (await storeFor(db, user.id).listCards()).find((each) => each.nickname === nickname)
+      if (!card) return declined(`You have no card called ${nickname}.`)
+      if (!save) {
+        const line = `/pattern ${nickname} ${merchant} none`
+        return confirmation(line, [{ text: REMOVE_PATTERN }, patternLine(card, merchant)])
+      }
+      const except = save.skips.length > 0 ? ['except', ...save.skips] : []
+      const line = ['/pattern', nickname, formatAmount(save.amountMinor), merchant, ...except].join(' ')
+      return confirmation(line, [{ text: SAVE_PATTERN }, patternLine(card, merchant, save)])
     }
   }
 }

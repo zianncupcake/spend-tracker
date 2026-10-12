@@ -38,6 +38,12 @@ const BY_HAND = '*'
 /** What a message says of that mark, under its tables, when a row in them has it. */
 export const BY_HAND_NOTE = `${BY_HAND} = added by hand`
 
+/** What the row of a table is called that has what the card's patterns hold back of the cap: see `sumsOf`. */
+export const TO_COME = 'To come'
+
+/** What a message says of that row, under its tables, when a table has it. */
+export const TO_COME_NOTE = `${TO_COME} = what your /patterns still expect this month, taken off what is left of a cap`
+
 /** What a button sends back: the id of a purchase and the key of a category. */
 const PRESS = /^(\d{1,15}):([a-z0-9-]{1,40})$/
 
@@ -97,6 +103,8 @@ export interface Section {
   spent: Amount[]
   /** The limit of the group, when it has one: see Group. It is in hundredths of the product's own currency. */
   limitMinor?: number
+  /** What the card's patterns hold back of that limit, in the same: see `toComeByGroup` in ../domain/patterns. */
+  toComeMinor?: number
 }
 
 /**
@@ -120,7 +128,7 @@ export function heldLine(purchase: HeldPurchase, date: string, flagged: boolean)
 }
 
 /** A line of what it starts with, the merchant's name when there is one, and the notes after that. */
-function lineOf(start: string[], merchant: string | null, notes: string[]): Line {
+export function lineOf(start: string[], merchant: string | null, notes: string[]): Line {
   const before = start.join(SEPARATOR)
   if (!merchant) return { text: [before, ...notes].join(SEPARATOR) }
   return {
@@ -279,8 +287,9 @@ export function readConfirmPress(data: string): { run: boolean; line: string } |
  * product's order and whether or not anything was spent in it, so that every limit is seen. After them comes what
  * is not sorted, when there is any, which only a product with no default category leaves so. `purchases` are those
  * to list. What a section's purchases come to is the breakdown's, which counts those that are not listed too.
+ * `toCome` is what the card's patterns hold back of each group, in the product's order.
  */
-export function sectionsOf(product: Product, breakdown: Breakdown, purchases: Dated[]): Section[] {
+export function sectionsOf(product: Product, breakdown: Breakdown, purchases: Dated[], toCome: number[]): Section[] {
   // A purchase is told apart by what is stored for it. Where it is is what the product makes of that.
   const placed = purchases.map((purchase) => ({ purchase, category: categoryOf(product, purchase.category) }))
   const among = (keys: (string | null)[]) =>
@@ -292,6 +301,7 @@ export function sectionsOf(product: Product, breakdown: Breakdown, purchases: Da
     purchases: among(product.groups[index].categories.map((category) => category.key)),
     spent,
     limitMinor,
+    toComeMinor: toCome[index],
   }))
   if (breakdown.unsorted.length > 0) {
     sections.push({ name: 'Not sorted', purchases: among([null]), spent: breakdown.unsorted })
@@ -404,19 +414,21 @@ function drafted(section: Section, homeCurrency: string) {
 
 /**
  * What a table ends with, each amount with what it is called there: what the section's purchases come to and, for a
- * section with a limit, the limit and what is left of it.
+ * section with a limit, the limit, what the card's patterns hold back of it, when that is anything, and what is
+ * left of it once both are taken off.
  */
-function sumsOf({ spent, limitMinor }: Section, homeCurrency: string): (Amount & { label: string })[] {
+function sumsOf({ spent, limitMinor, toComeMinor = 0 }: Section, homeCurrency: string): (Amount & { label: string })[] {
   // Nothing spent is none of the card's own currency.
   const totals = spent.length > 0 ? spent : [{ currency: homeCurrency, amountMinor: 0 }]
   const sums = totals.map((total) => ({ ...total, label: 'Total' }))
   if (limitMinor === undefined) return sums
   // A limit is in the product's own currency, so what is held against it is what was spent in that currency. What a
   // purchase in another currency comes to in it is not known here.
-  const left = limitMinor - (spent.find(({ currency }) => currency === homeCurrency)?.amountMinor ?? 0)
+  const left = limitMinor - (spent.find(({ currency }) => currency === homeCurrency)?.amountMinor ?? 0) - toComeMinor
   return [
     ...sums,
     { currency: homeCurrency, amountMinor: limitMinor, label: 'Cap' },
+    ...(toComeMinor > 0 ? [{ currency: homeCurrency, amountMinor: toComeMinor, label: TO_COME }] : []),
     // Past the limit, nothing is left of it, and the row says how far past it the spend is.
     { currency: homeCurrency, amountMinor: Math.abs(left), label: left < 0 ? 'Over' : 'Left' },
   ]

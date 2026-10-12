@@ -319,8 +319,8 @@ describe('/spend with a card that is linked to a product', () => {
 
     await chat.ask('/spend evol')
 
-    // After one for the user and one for the cards.
-    expect(queried).toHaveBeenCalledTimes(1 + 1 + 2)
+    // After one for the user, one for the cards and one for the user's patterns.
+    expect(queried).toHaveBeenCalledTimes(1 + 1 + 1 + 2)
   })
 })
 

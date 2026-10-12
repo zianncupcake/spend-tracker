@@ -105,6 +105,7 @@ const RUN_AT_ONCE = [
   'spend',
   'sort',
   'products',
+  'patterns',
   'status',
 ] as const
 
@@ -118,9 +119,10 @@ const CHANGING = ['addcard', 'renamecard', 'product', 'timezone'] as const
 /**
  * The commands that are asked about first, whatever the model had read: those that remove or revoke. They are the
  * taking out of a purchase or of a card, the giving up of the access to a Gmail, the removing of an assistant's
- * token, the making of a new one, which ends the one that there is, and the starting of a sign-in, which cancels
- * one that is waiting for its code. The assistant runs none of them: each waits for its user to press a button. So
- * they are what a press may run, but for the commands above: see CONFIRMABLE in ../log.
+ * token, the making of a new one, which ends the one that there is, the starting of a sign-in, which cancels one
+ * that is waiting for its code, and the removing of a pattern or the saving of one, which takes the place of the
+ * one that there is. The assistant runs none of them: each waits for its user to press a button. So they are what
+ * a press may run, but for the commands above: see CONFIRMABLE in ../log.
  */
 const ASKED_FIRST = CONFIRMABLE.filter((name) => !CHANGING.some((changing) => changing === name))
 
@@ -439,10 +441,11 @@ async function showAsked(deps: Deps, how: Asking, nickname?: string): Promise<Ca
   // The cards that are each shown in full: every card, or the one of that nickname, when there is one.
   const shown = nickname === undefined ? cards : cards.filter((card) => card.nickname === nickname)
   if (shown.length === 0) return declined(NOT_DONE)
-  // Two queries for each card: see spendDetail.
-  if (!take(room, 2 * shown.length)) return 'full'
+  // The user's patterns, which are read once for all the cards, and two queries for each card: see spendDetail.
+  if (!take(room, 1 + 2 * shown.length)) return 'full'
   const now = deps.now()
-  const replies = await Promise.all(shown.map((card) => spendDetail(store, card, now, user.timezone)))
+  const patterns = await store.listPatterns()
+  const replies = await Promise.all(shown.map((card) => spendDetail(store, card, patterns, now, user.timezone)))
   return { replies, outcome: 'done' }
 }
 

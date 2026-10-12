@@ -564,7 +564,7 @@ describe('the sections of a window', () => {
   ]
 
   it('are one for each group of the product, in its order, with the purchases that are in the group', () => {
-    const sections = sectionsOf(uobEvol, breakDown(uobEvol, sums), purchases)
+    const sections = sectionsOf(uobEvol, breakDown(uobEvol, sums), purchases, [])
 
     // What a section's purchases come to is what the breakdown says, which takes in those that are not listed.
     expect(told(sections)).toEqual([
@@ -581,7 +581,7 @@ describe('the sections of a window', () => {
   })
 
   it('are there for every group when nothing was bought, so that each limit is seen', () => {
-    expect(told(sectionsOf(uobEvol, breakDown(uobEvol, []), []))).toEqual([
+    expect(told(sectionsOf(uobEvol, breakDown(uobEvol, []), [], []))).toEqual([
       { name: 'Online and Mobile Contactless Spend', ids: [], spent: [], limitMinor: 30000 },
       { name: 'Selected Gym, Telco and Streaming Spend', ids: [], spent: [], limitMinor: 20000 },
       { name: 'Other Spend', ids: [], spent: [], limitMinor: undefined },
@@ -590,7 +590,7 @@ describe('the sections of a window', () => {
   })
 
   it('end with what is not sorted, on a product with no default category', () => {
-    const sections = sectionsOf(NO_DEFAULT, breakDown(NO_DEFAULT, sums), purchases)
+    const sections = sectionsOf(NO_DEFAULT, breakDown(NO_DEFAULT, sums), purchases, [])
 
     expect(told(sections).map(({ name, ids }) => [name, ids])).toEqual([
       ['Online and Mobile Contactless Spend', [1]],
@@ -602,7 +602,7 @@ describe('the sections of a window', () => {
     expect(told(sections)[4]).toEqual({ name: 'Not sorted', ids: [2, 6], spent: sgd(800), limitMinor: undefined })
     // With nothing left for its user to sort, such a product has no more sections than its groups.
     const sorted = sums.filter((each) => each.category !== null && each.category !== 'dining')
-    expect(sectionsOf(NO_DEFAULT, breakDown(NO_DEFAULT, sorted), [])).toHaveLength(4)
+    expect(sectionsOf(NO_DEFAULT, breakDown(NO_DEFAULT, sorted), [], [])).toHaveLength(4)
   })
 })
 

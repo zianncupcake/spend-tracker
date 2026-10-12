@@ -6,12 +6,16 @@ import { startOfDay } from './window'
 export const CURRENCY = /^[A-Za-z]{3}$/
 export const ISO_DATE = /^(\d{4})-(\d\d)-(\d\d)$/
 
-/** Unix seconds of the instant at which a day begins in the time zone. Null for a day that no calendar has. */
-export function dayStart(year: number, month: number, day: number, timeZone: string): number | null {
+/** Whether a calendar has the day. `month` is 1 to 12. */
+export function isRealDay(year: number, month: number, day: number): boolean {
   // A date that no calendar has rolls over into one that a calendar has, and then does not read back as it was given.
   const given = new Date(Date.UTC(year, month - 1, day))
-  const exists = given.getUTCFullYear() === year && given.getUTCMonth() === month - 1 && given.getUTCDate() === day
-  return exists ? startOfDay(year, month, day, timeZone).getTime() / 1000 : null
+  return given.getUTCFullYear() === year && given.getUTCMonth() === month - 1 && given.getUTCDate() === day
+}
+
+/** Unix seconds of the instant at which a day begins in the time zone. Null for a day that no calendar has. */
+export function dayStart(year: number, month: number, day: number, timeZone: string): number | null {
+  return isRealDay(year, month, day) ? startOfDay(year, month, day, timeZone).getTime() / 1000 : null
 }
 
 /**

@@ -117,7 +117,7 @@ cards, and nothing unless you ask a question.</li>`
   return page(
     'Privacy policy - Spend Tracker',
     `<h1>Privacy policy</h1>
-<p>Last updated: 11 October 2026</p>
+<p>Last updated: 12 October 2026</p>
 <p>Spend Tracker is a Telegram bot that keeps a running total of what you spend on each credit card. It is run
 by ${name}. For any question about this policy or about your data, contact: ${contact}</p>
 
@@ -138,6 +138,8 @@ that sent the alert and an id of the alert, so that it is not counted twice.</li
 <li>The purchases that you add by hand: the amount, currency, merchant and date that you give each one, with the
 id of the Telegram message that added it, so that it is not counted twice.</li>${reads ? fromPhotos : ''}
 <li>The reward category that each purchase is sorted into.</li>
+<li>The monthly patterns that you save: the card, the merchant, the amount for a month and the days that you say
+it skips.</li>
 <li>A purchase that you take out, which stays stored and marked as taken out, so that its alert is not counted
 again. It is left out of every total and list, and is deleted with everything else.</li>
 <li>The id of any alert that was fetched but not recorded, and why it was not, kept so that it is not fetched
