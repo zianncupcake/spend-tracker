@@ -31,19 +31,22 @@ const MERCHANTS: [name: string, mcc: number][] = [
   ['pelago', 4722],
 ]
 
-/** The text in lower case, with a blank for every run of what is not a letter or a digit, and one at each end. */
-function spaced(text: string): string {
-  return ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `
+/** The words of the text: its runs of letters and digits, in lower case. */
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().match(/[a-z0-9]+/g) ?? []
 }
 
 // Made ready once, and not for every purchase: a card that is linked to a product can have 200 of them to sort.
-const NAMES = MERCHANTS.map(([name, mcc]) => ({ name: spaced(name), mcc }))
+const NAMES = MERCHANTS.map(([name, mcc]) => ({ name: wordsOf(name).join(''), mcc }))
 
 /**
- * The category code of the merchant: that of the first name above that the text of the merchant holds as whole
- * words. Undefined for a merchant that none of them names.
+ * The category code of the merchant: that of the first name above that the text of the merchant holds. Only letters
+ * and digits are compared, as an alert does not keep to a name's blanks: it has "fp*Food Panda" for foodpanda. A
+ * name begins where a word of the text does, or "TOKO INDONESIA" would hold koi, and it may end inside a word.
+ * Undefined for a merchant that none of them names.
  */
 export function codeOf(merchant: string): number | undefined {
-  const text = spaced(merchant)
-  return NAMES.find(({ name }) => text.includes(name))?.mcc
+  const words = wordsOf(merchant)
+  const tails = words.map((_, from) => words.slice(from).join(''))
+  return NAMES.find(({ name }) => tails.some((tail) => tail.startsWith(name)))?.mcc
 }

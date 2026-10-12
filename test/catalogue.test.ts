@@ -229,10 +229,18 @@ describe("the DBS Woman's World Card", () => {
 })
 
 describe('the category code of a merchant', () => {
-  it('is that of a name that the text of the merchant holds as whole words', () => {
+  it('is that of a name that begins at a word of the text, by its letters and digits alone', () => {
     expect(codeOf('KOI THE SG')).toBe(5814)
-    expect(codeOf('KOIKE')).toBeUndefined()
+    // Text before the name, and a blank inside it.
+    expect(codeOf('fp*Food Panda')).toBe(5814)
+    expect(codeOf('SALAD STOP @ MALL')).toBe(5814)
+    // Punctuation counts as the end of a word.
     expect(codeOf('GRAB*A-123')).toBe(4121)
+    // A name may end in the middle of a word.
+    expect(codeOf('FAIRPRICEXTRA')).toBe(5411)
+    // A name does not begin in the middle of a word.
+    expect(codeOf('TOKO INDONESIA')).toBeUndefined()
+    expect(codeOf('COFFEE PLACE')).toBeUndefined()
   })
 
   it.each([
