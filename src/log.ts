@@ -1,7 +1,7 @@
 // The service's log: a line for each thing that it does, or that goes wrong. A line is JSON, written to the console,
 // which is what Cloudflare keeps of a Worker (Workers Logs) and what `wrangler tail` shows. The line of a failure is
 // written with console.error, and every other line with console.log, so that Cloudflare has a failure at the level
-// of an error and can count it as one. The README says what has been seen of that in its dashboard.
+// of an error and can count it as one.
 //
 // THE PRIVACY LINE. This service reads people's mail and keeps their purchases. Its log is read by whoever runs it,
 // and is kept by Cloudflare. So a line never holds:
@@ -23,6 +23,53 @@
 // `string`, which the compiler takes for none of them. A number is what it cannot check: one that goes into a line
 // is a count, a duration, a status or a user's id of the service's own, and never an id of Telegram's or the digits
 // of a card.
+
+/**
+ * The names of the bot's commands, each without its slash. What a message begins with is text from outside, so the
+ * log has a command only as the name that it is known to be.
+ */
+export const COMMAND_NAMES = [
+  'start',
+  'addcard',
+  'cards',
+  'products',
+  'product',
+  'removecard',
+  'renamecard',
+  'spend',
+  'add',
+  'remove',
+  'sort',
+  'timezone',
+  'connect',
+  'code',
+  'status',
+  'disconnect',
+  'mcp',
+  'delete',
+] as const
+
+/**
+ * The commands that a press of "Do it" may run: those that a message can have asked about, and no others. See
+ * pressConfirm in ./telegram/handler.
+ */
+export const CONFIRMABLE = [
+  'remove',
+  'removecard',
+  'disconnect',
+  'mcp',
+  'connect',
+  'addcard',
+  'renamecard',
+  'product',
+  'timezone',
+] as const
+
+/**
+ * The names of the assistant's tools. What a model calls a tool is text from outside, so the log has it only as the
+ * name that it is known to be.
+ */
+export const TOOL_NAMES = ['show_spending', 'find_purchases', 'add_purchases', 'set_category', 'run_command'] as const
 
 /** Every event, with what its line holds besides its name. The README says what each of them means. */
 export interface Events {
@@ -98,26 +145,7 @@ export interface Events {
       | 'message'
       | 'other'
       | 'unreadable'
-    command?:
-      | 'start'
-      | 'addcard'
-      | 'cards'
-      | 'products'
-      | 'product'
-      | 'removecard'
-      | 'renamecard'
-      | 'spend'
-      | 'add'
-      | 'remove'
-      | 'sort'
-      | 'timezone'
-      | 'connect'
-      | 'code'
-      | 'status'
-      | 'disconnect'
-      | 'mcp'
-      | 'delete'
-      | 'unknown'
+    command?: (typeof COMMAND_NAMES)[number] | 'unknown'
     outcome: 'replied' | 'deferred' | 'ignored' | 'failed'
     why?: 'not_private' | 'not_own_chat' | 'no_id' | 'not_text' | 'service_message' | 'nothing_read'
     handled?: boolean
@@ -144,27 +172,12 @@ export interface Events {
   }
   confirm_press: {
     user: number
-    command?:
-      | 'remove'
-      | 'removecard'
-      | 'disconnect'
-      | 'mcp'
-      | 'connect'
-      | 'addcard'
-      | 'renamecard'
-      | 'product'
-      | 'timezone'
+    command?: (typeof CONFIRMABLE)[number]
     outcome: 'done' | 'cancelled' | 'refused'
   }
   assistant_tool: {
     user: number
-    tool:
-      | 'show_spending'
-      | 'find_purchases'
-      | 'add_purchases'
-      | 'set_category'
-      | 'run_command'
-      | 'unknown'
+    tool: (typeof TOOL_NAMES)[number] | 'unknown'
     outcome: 'ok' | 'invalid' | 'failed'
     ms: number
   }

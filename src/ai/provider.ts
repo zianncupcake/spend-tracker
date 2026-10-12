@@ -127,8 +127,7 @@ export async function complete(
  * model that reads one. It throws what `complete` throws, and the request is logged as one of `complete`'s is.
  *
  * `temperature` is how freely the model is to choose among the words that it could write next: at 0, the same
- * request is to be answered the same each time. The request says nothing of it unless it is given, and the
- * provider's own setting then holds.
+ * request is to be answered the same each time.
  */
 export async function completeJson(
   provider: AiProvider,
@@ -136,11 +135,10 @@ export async function completeJson(
   messages: ChatMessage[],
   maxTokens: number,
   timeout: number,
-  temperature?: number,
+  temperature: number,
 ): Promise<ModelReply> {
   return request(
     provider,
-    // What is undefined is left out of the JSON that is posted.
     { model, messages, response_format: { type: 'json_object' }, max_completion_tokens: maxTokens, temperature },
     timeout,
   )

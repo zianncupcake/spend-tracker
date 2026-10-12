@@ -5,8 +5,7 @@ export interface Product {
   name: string
   /** The currency that the card is billed in. The limits and the minimum spend are in hundredths of its unit. */
   homeCurrency: string
-  /** Where the bank publishes the terms that the rules were taken from, and the date that those terms are as of. */
-  termsUrl: string
+  /** The date that the terms which the rules were taken from are as of. */
   termsAsOf: string
   /**
    * What has to be spent in a month, as the terms count one, before the groups with a limit earn their rate. Missing

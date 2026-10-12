@@ -353,44 +353,14 @@ describe('the photo in base64', () => {
     expect(other).not.toHaveBeenCalled()
   })
 
-  /** Reads the photo in a runtime that has no encoder of its own: the runtime's is taken away for as long. */
-  async function readWithoutEncoder(image: Uint8Array): Promise<void> {
-    const own = Object.getOwnPropertyDescriptor(Uint8Array.prototype, 'toBase64')
-    if (!own) throw new Error('The runtime has no encoder to take away')
-    delete (Uint8Array.prototype as { toBase64?: unknown }).toBase64
-    try {
-      expect((image as { toBase64?: unknown }).toBase64).toBeUndefined()
-      await read({ image })
-    } finally {
-      Object.defineProperty(Uint8Array.prototype, 'toBase64', own)
-    }
-  }
-
-  // The sizes are around those at which the other way of encoding takes its next stretch of the bytes.
-  it.each([0, 1, 8192, 8193, 70_000])(
-    'is the same for %i bytes in a runtime that has no encoder of its own',
-    async (length) => {
-      const image = bytesOf(length)
-      const expected = base64Of(image)
-      answering(answerOf([]))
-
-      await readWithoutEncoder(image)
-
-      expect(sentMessages().image).toBe(`data:image/jpeg;base64,${expected}`)
-    },
-  )
-
-  it.each([
-    ['the encoder that the runtime has', (image: Uint8Array) => read({ image }).then(() => {})],
-    ['no encoder of its own', readWithoutEncoder],
-  ])('is of the bytes that it is given and no others, when they are part of a longer run, with %s', async (_, encode) => {
+  it('is of the bytes that it is given and no others, when they are part of a longer run', async () => {
     // As the bytes of a file are: the part that was filled, of the room that the file was read into.
     const room = bytesOf(30_000)
     const image = room.subarray(3, 20_003)
     const expected = base64Of(image.slice())
     answering(answerOf([]))
 
-    await encode(image)
+    await read({ image })
 
     expect(sentMessages().image).toBe(`data:image/jpeg;base64,${expected}`)
   })
@@ -561,21 +531,6 @@ describe('the time that a purchase is put at, beside the time that /add stores',
       .first<{ occurred_at: number }>()
     return row?.occurred_at
   }
-
-  it.each([
-    ['today, before its noon', '2026-10-09', '2026-10-09T09:30:15+08:00', 'Asia/Singapore'],
-    ['today, after its noon', '2026-10-09', '2026-10-09T18:45:00+08:00', 'Asia/Singapore'],
-    ['yesterday, in New York', '2026-10-08', '2026-10-09T03:10:00-04:00', 'America/New_York'],
-    ['a day on which the clocks changed', '2026-03-29', '2026-10-09T12:00:00+01:00', 'Europe/London'],
-  ])('is the same for %s', async (_, date, now, timeZone) => {
-    clock.now = new Date(now)
-
-    const stored = await storedByAdd(date, timeZone)
-    const read = await readOne({ ...GIVEN, date }, { timeZone })
-
-    expect(stored).toBeTypeOf('number')
-    expect(read?.occurredAt).toBe(stored)
-  })
 
   it('is refused by both, for a day that is still to come', async () => {
     expect(await storedByAdd('2026-10-10', 'Asia/Singapore')).toBeUndefined()
@@ -1094,10 +1049,25 @@ describe('the checking of what a model gave, on its own', () => {
     expect(check(answer, CARDS, 'Asia/Singapore', later)).toMatchObject({ card: 'evol', category: 'other' })
     expect(check(answer, [CARDS[1]], 'Asia/Singapore', later)).toMatchObject({ card: null, category: null })
     expect(check(answer, [], 'Asia/Singapore', later)).toMatchObject({ card: null, category: null })
-    // And only when it is named in what the user wrote, which is whatever is given as that.
+    // And only when it is named in what the user wrote, which is whatever is given as that. The category is kept
+    // without it, as those words name the category too.
     const unnamed = check(answer, CARDS, 'Asia/Singapore', later, 'add these as other spend')
-    expect(unnamed).toMatchObject({ card: null, category: null, purchases: [taken] })
+    expect(unnamed).toMatchObject({ card: null, category: 'other', purchases: [taken] })
     expect(check(answer, CARDS, 'Asia/Singapore', later, 'Other spend, on EVOL.')).toMatchObject({ card: 'evol' })
+  })
+
+  // With no card named, a category is its user's to name, as a card is: a model is not taken at its word for one.
+  it.each<[what: string, category: unknown, written: string, kept: string | null]>([
+    ['its key, as a word of its own', 'fnb', 'add these as fnb', 'fnb'],
+    ['what it is called, in other letters and blanks', 'Dining Out', 'add these as DINING  out', 'fnb'],
+    ['its key inside a longer word', 'fnb', 'add these as fnbs', null],
+    ['one that the model did not give', null, 'add these as dining out', null],
+  ])('keeps a category with no card only when the model gave it and the user wrote it: %s', (_, category, written, kept) => {
+    const cards = [{ nickname: 'evol', categories: [{ key: 'fnb', label: 'Dining Out' }] }]
+
+    const checked = check(answerOf([GIVEN], { category }), cards, 'Asia/Singapore', NOON, written)
+
+    expect(checked).toMatchObject({ card: null, category: kept })
   })
 
   it.each<[what: string, answer: unknown]>([

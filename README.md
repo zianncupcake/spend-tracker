@@ -111,7 +111,7 @@ purchase for one group, which has a cap, until something says otherwise:
 
 A purchase is marked with the "Mark as ..." buttons under the bot's message about it, which `/sort <purchase id>`
 shows again. `/sort <nickname>` says what belongs where. The rules are data in `src/catalogue/`, a file to each
-product, with where the bank publishes its terms and the date that those terms are as of.
+product, with the date that the bank's terms are as of and, in a comment, where the bank publishes them.
 
 ## Setting it up
 

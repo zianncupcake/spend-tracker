@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import * as assistant from '../src/ai/assistant'
-import type { Action } from '../src/ai/assistant'
+import type { Action, Answer } from '../src/ai/assistant'
 import { userOfToken } from '../src/mcp/tokens'
 import { TelegramError, type RichMessage } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
@@ -56,6 +56,8 @@ const NO_CARDS = [
 const DELETE_WARNING =
   'This deletes your cards and every purchase stored for you, and cannot be undone. Send /delete confirm to go ahead.'
 const TOKYO = "Your time zone is now Asia/Tokyo. Your cards' cycles and months begin and end by it."
+/** What a press of "Do it" is answered with, and what the message that asked then ends with. */
+const SEE_REPLY = 'See the reply below.'
 
 /** The stand-in for the assistant. With nothing said, a test is to have nothing asked of it. */
 let answering: MockInstance<typeof assistant.answerQuestion>
@@ -574,17 +576,17 @@ describe('a press of a button under a message that asks before a command is run'
     return { chat, userId, purchase, asking, shown }
   }
 
-  it('runs the command once when it is "Do it": the message says so, has no buttons, and the command’s reply is sent', async () => {
+  it('runs the command once when it is "Do it": the command’s reply is sent, and the message points to it and has no buttons', async () => {
     const { chat, userId, purchase, asking, shown } = await asked()
     const logged = catchConsole()
 
     const pressed = await chat.press(asking, 'Do it')
 
-    expect(pressed.answer).toBe('Done.')
+    expect(pressed.answer).toBe(SEE_REPLY)
     expect(pressed.sent.map((message) => message.text)).toEqual([
       `Removed from ••••5678:\nID ${purchase} · 5 Oct · SGD 12.40 · COFFEE PLACE`,
     ])
-    expect(asking.text).toBe(`${shown}\nDone.`)
+    expect(asking.text).toBe(`${shown}\n${SEE_REPLY}`)
     expect(markedIn(asking)).toEqual(['COFFEE PLACE'])
     expect(asking.buttons).toBeUndefined()
     expect(await rowsOf(userId)).toMatchObject([{ id: purchase, removed_at: expect.any(Number) }])
@@ -595,8 +597,10 @@ describe('a press of a button under a message that asks before a command is run'
     expect(answering).toHaveBeenCalledTimes(1)
 
     // A press that Telegram delivers again takes nothing out twice: the command says that there is nothing to take.
+    // The press is answered as the first was: it is the reply that says what came of the command.
     const again = await chat.pressWith(asking, `do:/remove ${purchase}`)
     expect(again.sent.map((message) => message.text)).toEqual([`You have no purchase with ID ${purchase}.`])
+    expect(again.answer).toBe(SEE_REPLY)
     expect(await rowsOf(userId)).toHaveLength(1)
   })
 
@@ -743,6 +747,53 @@ describe('several things in one answer of the assistant’s', () => {
   })
 })
 
+describe('what a message asks for next, once the first thing that it asked for is done', () => {
+  /** Has the assistant make these actions of every message, with more to come, and `then` when it is asked again. */
+  function goingOn(first: Action[], then: Answer) {
+    const next = vi.fn(async (_came: string[], _changed: boolean) => then)
+    const more = { afterReading: false, dropped: 0, more: true, next }
+    answering.mockResolvedValue({ status: 'acting', actions: first, ...more })
+    return next
+  }
+
+  /** An answer that asks for the one action, and for nothing after it. */
+  function lastly(action: Action): Answer {
+    return { status: 'acting', actions: [action], afterReading: false, dropped: 0, more: false }
+  }
+
+  it('is done for the user as a command left them, with the assistant told that the cards may have changed: what was spent is shown by the time zone that the message set', async () => {
+    const chat = await chatWithCard()
+    // At 09:30 on 5 October in Singapore, which is the evening of the 4th in New York.
+    await buy(await chat.userId(), { cardLast4: '5678' })
+    const next = goingOn([command('/timezone America/New_York')], lastly({ kind: 'show' }))
+
+    const { rich } = await told(chat)
+
+    expect(next.mock.calls).toEqual([[['Done.'], true]])
+    expect(rich.flatMap(linesOf)).toContainEqual(expect.stringMatching(/ \| 4 Oct \| 12\.40 \| COFFEE PLACE$/))
+  })
+
+  it('is asked for with nothing read again, after a command that changes neither the cards nor the user', async () => {
+    const chat = await chatWithCard()
+    const next = goingOn([command('/cards')], { status: 'answered', text: 'Made-up words.' })
+
+    await told(chat)
+
+    expect(next.mock.calls).toEqual([[['Done.'], false]])
+  })
+
+  it('has no room left when the reading again took it: its two queries are counted with those of the actions', async () => {
+    const chat = await chatWithCard()
+    const zone = command('/timezone Asia/Tokyo')
+    // Four commands at six queries each leave six of the thirty, which a fifth would take but for those two.
+    goingOn([zone, zone, zone, zone], lastly(zone))
+
+    const { texts } = await told(chat)
+
+    expect(texts.filter((message) => message.text === TOKYO)).toHaveLength(4)
+  })
+})
+
 describe('what the model asks for after a tool has read for it', () => {
   it('is asked about first where it would change something: purchases are held whole, and a card, a product and a time zone wait for "Do it"', async () => {
     const chat = await chatWithCard()
@@ -828,9 +879,9 @@ describe('what the model asks for after a tool has read for it', () => {
 
     const pressed = await chat.press(texts[0], 'Do it')
 
-    expect(pressed.answer).toBe('Done.')
+    expect(pressed.answer).toBe(SEE_REPLY)
     expect(pressed.sent.map((message) => message.text)).toEqual(['Renamed evol ••••5678 to daily.'])
-    expect(texts[0].text).toBe('Rename evol ••••5678 to daily?\nDone.')
+    expect(texts[0].text).toBe(`Rename evol ••••5678 to daily?\n${SEE_REPLY}`)
     expect(texts[0].buttons).toBeUndefined()
     expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'daily | ••••5678 | calendar month | UOB EVOL Card'])
     const press = { event: 'confirm_press', user: userId, command: 'renamecard', outcome: 'done' }

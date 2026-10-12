@@ -78,7 +78,7 @@ interface Unread {
 
 /**
  * What a run has done so far, which is what its line in the log says when it ends, and the stage that it is at,
- * which is where it failed when it fails. The README says what each count is of.
+ * which is where it failed when it fails.
  */
 type Run = Omit<Events['check'], 'ms'> & Pick<Events['check_failed'], 'stage'>
 
@@ -276,9 +276,9 @@ async function readAlert(
   if (!isFromBank(message)) return reject()
 
   run.stage = 'store'
-  const { from, subject, receivedAt } = message
+  const { from, receivedAt } = message
   const store = storeFor(deps.db, mailbox.ownerId)
-  const result = await ingestAlert(store, { sourceId: id, from, subject, receivedAt, text: message.text() })
+  const result = await ingestAlert(store, { sourceId: id, from, receivedAt, text: message.text() })
   if (result.status === 'unparsed') {
     await mail.markSeen(id, 'unparsed')
     run.unparsed++

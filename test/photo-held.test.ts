@@ -270,6 +270,21 @@ describe('a card that is chosen by button', () => {
     )
   })
 
+  it.each<[what: string, button: string, categories: (string | null)[]]>([
+    // Whatever a rule of the product would make of a purchase: one of the two is at a merchant that a rule places.
+    ['evol, which has that category', 'Add to evol', ['other', 'other']],
+    ['visa, which has no categories', 'Add to visa', [null, null]],
+  ])('has its purchases put in the category that the message named with no card, where it has that category: %s', async (_, button, categories) => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    reading(read([bought(1240, 'COFFEE PLACE'), bought(1598, 'NETFLIX.COM')], { category: 'other' }))
+    const [asking] = (await chat.photo('other spend', MESSAGE)).texts
+
+    await chat.press(asking, button)
+
+    expect((await rowsOf(userId)).map((row) => row.category)).toEqual(categories)
+  })
+
   it('can be passed over: the button that skips adds the purchases to no card', async () => {
     const { chat, userId, asking } = await asked()
 

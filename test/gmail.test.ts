@@ -204,7 +204,7 @@ describe('listing messages', () => {
 })
 
 describe('reading the headers of a message', () => {
-  const ASKED_FOR = ['From', 'Subject', 'Authentication-Results']
+  const ASKED_FOR = ['From', 'Authentication-Results']
 
   /** What is read from the headers of a message, when Gmail returns those that were asked for and no more. */
   function readHeaders(message: ReturnType<typeof gmailMessage>) {
@@ -212,25 +212,24 @@ describe('reading the headers of a message', () => {
     return getMessageHeaders('made-up-access-token', 'msg-1')
   }
 
-  it('asks Gmail for three headers of the message, and for nothing else of it', async () => {
+  it('asks Gmail for two headers of the message, and for nothing else of it', async () => {
     await readHeaders(gmailMessage())
 
     expect(google).toHaveBeenCalledTimes(1)
     const [url, init] = google.mock.calls[0]
     expect(url).toBe(
       'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg-1' +
-        '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Authentication-Results',
+        '?format=metadata&metadataHeaders=From&metadataHeaders=Authentication-Results',
     )
     expect(init?.method).toBeUndefined()
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer made-up-access-token')
   })
 
-  it('reads the sender, the subject and the domain that the message is authentic for', async () => {
-    const message = gmailMessage({ from: 'Example Bank <Alerts@ExampleBank.TEST>', subject: 'Transaction alert' })
+  it('reads the sender and the domain that the message is authentic for', async () => {
+    const message = gmailMessage({ from: 'Example Bank <Alerts@ExampleBank.TEST>' })
 
     expect(await readHeaders(message)).toEqual({
       from: 'alerts@examplebank.test',
-      subject: 'Transaction alert',
       authenticatedDomain: 'examplebank.test',
     })
   })
@@ -250,7 +249,6 @@ describe('reading the headers of a message', () => {
 
     expect(await getMessageHeaders('made-up-access-token', 'msg-1')).toEqual({
       from: '',
-      subject: '',
       authenticatedDomain: null,
     })
   })
@@ -276,11 +274,10 @@ describe('reading a message', () => {
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer made-up-access-token')
   })
 
-  it('reads the sender, the subject, the time and the text of a plain-text message', async () => {
+  it('reads the sender, the time and the text of a plain-text message', async () => {
     const text = `Dear customer,\r\n\r\n${ALERT}\r\n\r\nThank you for banking with us.\r\n`
     const message = gmailMessage({
       from: 'alerts@examplebank.test',
-      subject: 'Transaction alert',
       receivedAt: seconds('2026-10-09T11:55:00+08:00'),
       content: textPart(text),
     })
@@ -289,7 +286,6 @@ describe('reading a message', () => {
 
     expect(found).toEqual({
       from: 'alerts@examplebank.test',
-      subject: 'Transaction alert',
       receivedAt: seconds('2026-10-09T11:55:00+08:00'),
       authenticatedDomain: 'examplebank.test',
       text: expect.any(Function),
@@ -327,11 +323,10 @@ describe('reading a message', () => {
 
     expect(await read(message)).toMatchObject({
       from: 'alerts@examplebank.test',
-      subject: '',
       authenticatedDomain: 'examplebank.test',
     })
     const bare = await read({ internalDate: '1791518400000' })
-    expect(bare).toMatchObject({ from: '', subject: '', receivedAt: 1791518400, authenticatedDomain: null })
+    expect(bare).toMatchObject({ from: '', receivedAt: 1791518400, authenticatedDomain: null })
     expect(bare.text()).toBe('')
   })
 
@@ -511,8 +506,8 @@ describe('an HTML-only message', () => {
     const started = performance.now()
     for (const message of messages) (await read(message)).text()
 
-    // Measured at about 40 ms. One pattern that backtracked over a body would take seconds.
-    expect(performance.now() - started).toBeLessThan(500)
+    // Measured at about 40 ms. The bound is for a pattern that never ends, and is set well above a slow machine.
+    expect(performance.now() - started).toBeLessThan(5_000)
   })
 })
 

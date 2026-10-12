@@ -76,7 +76,7 @@ describe('purchases that are held', () => {
     await owner.held.hold(batch(71), NOW)
 
     expect(await other.held.find(71, NOW)).toBeNull()
-    expect(await other.held.remove(71)).toBe(false)
+    await other.held.remove(71)
 
     expect(await owner.held.find(71, NOW)).toEqual(batch(71))
     // Two users can each have purchases held for a message with the same id: an id is of one chat.
@@ -98,13 +98,12 @@ describe('purchases that are held', () => {
     expect(await held.find(71, NOW + DAY + DAY / 2)).toBeNull()
   })
 
-  it('are let go of once', async () => {
+  it('are let go of a message at a time', async () => {
     const { id, held } = await newUser()
     await held.hold(batch(71), NOW)
     await held.hold(batch(72), NOW)
 
-    expect(await held.remove(71)).toBe(true)
-    expect(await held.remove(71)).toBe(false)
+    await held.remove(71)
 
     expect(await held.find(71, NOW)).toBeNull()
     expect(await held.find(72, NOW)).toEqual(batch(72))

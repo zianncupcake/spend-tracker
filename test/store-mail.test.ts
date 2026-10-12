@@ -251,13 +251,13 @@ describe('the mailbox whose turn it is', () => {
     const lost = await newUser('jane@example.test')
     const active = await newUser('sam@example.test')
     await newUser()
-    expect(await lost.mail.markNeedsReconnect()).toBe(true)
+    await lost.mail.markNeedsReconnect()
 
     expect((await takeNextMailbox(db, NOW))?.ownerId).toBe(active.id)
     expect((await takeNextMailbox(db, NOW + 60))?.ownerId).toBe(active.id)
     expect(await connectionOf(lost.id)).toMatchObject({ status: 'needs_reconnect', last_run_at: null })
 
-    expect(await active.mail.markNeedsReconnect()).toBe(true)
+    await active.mail.markNeedsReconnect()
     expect(await takeNextMailbox(db, NOW + 120)).toBeNull()
   })
 })
@@ -313,14 +313,11 @@ describe('a mail store', () => {
     await expect(insert.bind(id).run()).rejects.toThrow()
   })
 
-  it('marks an active connection as needing to be reconnected, and says whether it did', async () => {
+  it('marks the connection of its own user as needing to be reconnected, and nobody else’s', async () => {
     const user = await newUser('jane@example.test')
     const other = await newUser('sam@example.test')
-    const unconnected = await newUser()
 
-    expect(await user.mail.markNeedsReconnect()).toBe(true)
-    expect(await user.mail.markNeedsReconnect()).toBe(false)
-    expect(await unconnected.mail.markNeedsReconnect()).toBe(false)
+    await user.mail.markNeedsReconnect()
 
     expect(await user.connect.findConnection()).toEqual({ email: 'jane@example.test', status: 'needs_reconnect' })
     expect(await other.connect.findConnection()).toEqual({ email: 'sam@example.test', status: 'active' })

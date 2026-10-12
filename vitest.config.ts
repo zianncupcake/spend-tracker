@@ -36,7 +36,7 @@ export default defineConfig(async () => {
       }),
     ],
     test: {
-      setupFiles: ['./test/apply-migrations.ts'],
+      setupFiles: ['./test/apply-migrations.ts', './test/register-example-bank.ts'],
       // Every test file loads the Worker, and with it the MCP SDK: a hundred or so modules, with what it depends
       // on. Bundled into one module ahead of the tests, they load in about half the time.
       deps: { optimizer: { ssr: { enabled: true, include: ['@modelcontextprotocol/server'] } } },

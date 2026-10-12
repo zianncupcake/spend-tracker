@@ -44,7 +44,6 @@ export function gmailResults(dmarc: 'pass' | 'fail', domain: string): string {
 export interface MessageOptions {
   id?: string
   from?: string
-  subject?: string
   /** Unix seconds. */
   receivedAt?: number
   /** The values of the message's Authentication-Results headers, from the top down. */
@@ -60,7 +59,6 @@ export function gmailMessage(options: MessageOptions = {}) {
   const {
     id = 'msg-1',
     from = 'Example Bank <alerts@examplebank.test>',
-    subject = 'Transaction alert',
     receivedAt = seconds('2026-10-09T11:55:00+08:00'),
     results = [gmailResults('pass', 'examplebank.test')],
     content = textPart(alertText('SGD 12.40', '1234')),
@@ -83,7 +81,7 @@ export function gmailMessage(options: MessageOptions = {}) {
         ...results.map((value) => ({ name: 'Authentication-Results', value })),
         { name: 'From', value: from },
         { name: 'To', value: 'jane@example.test' },
-        { name: 'Subject', value: subject },
+        { name: 'Subject', value: 'Transaction alert' },
         { name: 'MIME-Version', value: '1.0' },
       ],
       ...content,

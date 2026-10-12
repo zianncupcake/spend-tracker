@@ -124,15 +124,13 @@ export function mailStoreFor(db: D1Database, ownerId: number) {
 
     /**
      * Marks the user's active connection as one that Google has ended the
-     * access of. It has no more turns until the user connects again. False
-     * when there was no active connection to mark.
+     * access of. It has no more turns until the user connects again.
      */
-    async markNeedsReconnect(): Promise<boolean> {
-      const result = await db
+    async markNeedsReconnect(): Promise<void> {
+      await db
         .prepare("UPDATE google_connections SET status = 'needs_reconnect' WHERE owner_id = ? AND status = 'active'")
         .bind(ownerId)
         .run()
-      return result.meta.changes > 0
     },
 
     /**

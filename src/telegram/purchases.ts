@@ -25,14 +25,6 @@ import { formatAmount, formatMoney } from './format'
 export const MAX_LENGTH = 4096
 
 /**
- * How many marked stretches of one message Telegram goes by. It makes nothing of those that come after, which would
- * leave a name as text that can be tapped. The limit is not in Telegram's documentation: it is the one that its
- * clients are known to apply. The block of a table is one more such stretch, and is not counted here: a message
- * holds a few of them at most, and no message with a table in it has a name that is marked.
- */
-const MAX_MARKED = 100
-
-/**
  * The most characters in a row of a table. A phone shows about that many across a block. It wraps a row that is
  * longer, and the columns of a wrapped row no longer line up.
  */
@@ -142,8 +134,7 @@ type Held = Line & { table?: Table }
 
 /**
  * The lines and the tables as messages, in their order and in as few messages as Telegram takes them in. A message
- * ends where one more line would take it past the text, or past the marked stretches, that Telegram allows. None
- * begins or ends with an empty line.
+ * ends where one more line would take it past the text that Telegram allows. None begins or ends with an empty line.
  *
  * A table is parted only between two of its rows. Its name stays with its first row, and the rows that sum it up
  * stay with one another. Where a table goes on in another message, its header is above its rows there too, and each
@@ -153,13 +144,11 @@ export function inMessages(parts: (Line | Table)[]): Outgoing[] {
   const messages: Outgoing[] = []
   let held: Held[] = []
   let length = 0
-  let marked = 0
   const close = () => {
     const kept = held.slice(0, held.findLastIndex((line) => line.text !== '') + 1)
     if (kept.length > 0) messages.push(asMessage(kept))
     held = []
     length = 0
-    marked = 0
   }
   // Whether the open message takes the lines, with a line end before each of them but the first that it holds.
   const fits = (lines: Held[]) => length + lines.reduce((sum, line) => sum + line.text.length + 1, -1) <= MAX_LENGTH
@@ -168,7 +157,6 @@ export function inMessages(parts: (Line | Table)[]): Outgoing[] {
       held.push(line)
       // With the line end that comes before the next line.
       length += line.text.length + 1
-      if (line.marked) marked++
     }
   }
 
@@ -188,7 +176,7 @@ export function inMessages(parts: (Line | Table)[]): Outgoing[] {
       }
       continue
     }
-    if (!fits([part]) || (part.marked && marked === MAX_MARKED)) close()
+    if (!fits([part])) close()
     if (part.text === '' && held.length === 0) continue
     hold([part])
   }

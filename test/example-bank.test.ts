@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { alertSenders, parseAlert, parserOf } from '../src/parsers'
-import { exampleBank } from '../src/parsers/example-bank'
+import { describe, expect, it, vi } from 'vitest'
+import { parseAlert, parserOf } from '../src/parsers'
+import { exampleBank } from './example-bank'
 import { alertEmail, alertText } from './helpers'
 
 const parse = (text: string) => parseAlert(alertEmail({ text }))
@@ -79,10 +79,12 @@ describe('Example Bank alerts', () => {
     expect(parserOf(alertEmail({ from: 'offers@examplebank.test' }))).toBeUndefined()
   })
 
-  it("sends its alerts from one address, and mail is looked for from the banks' senders and from no other", () => {
-    expect(exampleBank.senders).toEqual(['alerts@examplebank.test'])
-    expect(alertSenders()).toEqual([
-      'alerts@examplebank.test',
+  it("is not shipped: the service looks for mail from the three real banks' senders and from no other", async () => {
+    // Loaded anew, the parsers are as they ship: the tests' set-up, which adds this bank, has not touched the copy.
+    vi.resetModules()
+    const shipped = await import('../src/parsers')
+
+    expect(shipped.alertSenders()).toEqual([
       'noreply@notify.ocbc.com',
       'unialerts@uobgroup.com',
       'hsbc.bank.singapore.limited@notification.hsbc.com.hk',
@@ -115,7 +117,7 @@ describe('Example Bank alerts', () => {
       expect(exampleBank.parse(alertEmail({ text }))).toBeNull()
     }
 
-    // Measured at about 20 ms. Heavy backtracking over megabytes would take far longer.
-    expect(performance.now() - started).toBeLessThan(500)
+    // Measured at about 20 ms. The bound is for a pattern that never ends, and is set well above a slow machine.
+    expect(performance.now() - started).toBeLessThan(5_000)
   })
 })

@@ -69,7 +69,7 @@ amount, currency, merchant, last four card digits and time from each one. The te
  * bot reads photos, which it does when that provider has a model that reads them. What becomes of a question is
  * said only where a question is answered, and what becomes of a photo only where a photo is read.
  */
-export function privacyPage(operator: Operator, assistant: boolean, photos = false): Response {
+export function privacyPage(operator: Operator, assistant: boolean, photos: boolean): Response {
   const name = escapeHtml(operator.name)
   const contact = escapeHtml(operator.contact)
   // A service reads photos with the model of the provider that answers its questions, so it reads none without one.

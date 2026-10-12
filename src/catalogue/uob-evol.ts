@@ -41,8 +41,8 @@ export const uobEvol: Product = {
   key: 'uob-evol',
   name: 'UOB EVOL Card',
   homeCurrency: 'SGD',
-  termsUrl:
-    'https://www.uob.com.sg/web-resources/personal/pdf/personal/cards/credit-cards/rebates-cards/evol/uob-evol-faq.pdf',
+  // Where the bank publishes the terms that the limits are from:
+  // https://www.uob.com.sg/web-resources/personal/pdf/personal/cards/credit-cards/rebates-cards/evol/uob-evol-faq.pdf
   termsAsOf: '10 June 2026',
   minimumSpendMinor: 80000,
   // UOB's terms count spend that is "successfully charged and posted to the Card account in each Statement Month",
