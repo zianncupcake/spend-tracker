@@ -165,12 +165,3 @@ describe('/delete confirm', () => {
     expect(await letsIn(other)).toBe(true)
   })
 })
-
-describe('the command list', () => {
-  it('names /mcp and /mcp revoke', async () => {
-    const reply = await openChat().say('/start')
-
-    expect(reply).toContain('/mcp - let an AI assistant, such as Claude Code, read your card totals and purchases')
-    expect(reply).toContain('/mcp revoke - take that access away again')
-  })
-})

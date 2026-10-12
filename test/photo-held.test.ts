@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
 import { TelegramError } from '../src/telegram/api'
 import type { Reading } from '../src/telegram/adding'
+import { PRESS_FAILED } from '../src/telegram/texts'
 import { answered, clock, deps, NOW, openChat } from './connect-helpers'
 import { bold, buy, headerRow, plain, purchaseRow, seconds, sumRow, tableOf, userCount } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -545,7 +546,7 @@ describe('a press of a button under purchases that are held', () => {
     const pressed = await chat.press(asking, 'Add these 2')
     failing.mockRestore()
 
-    expect(pressed).toEqual({ answer: 'Something went wrong. Please try again in a moment.', sent: [] })
+    expect(pressed).toEqual({ answer: PRESS_FAILED, sent: [] })
     expect(await rowsOf(userId)).toEqual([])
     expect(labels(asking)).toEqual(['Add these 2', 'Skip'])
     // The log has that the press failed before what it asked for was done, and nothing of the purchases.

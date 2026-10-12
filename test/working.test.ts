@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { depsFor } from '../src/deps'
 import { findUser } from '../src/store'
 import { handleUpdate } from '../src/telegram/handler'
+import { busyReply } from '../src/telegram/replies'
+import { FAILED, NOT_ANSWERED, TOOK_TOO_LONG, WORKING } from '../src/telegram/texts'
 import { AI_URL, refusing, saying } from './ai-helpers'
 import { newTelegramId, plain, userCount } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -12,12 +14,6 @@ import { catchConsole } from './log-helpers'
 // posted, in order, and answers as a test has it answer. A stand-in for the AI provider answers when a test lets it.
 // The clock is a fake one that a test moves, so nothing here waits the four seconds between two showings that the
 // bot is writing, the 5 that a request to Telegram is given, or the 27 that a question is given.
-
-const WORKING =
-  'Working on it… If this message is still here in half a minute, something went wrong. Please ask again.'
-const NOT_ANSWERED = 'That question could not be answered. Try again later, or ask it another way.'
-const TOOK_TOO_LONG = 'That question took too long to answer. Try again later, or ask it another way.'
-const FAILED = "Something went wrong on the bot's side. Please try again in a moment."
 
 const API = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/`
 
@@ -569,17 +565,18 @@ describe('a question that cannot be answered', () => {
     ['later', {}],
   ])(
     'has its user told to try again %s, in the place of the placeholder, when the provider has had too many requests',
-    async (when, headers) => {
+    async (_, headers) => {
       const logged = catchConsole()
       provider.mockImplementationOnce(refusing(429, 'Rate limit reached.', headers))
       const { telegramId, later } = await question()
 
       await later()
 
+      const wait = headers['retry-after']
       expect(telegram.mock.calls).toEqual([
         placeholder(telegramId),
         typing(telegramId),
-        edited(telegramId, `The assistant has reached its limit for now. Try again ${when}.`),
+        edited(telegramId, busyReply(wait ? Number(wait) : undefined)),
       ])
       expect(logged.events('question')).toEqual([
         { ...(await failedLine(telegramId)), outcome: 'busy', ...providerRefused(429) },

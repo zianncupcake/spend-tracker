@@ -1,25 +1,11 @@
+import { DEFAULT_BASE_URL } from '../src/ai/provider'
+
 // What the tests of the bot's assistant share: where the AI provider is reached, what a request to it holds, and
 // what a provider with a chat completions API answers with. Nothing here reaches a provider: the tests put a
 // stand-in in its place, and these make what the stand-in is to say.
 
 /** Where the bot asks the model when the service is set up with a key and nothing else. */
-export const AI_URL = 'https://api.groq.com/openai/v1/chat/completions'
-
-/**
- * What the model is told of a message that asks for several things, word for word: one line of what it is told
- * before a question, which the tests that have all of that written out share.
- */
-export const ONE_AT_A_TIME =
-  'Call one tool at a time. When the user asks for several things, call the tool for the first with more set to ' +
-  'true, and you will be asked again for the next: set more to false on the last.'
-
-/** The same of showing a user what they have spent: the line after that one. */
-export const SHOWN_NOT_WRITTEN =
-  'When the user asks what they have spent, or to see or list their purchases or transactions, or for a breakdown, a ' +
-  'total or what is left of a limit, call show_spending and write nothing else: the bot then shows it in tables, for ' +
-  "each card's current statement month or calendar month. Never write those out yourself. find_purchases is for " +
-  'your own reading, to find the id of a purchase or to answer what the tables do not show, such as an earlier month ' +
-  'or one merchant: the user is shown none of what it returns.'
+export const AI_URL = `${DEFAULT_BASE_URL}/chat/completions`
 
 /** A message of a conversation, as the bot posts it to the provider. */
 export interface ChatMessage {
@@ -37,6 +23,14 @@ export interface Completion {
   tools: { type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }[]
   tool_choice: string
   max_completion_tokens: number
+}
+
+/**
+ * The tools of a request with every `description` taken out, at every depth. What is left is what a call has to
+ * keep to: the names, the types, what is required and what may be null.
+ */
+export function withoutDescriptions(tools: Completion['tools']): unknown {
+  return JSON.parse(JSON.stringify(tools, (key, value) => (key === 'description' ? undefined : value)))
 }
 
 /** What the provider answers a request with, around the one message that the model wrote. */

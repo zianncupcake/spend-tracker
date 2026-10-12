@@ -5,6 +5,7 @@ import type { Action, Answer } from '../src/ai/assistant'
 import { userOfToken } from '../src/mcp/tokens'
 import { TelegramError, type RichMessage } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
+import { CANCELLED, DOING, NO_CARDS, NO_PURCHASES_SAID, NOT_DONE, SEE_REPLY } from '../src/telegram/texts'
 import { connectedChat, connectionOf, deps, openChat, sentRich, signIn, type Posted } from './connect-helpers'
 import {
   bold,
@@ -43,21 +44,9 @@ import {
 // test/assistant-actions.test.ts has the assistant's half. The chats, the clock and the service are those of
 // ./connect-helpers: it is 12:00 on 9 October 2026 in Singapore.
 
-const DOING =
-  'Doing what you asked… If this message is still here in half a minute, something went wrong. Check /spend ' +
-  'before you ask again.'
-const NOT_DONE =
-  'Something that you asked for could not be done. Ask for it another way, or send /start for the list of commands.'
-const NO_CARDS = [
-  'You have no cards yet. Add one with:',
-  '/addcard <nickname> <last4> statement <day>',
-  '/addcard <nickname> <last4> calendar',
-].join('\n')
 const DELETE_WARNING =
   'This deletes your cards and every purchase stored for you, and cannot be undone. Send /delete confirm to go ahead.'
 const TOKYO = "Your time zone is now Asia/Tokyo. Your cards' cycles and months begin and end by it."
-/** What a press of "Do it" is answered with, and what the message that asked then ends with. */
-const SEE_REPLY = 'See the reply below.'
 
 /** The stand-in for the assistant. With nothing said, a test is to have nothing asked of it. */
 let answering: MockInstance<typeof assistant.answerQuestion>
@@ -301,7 +290,7 @@ describe('purchases that the assistant makes out in a message', () => {
     const { rich, texts } = await told(chat)
 
     expect(rich).toEqual([])
-    expect(texts.map((message) => message.text)).toEqual(['No purchases to add were found in that message.'])
+    expect(texts.map((message) => message.text)).toEqual([NO_PURCHASES_SAID])
     expect(await rowsOf(await chat.userId())).toEqual([])
   })
 })
@@ -646,8 +635,8 @@ describe('a press of a button under a message that asks before a command is run'
 
     const pressed = await chat.press(asking, 'Cancel')
 
-    expect(pressed).toEqual({ answer: 'Cancelled. Nothing was changed.', sent: [] })
-    expect(asking.text).toBe(`${shown}\nCancelled. Nothing was changed.`)
+    expect(pressed).toEqual({ answer: CANCELLED, sent: [] })
+    expect(asking.text).toBe(`${shown}\n${CANCELLED}`)
     expect(asking.buttons).toBeUndefined()
     expect(await rowsOf(userId)).toMatchObject([{ id: purchase, removed_at: null }])
     expect(logged.events('confirm_press')).toEqual([

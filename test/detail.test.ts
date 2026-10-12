@@ -1,6 +1,9 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatBlockedError, TelegramError } from '../src/telegram/api'
+import { COUNTED_BY_POSTING } from '../src/telegram/format'
+import { BY_HAND_NOTE } from '../src/telegram/purchases'
+import { FAILED, NO_CARDS } from '../src/telegram/texts'
 import { clock, deps, openChat, sent, sentRich, type Posted } from './connect-helpers'
 import { buy } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -26,9 +29,6 @@ function counting(from: string, to: string): string {
 const OCTOBER_COUNTS =
   'The total counts purchases made from 29 Sep to 29 Oct. The bank counts a purchase by the day it is posted, so ' +
   'one made in the last 2 days of a month is counted in the next month.'
-
-/** What a chat is sent when the handling of its message fails, the sending of the reply included. */
-const FAILED = "Something went wrong on the bot's side. Please try again in a moment."
 
 beforeEach(() => {
   vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 400))
@@ -259,7 +259,7 @@ describe('/spend with a card that is linked to a product', () => {
         'Overseas Foreign Currency Spend',
         ...foreign,
         '',
-        '* = added by hand',
+        BY_HAND_NOTE,
         '',
         'Total: SGD 254.88 + USD 5.00 in 8 purchases, resets 16 Oct',
         counting('14 Sep', '13 Oct'),
@@ -331,8 +331,7 @@ describe('/spend, where the last two days of a window are counted in the next on
       total,
       `The total counts purchases made from ${from} to ${to}.`,
       '',
-      'A bank counts a purchase by the day it is posted, so one made in the last days of a cycle or a month is ' +
-        'counted in the next one.',
+      COUNTED_BY_POSTING,
       'Totals are estimated from bank alerts.',
     ].join('\n')
 
@@ -472,7 +471,7 @@ describe('/spend with a card that is linked to no product', () => {
         '',
         ...table,
         '',
-        '* = added by hand',
+        BY_HAND_NOTE,
         '',
         'Total: SGD 101.80 in 3 purchases, resets 1 Nov',
         OCTOBER_COUNTS,
@@ -550,7 +549,7 @@ describe('/spend with a card', () => {
   })
 
   it('says how to add a card when the user has none', async () => {
-    expect(await openChat().say('/spend evol')).toContain('You have no cards yet')
+    expect(await openChat().say('/spend evol')).toBe(NO_CARDS)
   })
 })
 

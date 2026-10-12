@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { refreshAccessToken } from '../src/google/gmail'
+import { NO_SIGN_IN } from '../src/telegram/texts'
 import {
   attemptOf,
   connectedChat,
@@ -43,7 +44,7 @@ describe('/disconnect', () => {
 
     expect(await attemptOf(await chat.userId())).toBeNull()
     expect(outside.revoked).toEqual([outside.issued[0]])
-    expect(await chat.say(code)).toContain('No sign-in is waiting for a code')
+    expect(await chat.say(code)).toBe(NO_SIGN_IN)
   })
 
   it('still disconnects when Google cannot be told, and logs only that it failed, with the status', async () => {

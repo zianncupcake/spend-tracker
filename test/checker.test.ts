@@ -7,6 +7,7 @@ import worker from '../src/index'
 import { storeFor } from '../src/store'
 import { heldStoreFor } from '../src/store-held'
 import { mailStoreFor } from '../src/store-mail'
+import { NO_SIGN_IN } from '../src/telegram/texts'
 import {
   attemptOf,
   clock,
@@ -1081,7 +1082,7 @@ describe('sign-ins that nobody came back to', () => {
     expect(await attemptOf(await approved.userId())).toBeNull()
     expect(await attemptOf(await opened.userId())).toBeNull()
     expect(outside.revoked).toEqual([outside.issued[0]])
-    expect(await approved.say(code)).toContain('No sign-in is waiting for a code')
+    expect(await approved.say(code)).toBe(NO_SIGN_IN)
     // The one that still has time is left alone.
     expect(await recent.say(recentCode)).toContain('Connected sam@example.test')
   })

@@ -1,15 +1,16 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_MODEL } from '../src/ai/provider'
 import worker from '../src/index'
+import { BY_HAND_NOTE } from '../src/telegram/purchases'
+import { busyReply } from '../src/telegram/replies'
+import { ASK, EDITED, FAILED, WELCOME, WORKING } from '../src/telegram/texts'
 import { AI_URL, refusing, saying } from './ai-helpers'
 import { newTelegramId, userCount, withoutCarried } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const SECRET = env.TELEGRAM_WEBHOOK_SECRET
-
-/** What a chat is sent when the handling of its message fails. */
-const FAILED = "Something went wrong on the bot's side. Please try again in a moment."
 
 /** How long the handling of an update took, which is whatever it took: the Worker goes by the real clock. */
 const took = expect.any(Number)
@@ -178,7 +179,7 @@ describe('POST /telegram', () => {
     // Plain text, with nothing marked in it and no parse mode, and with no link previewed.
     expect(JSON.parse(init.body as string)).toEqual({
       chat_id: telegramId,
-      text: expect.stringContaining('Welcome to Spend Tracker'),
+      text: expect.stringContaining(WELCOME),
       link_preview_options: { is_disabled: true },
     })
   })
@@ -216,7 +217,7 @@ describe('POST /telegram', () => {
     expect(response.status).toBe(200)
     // The welcome, and then one line to say that it failed, which Telegram takes no more than it took the welcome.
     expect(asked()).toEqual([
-      ['sendMessage', expect.objectContaining({ text: expect.stringContaining('Welcome to Spend Tracker') })],
+      ['sendMessage', expect.objectContaining({ text: expect.stringContaining(WELCOME) })],
       ['sendMessage', { chat_id: telegramId, text: FAILED, link_preview_options: { is_disabled: true } }],
     ])
     // Both requests are logged. The update is logged as one that failed when all that was left of it was the
@@ -446,7 +447,7 @@ describe('POST /telegram with /spend and a card', () => {
                   [{ text: 'Total', colspan: 2 }, { text: '12.50', align: 'right' }, { text: '' }],
                 ],
               },
-              { type: 'paragraph', text: '* = added by hand' },
+              { type: 'paragraph', text: BY_HAND_NOTE },
               { type: 'paragraph', text: expect.stringMatching(/^Total: SGD 12\.50 in 1 purchase, resets 1 \w+$/) },
               { type: 'paragraph', text: expect.stringMatching(COUNTS) },
             ],
@@ -476,7 +477,7 @@ describe('POST /telegram with /spend and a card', () => {
     expect(text).toMatch(/^visa ••••1234: 1 \w+ to \d+ \w+\n\n/)
     // After the table comes what its mark means, and then the total with the days that it counts.
     const [mark, below] = text.split('\n\n').slice(-2)
-    expect(mark).toBe('* = added by hand')
+    expect(mark).toBe(BY_HAND_NOTE)
     expect(below.split('\n')).toEqual([
       expect.stringMatching(/^Total: SGD 12\.50 in 1 purchase, resets 1 \w+$/),
       expect.stringMatching(COUNTS),
@@ -530,9 +531,7 @@ describe('POST /telegram with a question', () => {
 
   /** The placeholder that a question is answered with at once: a message of plain text. */
   function placeholder(telegramId: number) {
-    const text =
-      'Working on it… If this message is still here in half a minute, something went wrong. Please ask again.'
-    return ['sendMessage', { chat_id: telegramId, text, link_preview_options: { is_disabled: true } }]
+    return ['sendMessage', { chat_id: telegramId, text: WORKING, link_preview_options: { is_disabled: true } }]
   }
 
   /** The showing of the chat that the bot is writing. */
@@ -586,13 +585,13 @@ describe('POST /telegram with a question', () => {
     // The provider was asked once, with the key of the service, and with a time in which it has to answer.
     const [[url, init], ...more] = provider.mock.calls
     expect(more).toEqual([])
-    expect(url).toBe('https://api.groq.com/openai/v1/chat/completions')
+    expect(url).toBe(AI_URL)
     expect(init.method).toBe('POST')
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer test-ai-key')
     expect(new Headers(init.headers).get('content-type')).toBe('application/json')
     expect(init.signal).toBeInstanceOf(AbortSignal)
     expect(JSON.parse(init.body as string)).toMatchObject({
-      model: 'openai/gpt-oss-120b',
+      model: DEFAULT_MODEL,
       messages: [{ role: 'system' }, { role: 'user', content: 'How much have I spent?' }],
       // The tool that reads, and the four by which the model says what it was asked to have done: the one that
       // shows what was spent is the first of the five.
@@ -620,7 +619,7 @@ describe('POST /telegram with a question', () => {
     expect(asked()).toEqual([
       placeholder(telegramId),
       typing(telegramId),
-      inPlaceOf(telegramId, 1, 'The assistant has reached its limit for now. Try again later.'),
+      inPlaceOf(telegramId, 1, busyReply(undefined)),
     ])
     const refused = { error: 'Error', reason: 'http_error', status: 429 }
     expect(logged.events('question')).toMatchObject([{ outcome: 'busy', sent: 'edit', requests: 1, ...refused }])
@@ -643,7 +642,7 @@ describe('POST /telegram with a question', () => {
     expect(asked()).toEqual([
       placeholder(telegramId),
       typing(telegramId),
-      inPlaceOf(telegramId, 1, 'The assistant has reached its limit for now. Try again in about 12 minutes.'),
+      inPlaceOf(telegramId, 1, busyReply(720)),
     ])
     // How long the provider said to wait is in the line of the request to it, and not in the line of the question.
     expect(logged.events('ai_call')).toMatchObject([{ status: 429, retry_after: 720 }])
@@ -664,17 +663,12 @@ describe('POST /telegram with a question', () => {
     expect(more).toEqual([])
     expect(method).toBe('sendMessage')
     // The welcome says that a question can be asked, and what becomes of one.
-    expect(body.text).toContain(
-      'You can also just ask a question in your own words, and it is answered by an AI service, which is sent your ' +
-        'question and the card and purchase details needed to answer it.',
-    )
+    expect(body.text).toContain(ASK)
     expect(provider).not.toHaveBeenCalled()
   })
 })
 
 describe('POST /telegram with a message that the bot does not read', () => {
-  const EDITED = 'The bot does not read a message again after it has been edited. Please send it as a new message.'
-
   /** Posts the Worker an update with a message of a user's, in their private chat with the bot. */
   function post(telegramId: number, kind: string, content: object) {
     const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId, is_bot: false, first_name: 'Jane' }]
