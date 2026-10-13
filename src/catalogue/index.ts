@@ -93,6 +93,17 @@ export function startingCategory(
 }
 
 /**
+ * Whether the purchase is one to ask its user about: no rule placed it, so nothing is stored for it, on a product
+ * whose rules go by the codes of merchants. A product that lists no codes has no more to learn from a merchant. And
+ * one in another currency is left out, as a cap is held against what was spent in the product's own: see `sumsOf`
+ * in ../telegram/purchases.
+ */
+export function unplaced(product: Product, purchase: { currency: string; category: string | null }): boolean {
+  const byCodes = categoriesOf(product).some(({ mccs }) => mccs !== undefined)
+  return byCodes && purchase.category === null && purchase.currency === product.homeCurrency
+}
+
+/**
  * Where each product counts a purchase in its own currency, at a merchant of the code or of the name: what the
  * assistant's card_rules answers. A name that the product lists comes before a code, as in `startingCategory`. The
  * code is the one that was given or, with none, the one that ./merchants knows for the name: `mcc` is that, or null.

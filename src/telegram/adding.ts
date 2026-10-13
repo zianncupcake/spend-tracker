@@ -2,7 +2,7 @@
 // that are held until their user answers for them with a button.
 
 import { MAX_PURCHASES_PER_PHOTO, type PhotoReading } from '../ai/photo'
-import { categoriesOf, categoryName, categoryOf, choicesOf, productOf } from '../catalogue'
+import { categoriesOf, categoryName, categoryOf, choicesOf, productOf, unplaced } from '../catalogue'
 import type { Deps } from '../deps'
 import { perCurrency } from '../domain/breakdown'
 import { startingCategoryOn } from '../domain/sorting'
@@ -33,6 +33,7 @@ import {
   purchaseLine,
   purchaseTables,
   sortEnd,
+  sortPrompt,
   UNSURE_NOTE,
   type Dated,
   type Line,
@@ -40,9 +41,9 @@ import {
   type Table,
 } from './purchases'
 import { label, spendLine } from './replies'
-import type { Tabled } from './sending'
+import { sendReply, type Tabled } from './sending'
 import { DEFAULT_CURRENCY, type Handling } from './shared'
-import { TOO_MANY_BY_HAND } from './texts'
+import { moreNotPlaced, NOT_PLACED, TOO_MANY_BY_HAND } from './texts'
 
 /**
  * A reading of purchases to add, as `readPhoto` gives one when it found some. Nothing in it says what it was read
@@ -83,7 +84,8 @@ interface OnCard {
 /**
  * What the user of a reading is told of the adding of its purchases: those that were added, as a reply that is sent
  * as a rich message, and after it the messages of text, which are the purchases that are held, with their buttons,
- * and what there is to know besides. A reading that left nothing to tell of has neither.
+ * what there is to know besides, and last those that were added with nothing to place them: see unplacedPrompts. A
+ * reading that left nothing to tell of has neither.
  */
 export interface Added {
   rich?: Tabled
@@ -203,7 +205,10 @@ export async function pressHeld(
   // After what was added comes the note of those that are counted in the window after theirs: see carriedNotes.
   const on = byCard(cards, added)
   const notes = [...carriedNotes(on, now(), user.timezone, day), ...keptNotes(kept)]
-  return done(answered, [...addedLines(on), ...notes.map((text) => ({ text }))])
+  await done(answered, [...addedLines(on), ...notes.map((text) => ({ text }))])
+  // Asked once the purchases are let go of, so a press that comes after this one asks nothing again. Two that come
+  // together both ask, as both say what was added.
+  await sendReply(messenger, chatId, unplacedPrompts(on, user.timezone))
 }
 
 /**
@@ -320,6 +325,7 @@ export async function addRead(
   const day = dayIn(user.timezone, now())
   const added = kept.added.map((purchase) => ({ ...purchase, date: day(new Date(purchase.occurredAt * 1000)) }))
   let rich: Tabled | undefined
+  let toSort: Outgoing[] = []
   if (added.length > 0) {
     // What was added is told by the card that it is stored on, which is not the reading's when an earlier delivery
     // of the message stored it on another: see byCard. With it is where it leaves that card, as the reply to /add
@@ -327,6 +333,7 @@ export async function addRead(
     const on = byCard(cards, added)
     const totals = await cardTotals(store, on.flatMap((each) => each.card ?? []), now(), user.timezone)
     rich = addedReply(on, totals, user.timezone, carriedNotes(on, now(), user.timezone, day))
+    toSort = unplacedPrompts(on, user.timezone)
   }
   const asked = unclear.length > 0 ? [heldPrompt(messageId, unclear, day, cards, card, named)] : []
 
@@ -344,7 +351,8 @@ export async function addRead(
         'add them with /add.',
     )
   }
-  return { rich, text: notes.length > 0 ? [...asked, { text: notes.join('\n') }] : asked }
+  const besides = notes.length > 0 ? [{ text: notes.join('\n') }] : []
+  return { rich, text: [...asked, ...besides, ...toSort] }
 }
 
 /** What `keep` comes to when it is given no purchases. */
@@ -560,6 +568,30 @@ function addedReply(on: OnCard[], totals: CardTotals[], timeZone: string, notes:
       return inMessages(parts.flatMap((part) => [{ text: '' }, ...part]))
     },
   }
+}
+
+/**
+ * The most purchases that are asked about after one adding: see unplacedPrompts. Each is a message of its own, and
+ * five of those are as many as one adding should set off.
+ */
+const MAX_ASKED = 5
+
+/**
+ * What asks about those of the purchases that were added with nothing to place them: see `unplaced`. A line says
+ * why, and under it each is a message of its own, as /sort shows it, with the buttons that move it. No more are
+ * asked about than MAX_ASKED, and a line counts the rest. Nothing when something placed every purchase. `on` are the
+ * purchases by the card that each is stored on: see byCard.
+ */
+function unplacedPrompts(on: OnCard[], timeZone: string): Outgoing[] {
+  const those = on.flatMap(({ card, purchases }) => {
+    const product = productOf(card?.product)
+    if (!product) return []
+    return purchases.filter((purchase) => unplaced(product, purchase)).map((purchase) => ({ product, purchase }))
+  })
+  if (those.length === 0) return []
+  const asked = those.slice(0, MAX_ASKED).map(({ product, purchase }) => sortPrompt(product, purchase, timeZone))
+  const more = those.length - asked.length
+  return [{ text: NOT_PLACED }, ...asked, ...(more > 0 ? [{ text: moreNotPlaced(more) }] : [])]
 }
 
 /** Purchases that are held, each on a line: see heldLine. */

@@ -16,7 +16,7 @@ import { perCurrency, type Amount, type Breakdown } from '../domain/breakdown'
 import { MANUAL, type Card, type Transaction } from '../store'
 import type { HeldPurchase } from '../store-held'
 import type { Button, MessageEntity, Outgoing, RichBlock, TableCell } from './api'
-import { formatAmount, formatMoney } from './format'
+import { formatAmount, formatMoney, formatShortDate } from './format'
 
 /**
  * The most text that Telegram takes in one message. It is counted here in UTF-16 code units, of which a text has
@@ -229,6 +229,14 @@ export function sortEnd(
     .filter((choice) => choice.key !== current)
     .map(({ key, label }) => [{ text: `Mark as ${label}`, data: `${purchase.id}:${key}` }])
   return { line: `ID ${purchase.id}: ${whereSorted(product, purchase.category)}`, buttons }
+}
+
+/** A purchase, with where it is sorted and the buttons that move it. */
+export function sortPrompt(product: Product, purchase: Transaction, timeZone: string): Outgoing {
+  const { line, buttons } = sortEnd(product, purchase)
+  const date = formatShortDate(new Date(purchase.occurredAt * 1000), timeZone)
+  const [message] = inMessages([purchaseLine(purchase, date), { text: line }])
+  return { ...message, buttons }
 }
 
 /** What a button of `sortEnd` sent back, read again. Null for anything else: a client can send what no button holds. */

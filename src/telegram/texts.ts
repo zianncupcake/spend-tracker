@@ -301,6 +301,17 @@ export const TOO_MANY_BY_HAND =
   `You have added ${MAX_BY_HAND_PER_DAY} purchases by hand in the last 24 hours, which is as many as can be added ` +
   'in that time. Try again later.'
 
+// What the bot says around the purchases that it asks about once it has added them, because no rule placed them:
+// see `unplaced` in ../catalogue. Where each counts until it is marked is said in its own message.
+
+/** What goes before them: why they are asked about. */
+export const NOT_PLACED = 'Not placed by any rule, so each counts as shown until you mark it:'
+
+/** What comes after them when there are more than are asked about. What told of the adding lists those by id. */
+export function moreNotPlaced(count: number): string {
+  return `Not asked about: ${count} more of those listed above. /sort <purchase id> asks about one.`
+}
+
 export const TIMEZONE_USAGE = '/timezone <IANA name>, for example /timezone Asia/Tokyo'
 
 export const NO_SIGN_IN =
