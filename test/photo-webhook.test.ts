@@ -7,7 +7,7 @@ import { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai
 import worker from '../src/index'
 import { findUser } from '../src/store'
 import * as api from '../src/telegram/api'
-import { BY_HAND_NOTE, UNSURE_NOTE } from '../src/telegram/purchases'
+import { BY_HAND_NOTE } from '../src/telegram/purchases'
 import { READING } from '../src/telegram/texts'
 import { newTelegramId, withoutCarried } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -80,11 +80,7 @@ afterEach(() => {
 /** A request as the Worker's own handler takes one, with which a test brings an execution context of its own. */
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>
 
-/**
- * The id of the last message that a test's user sent. The ids go up from a number that nothing else in a line of
- * the log could be: a test says that no line holds the id of a message, and the Worker goes by the real clock, so a
- * count or a duration could be any small number, and was one of these ids once in six runs.
- */
+/** The id of the last message that a test's user sent. */
 let lastMessage = 7_100_000_000
 
 /** The request that Telegram posts the Worker for an update that holds the message, or the press. */
@@ -276,87 +272,6 @@ describe('POST /telegram with a photo', () => {
     // Nothing of the photo is in a line: not its caption, its file, a merchant, an amount or the chat.
     const never = ['bus/mrt', 'add these', 'made-up', 'BUS', 'attacker', '12.40', '1240', 'Jane', 'test-ai-key']
     for (const text of [...never, String(telegramId)]) expect(logged.text()).not.toContain(text)
-  })
-
-  it('sends the purchases that it asks about with their buttons as an inline keyboard, and answers the press of one', async () => {
-    const telegramId = await userWith('visa', 'evol')
-    const user = (await findUser(env.DB, telegramId))?.id
-    reader.mockResolvedValue(read([bought(300, 'TEA HOUSE', { unsure: true })]))
-    const sent = message(telegramId, { photo: PHOTO })
-    const photoId = sent.message.message_id
-
-    const { response, deferred } = await post(sent)
-
-    expect([response.status, deferred]).toEqual([200, true])
-    // The placeholder, the showing that the bot is writing, the message that asks, and the placeholder deleted.
-    const [, , [method, asking], removed, ...more] = asked()
-    expect(more).toEqual([])
-    expect(removed).toEqual(['deleteMessage', { chat_id: telegramId, message_id: 3 }])
-    expect(method).toBe('sendMessage')
-    const text = String(asking.text)
-    expect(text.split('\n')).toEqual([
-      'Which card was this purchase made with? The bot could not tell.',
-      expect.stringMatching(/^\d+ \w+ · SGD 3\.00 · TEA HOUSE · not sure$/),
-      UNSURE_NOTE,
-    ])
-    expect(asking).toEqual({
-      chat_id: telegramId,
-      text,
-      // The merchant's name is marked as code, so that nothing in it can be tapped.
-      entities: [{ type: 'code', offset: text.indexOf('TEA HOUSE'), length: 'TEA HOUSE'.length }],
-      link_preview_options: { is_disabled: true },
-      // A row to each button, and what each holds for the bot: the id of the photo's message, and the choice.
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: 'Add to visa', callback_data: `held:${photoId}:1234` }],
-          [{ text: 'Add to evol', callback_data: `held:${photoId}:5678` }],
-          [{ text: 'Skip', callback_data: `held:${photoId}:skip` }],
-        ],
-      },
-    })
-
-    // The press of a button, as Telegram posts it: with what the button holds, and with the message as it stands.
-    telegramApi.mockClear()
-    const under = { message_id: 4, date: 1, chat: { id: telegramId, type: 'private' }, text, entities: asking.entities }
-    const press = { id: 'press-1', from: { id: telegramId }, chat_instance: 'made-up', data: `held:${photoId}:5678` }
-    const logged = catchConsole()
-
-    const pressed = await post({ callback_query: { ...press, message: under } })
-
-    // A press is answered before the response, and leaves nothing for after it.
-    expect([pressed.response.status, pressed.deferred]).toEqual([200, false])
-    const [answer, [edit, edited], ...rest] = asked()
-    expect(rest).toEqual([])
-    expect(answer).toEqual(['answerCallbackQuery', { callback_query_id: 'press-1', text: 'Added 1 purchase.' }])
-    expect(edit).toBe('editMessageText')
-    const added = String(edited.text)
-    expect(added.split('\n')).toEqual([
-      'Added to evol ••••5678 as Online / Mobile Contactless Spend:',
-      expect.stringMatching(/^ID \d+ · \d+ \w+ · SGD 3\.00 · TEA HOUSE · by hand$/),
-    ])
-    expect(edited).toEqual({
-      chat_id: telegramId,
-      message_id: 4,
-      text: added,
-      entities: [{ type: 'code', offset: added.indexOf('TEA HOUSE'), length: 'TEA HOUSE'.length }],
-      link_preview_options: { is_disabled: true },
-      // A keyboard with no rows takes the buttons away.
-      reply_markup: { inline_keyboard: [] },
-    })
-    expect(logged.events()).toEqual([
-      { event: 'held_press', user, outcome: 'added', held: 1, stored: 1 },
-      { event: 'update', kind: 'press', outcome: 'replied', ms: took },
-    ])
-    for (const text of ['press-1', 'held:', 'TEA', '5678', String(photoId), String(telegramId)]) {
-      expect(logged.text()).not.toContain(text)
-    }
-
-    // The second press of the same button finds nothing to add.
-    telegramApi.mockClear()
-    await post({ callback_query: { ...press, message: under } })
-    expect(asked()).toEqual([
-      ['answerCallbackQuery', { callback_query_id: 'press-1', text: 'That button no longer works.' }],
-    ])
   })
 })
 

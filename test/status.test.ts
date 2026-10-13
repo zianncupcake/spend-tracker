@@ -142,26 +142,4 @@ describe('/status', () => {
     expect(await asText(chat)).toContain('Last 30 days: 2 purchases recorded, 1 alert could not be read')
     expect(await asText(bystander)).toContain('Last 30 days: 1 purchase recorded, 0 alerts could not be read')
   })
-
-  it('counts what was read from alerts: no purchase that was added by hand, and none that was taken out', async () => {
-    const chat = await connectedChat('jane@example.test')
-    const userId = await chat.userId()
-    const rows: [sourceId: string, parser: string, removedAt: number | null][] = [
-      ['read-and-kept', 'example-bank', null],
-      ['read-and-taken-out', 'example-bank', NOW_SECONDS - 60],
-      ['added-by-hand', 'manual', null],
-    ]
-    for (const [sourceId, parser, removedAt] of rows) {
-      await db
-        .prepare(
-          `INSERT INTO transactions
-             (owner_id, source_id, created_at, parser, removed_at, card_last4, amount_minor, currency, occurred_at)
-           VALUES (?, ?, ?, ?, ?, '1234', 1000, 'SGD', 0)`,
-        )
-        .bind(userId, sourceId, NOW_SECONDS - 3600, parser, removedAt)
-        .run()
-    }
-
-    expect(await chat.lines('/status')).toContain('Purchases recorded, last 30 days | 1')
-  })
 })

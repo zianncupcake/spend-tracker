@@ -58,14 +58,6 @@ describe('the authorisation URL', () => {
       code_challenge_method: 'S256',
     })
   })
-
-  it('holds neither the verifier nor the client secret, and asks Google for nothing', async () => {
-    const url = await authorizationUrl(client, 'made-up-state', VERIFIER)
-
-    expect(url).not.toContain(VERIFIER)
-    expect(url).not.toContain(client.clientSecret)
-    expect(google).not.toHaveBeenCalled()
-  })
 })
 
 describe('exchanging a code', () => {

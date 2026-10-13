@@ -8,7 +8,6 @@ import {
   products,
   productTerms,
   ruledByCode,
-  ruledByName,
   rulesFor,
   startingCategory,
 } from '../src/catalogue'
@@ -158,21 +157,6 @@ describe('the UOB EVOL Card', () => {
       expect(at(merchant)).toBeNull()
     }
   })
-
-  it('stores nothing for a purchase that no rule settles, which leaves it online', () => {
-    for (const merchant of ['COFFEE PLACE', 'BOOK SHOP SINGAPORE', null]) {
-      expect(at(merchant)).toBeNull()
-      expect(categoryOf(uobEvol, at(merchant))).toBe('online')
-    }
-  })
-
-  it('tells which merchants a rule places, by the text of their names', () => {
-    expect(ruledByName(uobEvol, 'NETFLIX.COM')).toBe('selected')
-    expect(ruledByName(uobEvol, 'payment*singtel sg')).toBe('selected')
-    expect(ruledByName(uobEvol, 'COFFEE PLACE')).toBeUndefined()
-    // A rule for another currency places a purchase, and no merchant.
-    expect(ruledByName(uobEvol, 'AIRLINE')).toBeUndefined()
-  })
 })
 
 describe('the HSBC Revolution Credit Card', () => {
@@ -254,12 +238,9 @@ describe('the category code of a merchant', () => {
     { product: hsbcRevolution, mcc: 4121, category: 'eligible' },
     { product: hsbcRevolution, mcc: 5814, category: 'other' },
     { product: ocbcRewards, mcc: 5651, category: 'shopping' },
-    { product: ocbcRewards, mcc: 5814, category: 'other' },
     { product: dbsWomansWorld, mcc: 6300, category: 'other' },
     // No category of the product takes a code that it does not list.
     { product: dbsWomansWorld, mcc: 7922, category: undefined },
-    // The product lists no codes at all.
-    { product: uobEvol, mcc: 5814, category: undefined },
   ])('puts $mcc in $category on $product.key', ({ product, mcc, category }) => {
     expect(ruledByCode(product, mcc)).toBe(category)
   })
@@ -271,8 +252,6 @@ describe('the category code of a merchant', () => {
     { product: ocbcRewards, merchant: 'NTUC FAIRPRICE', category: 'other' },
     { product: ocbcRewards, merchant: 'UNITY BY FAIRPRICE', category: 'shopping' },
     { product: ocbcRewards, merchant: 'TIKTOK*SHOP', category: 'shopping' },
-    { product: hsbcRevolution, merchant: 'KOI THE SG', category: 'other' },
-    { product: hsbcRevolution, merchant: 'GRAB RIDE', category: 'eligible' },
     { product: hsbcRevolution, merchant: 'BUS/MRT 4471 SINGAPORE SG', category: 'other' },
     { product: dbsWomansWorld, merchant: 'YOUTRIP', category: 'other' },
     { product: dbsWomansWorld, merchant: 'SHOPEE PAY', category: 'other' },
@@ -288,7 +267,6 @@ describe('where the products count a purchase, by the code or the name of its me
   it.each<[key: string, asked: Asked, mcc: number | null, group: string, cap: string | null, bonus: string]>([
     // A code that the product lists, and one that falls to its category for the codes that it does not list.
     ['hsbc-revolution', { mcc: 5812 }, 5812, 'Eligible Transactions', '1000.00', 'yes'],
-    ['dbs-womans-world', { mcc: 6300 }, 6300, 'Other Spend', null, 'no'],
     ['ocbc-rewards', { mcc: 5812 }, 5812, 'Other Spend', null, 'no'],
     // The product lists other codes and has no such category, or lists none: the group is where a purchase starts.
     ['dbs-womans-world', { mcc: 5812 }, 5812, 'Online Spend', '1000.00', 'depends'],

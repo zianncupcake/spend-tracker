@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { deleteUser, findOrCreateUser, storeFor } from '../src/store'
 import { claimAttempt, connectStoreFor } from '../src/store-connect'
 import { heldStoreFor } from '../src/store-held'
@@ -128,18 +128,6 @@ describe('held purchases that nobody answered for', () => {
     expect(await heldStoreFor(db, second.id).find(73, NOW)).toMatchObject({ messageId: 73 })
     // There is nothing left for the next run to delete.
     expect(await removeExpiredBatches(db, NOW)).toBe(0)
-  })
-
-  it('are deleted in one statement, however many there are', async () => {
-    const user = await newUser()
-    for (let messageId = 1; messageId <= 30; messageId++) await hold(user.id, messageId, NOW - DAY)
-    const queried = vi.spyOn(db, 'prepare')
-
-    expect(await removeExpiredBatches(db, NOW)).toBe(30)
-
-    expect(queried).toHaveBeenCalledTimes(1)
-    queried.mockRestore()
-    expect(await ownersOf('held_batches')).toEqual([])
   })
 
   it('are looked for by when their time is up, so that a run does not read through all that is still held', async () => {

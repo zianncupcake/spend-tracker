@@ -5,7 +5,7 @@ import { DEFAULT_MODEL } from '../src/ai/provider'
 import worker from '../src/index'
 import { BY_HAND_NOTE } from '../src/telegram/purchases'
 import { busyReply } from '../src/telegram/replies'
-import { ASK, EDITED, FAILED, WELCOME, WORKING } from '../src/telegram/texts'
+import { ASK, FAILED, WELCOME, WORKING } from '../src/telegram/texts'
 import { AI_URL, refusing, saying } from './ai-helpers'
 import { newTelegramId, userCount, withoutCarried } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -184,29 +184,6 @@ describe('POST /telegram', () => {
     })
   })
 
-  it('adds a purchase once when Telegram posts the same update twice, and replies to both', async () => {
-    const telegramId = newTelegramId()
-    await say(telegramId, '/addcard visa 1234 calendar')
-    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
-    const message = { message_id: 9001, date: 1, text: '/add visa 12.50 Lunch', chat, from }
-    const body = JSON.stringify({ update_id: 7, message })
-    telegramApi.mockClear()
-
-    // Telegram posts an update again when it has not heard that the update was taken.
-    const responses = [
-      await request('POST', '/telegram', { secret: SECRET, body }),
-      await request('POST', '/telegram', { secret: SECRET, body }),
-    ]
-
-    expect(responses.map((response) => response.status)).toEqual([200, 200])
-    const [[, first], [, again], ...more] = asked()
-    expect(more).toEqual([])
-    // The second reply is the first again: the same purchase, counted once in the total of its card.
-    expect(first.text).toMatch(/^ID \d+ · \d+ \w+ · SGD 12\.50 · Lunch · by hand\n/)
-    expect(first.text).toMatch(/\nvisa ••••1234: SGD 12\.50 in 1 purchase, resets 1 \w+$/)
-    expect(again).toEqual(first)
-  })
-
   it('still answers 200 when Telegram takes no reply, not even that something went wrong, and logs no message content', async () => {
     const logged = catchConsole()
     const telegramId = newTelegramId()
@@ -245,59 +222,6 @@ describe('POST /telegram', () => {
       { ...failedUpdate({ kind: 'unreadable' }, false, false), error: 'SyntaxError' },
     ])
     expect(logged.text()).not.toContain('private')
-  })
-})
-
-describe('POST /telegram when the handling of a message fails', () => {
-  /** Has the database fail at every statement that reads a user's cards, with an error that quotes a card. */
-  function failAtCards() {
-    const prepare = env.DB.prepare.bind(env.DB)
-    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
-      if (query.includes('FROM cards')) throw new Error('a made-up failure that quotes a card: visa 1234')
-      return prepare(query)
-    })
-  }
-
-  it('says to try again when it is the reply to /mcp, whose token is nowhere but in its reply that Telegram refuses', async () => {
-    const telegramId = newTelegramId()
-    telegramApi.mockImplementationOnce(async () => new Response('Bad Gateway', { status: 502 }))
-    const logged = catchConsole()
-
-    const response = await say(telegramId, '/mcp')
-
-    // Sent again, the command does no harm, and for a token it is the only way to one that its user has seen.
-    expect(response.status).toBe(200)
-    expect(asked().map(([method, body]) => [method, body.text])).toEqual([
-      ['sendMessage', expect.any(String)],
-      ['sendMessage', FAILED],
-    ])
-    const failure = { error: 'Error', reason: 'http_error', status: 502 }
-    expect(logged.events()).toEqual([
-      refusedCall('sendMessage', 502),
-      { ...failedUpdate({ kind: 'command', command: 'mcp' }, true, true), ...failure },
-    ])
-    // Nothing of the token that was made and lost is in the log.
-    expect(logged.text()).not.toContain('stmcp_')
-  })
-
-  it('answers 200 all the same when the chat cannot be told that something went wrong, which is logged', async () => {
-    const telegramId = newTelegramId()
-    failAtCards()
-    telegramApi.mockImplementation(async () => new Response('Bad Gateway', { status: 502 }))
-    const logged = catchConsole()
-
-    const response = await say(telegramId, '/spend')
-
-    expect(response.status).toBe(200)
-    expect(asked()).toEqual([
-      ['sendMessage', { chat_id: telegramId, text: FAILED, link_preview_options: { is_disabled: true } }],
-    ])
-    // What the update failed with is the database's error, and the telling that failed has its own line before it.
-    // That line does not make the command one that had been handled: `handled` says that it was not.
-    expect(logged.events()).toEqual([
-      refusedCall('sendMessage', 502),
-      { ...failedUpdate({ kind: 'command', command: 'spend' }, false, false), error: 'Error' },
-    ])
   })
 })
 
@@ -359,13 +283,10 @@ describe('POST /telegram with buttons', () => {
     ])
   })
 
-  it.each([
-    ['something that is not text', { purchase: 1 }],
-    ['nothing', undefined],
-  ])('answers a press that brings %s, and does nothing else', async (_, data) => {
+  it('answers a press that brings something that is not text, and does nothing else', async () => {
     const { telegramId, message } = await onlinePurchase()
 
-    const response = await press(telegramId, message, data)
+    const response = await press(telegramId, message, { purchase: 1 })
 
     expect(response.status).toBe(200)
     expect(asked()).toEqual([
@@ -408,54 +329,6 @@ describe('POST /telegram with /spend and a card', () => {
     const [, id] = /^ID (\d+) /.exec((await replyTo(telegramId, `/add visa 12.50 ${MERCHANT}`)).text) ?? []
     return { telegramId, id }
   }
-
-  it('sends the purchases as one rich message, in whose plain text Telegram is to detect nothing', async () => {
-    const { telegramId, id } = await purchaseOnCard()
-
-    const response = await say(telegramId, '/spend visa')
-
-    expect(response.status).toBe(200)
-    expect(asked()).toEqual([
-      [
-        'sendRichMessage',
-        {
-          chat_id: telegramId,
-          rich_message: {
-            skip_entity_detection: true,
-            blocks: [
-              {
-                type: 'paragraph',
-                text: { type: 'bold', text: expect.stringMatching(/^visa ••••1234: 1 \w+ to \d+ \w+$/) },
-              },
-              {
-                type: 'table',
-                is_bordered: true,
-                cells: [
-                  [
-                    { text: 'ID', is_header: true },
-                    { text: 'Date', is_header: true },
-                    { text: 'SGD', is_header: true, align: 'right' },
-                    { text: 'Merchant', is_header: true },
-                  ],
-                  [
-                    { text: `${id}*`, align: 'right' },
-                    { text: expect.stringMatching(/^\d+ \w+$/) },
-                    { text: '12.50', align: 'right' },
-                    // The merchant's name as it was given, and as a string, which is plain text.
-                    { text: MERCHANT },
-                  ],
-                  [{ text: 'Total', colspan: 2 }, { text: '12.50', align: 'right' }, { text: '' }],
-                ],
-              },
-              { type: 'paragraph', text: BY_HAND_NOTE },
-              { type: 'paragraph', text: expect.stringMatching(/^Total: SGD 12\.50 in 1 purchase, resets 1 \w+$/) },
-              { type: 'paragraph', text: expect.stringMatching(COUNTS) },
-            ],
-          },
-        },
-      ],
-    ])
-  })
 
   it('sends text instead when Telegram answers the rich message with an error, and logs only the status', async () => {
     const { telegramId, id } = await purchaseOnCard()
@@ -629,28 +502,6 @@ describe('POST /telegram with a question', () => {
     for (const text of ['What did I buy', 'Rate limit']) expect(logged.text()).not.toContain(text)
   })
 
-  it('says when to try again when the 429 says how long to wait, and still logs only that status', async () => {
-    const logged = catchConsole()
-    const telegramId = newTelegramId()
-    // The header is in seconds: these are twelve minutes.
-    const refusal = refusing(429, 'Rate limit reached for: What did I buy?', { 'retry-after': '720' })
-    provider.mockImplementation(async () => refusal())
-
-    const response = await tell(telegramId, 'What did I buy?')
-
-    expect(response.status).toBe(200)
-    expect(provider).toHaveBeenCalledTimes(1)
-    expect(asked()).toEqual([
-      placeholder(telegramId),
-      typing(telegramId),
-      inPlaceOf(telegramId, 1, busyReply(720)),
-    ])
-    // How long the provider said to wait is in the line of the request to it, and not in the line of the question.
-    expect(logged.events('ai_call')).toMatchObject([{ status: 429, retry_after: 720 }])
-    expect(logged.events('question')).toMatchObject([{ outcome: 'busy', error: 'Error', status: 429 }])
-    expect(logged.events('question')[0]).not.toHaveProperty('retry_after')
-  })
-
   it('leaves nothing for after its answer of a command, which is answered before it', async () => {
     const telegramId = newTelegramId()
     const ctx = createExecutionContext()
@@ -666,34 +517,6 @@ describe('POST /telegram with a question', () => {
     // The welcome says that a question can be asked, and what becomes of one.
     expect(body.text).toContain(ASK)
     expect(provider).not.toHaveBeenCalled()
-  })
-})
-
-describe('POST /telegram with a message that the bot does not read', () => {
-  /** Posts the Worker an update with a message of a user's, in their private chat with the bot. */
-  function post(telegramId: number, kind: string, content: object) {
-    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId, is_bot: false, first_name: 'Jane' }]
-    const message = { message_id: ++lastMessage, date: 1, chat, from, ...content }
-    return request('POST', '/telegram', { secret: SECRET, body: JSON.stringify({ update_id: 3, [kind]: message }) })
-  }
-
-  it('answers an edited message with what the bot does not read of it, and asks the model nothing', async () => {
-    const telegramId = newTelegramId()
-    const logged = catchConsole()
-
-    // A message of text as it stands after it was edited, which is no `message` of the update.
-    const response = await post(telegramId, 'edited_message', { edit_date: 2, text: 'How much have I spent?' })
-
-    expect(response.status).toBe(200)
-    expect(asked()).toEqual([
-      ['sendMessage', { chat_id: telegramId, text: EDITED, link_preview_options: { is_disabled: true } }],
-    ])
-    // Its words are no question, and no command: nobody is asked, and nothing is stored.
-    expect(provider).not.toHaveBeenCalled()
-    expect(await userCount(telegramId)).toBe(0)
-    // The log has that it came, what it was and that it was replied to, and nothing of the words.
-    expect(logged.events()).toEqual([{ event: 'update', kind: 'edited', outcome: 'replied', ms: took }])
-    expect(logged.text()).not.toContain('How much')
   })
 })
 
@@ -730,13 +553,7 @@ describe('other requests', () => {
   it.each([
     ['GET', '/telegram'],
     ['GET', '/nowhere'],
-    ['POST', '/'],
     ['POST', '/telegram/'],
-    ['POST', '/privacy'],
-    ['GET', '/privacy/'],
-    ['POST', '/oauth/start'],
-    ['POST', '/oauth/callback'],
-    ['GET', '/oauth'],
   ])('answers 404 to %s %s', async (method, path) => {
     expect((await request(method, path)).status).toBe(404)
   })

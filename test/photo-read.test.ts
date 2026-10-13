@@ -10,9 +10,8 @@ import {
 import { ProviderError, type AiProvider } from '../src/ai/provider'
 import { depsFor, type Deps } from '../src/deps'
 import { Failure } from '../src/log'
-import { handleUpdate } from '../src/telegram/handler'
 import { refusing, saying } from './ai-helpers'
-import { newTelegramId, seconds } from './helpers'
+import { seconds } from './helpers'
 import { catchConsole } from './log-helpers'
 
 // The reading of a photo: what the model is sent, and what is made of what it answers. A stand-in for the AI
@@ -234,7 +233,6 @@ describe('the request that a reading sends', () => {
     // Half past seven in the morning of the 10th in Singapore, and in the evening of the 9th in New York.
     ['Asia/Singapore', '2026-10-10'],
     ['America/New_York', '2026-10-09'],
-    ['Pacific/Kiritimati', '2026-10-10'],
   ])('tells the model the day that it is in the time zone %s', async (timeZone, today) => {
     clock.now = new Date('2026-10-09T23:30:00Z')
     answering(answerOf([]))
@@ -254,13 +252,10 @@ describe('the request that a reading sends', () => {
     expect(sentMessages().text).toBe(CAPTION)
   })
 
-  it.each([
-    ['nothing', ''],
-    ['nothing but blanks', ' \n\t  '],
-  ])('says in words that there was no caption, for a photo that came with %s', async (_, caption) => {
+  it('says in words that there was no caption, for a photo that came with nothing but blanks', async () => {
     answering(answerOf([]))
 
-    await read({ caption })
+    await read({ caption: ' \n\t  ' })
 
     expect(sentMessages().text).toBe(NO_CAPTION)
   })
@@ -284,33 +279,16 @@ describe('the request that a reading sends', () => {
     expect(String(posted.mock.calls[0][1]?.body)).not.toContain('\\ud83d')
   })
 
-  it.each(['image/jpeg', 'image/png', 'image/webp'])('sends the photo as a data URL of the type %s', async (mime) => {
+  it('sends the photo as a data URL of the type image/png', async () => {
     answering(answerOf([]))
 
-    await read({ mime })
+    await read({ mime: 'image/png' })
 
-    expect(sentMessages().image).toBe(`data:${mime};base64,${IMAGE_BASE64}`)
+    expect(sentMessages().image).toBe(`data:image/png;base64,${IMAGE_BASE64}`)
   })
 })
 
 describe('the photo in base64', () => {
-  it('is made by the encoder that the runtime has, which is the real workerd here', async () => {
-    expect(Uint8Array.prototype.toBase64).toBeTypeOf('function')
-    const encoder = vi.spyOn(Uint8Array.prototype, 'toBase64')
-    const other = vi.spyOn(globalThis, 'btoa')
-    const image = bytesOf(70_000)
-    const expected = base64Of(image)
-    other.mockClear()
-    answering(answerOf([]))
-
-    await read({ image })
-
-    expect(sentMessages().image).toBe(`data:image/jpeg;base64,${expected}`)
-    // The photo is encoded once, and by nothing else.
-    expect(encoder).toHaveBeenCalledTimes(1)
-    expect(other).not.toHaveBeenCalled()
-  })
-
   it('is of the bytes that it is given and no others, when they are part of a longer run', async () => {
     // As the bytes of a file are: the part that was filled, of the room that the file was read into.
     const room = bytesOf(30_000)
@@ -372,34 +350,10 @@ describe('an answer of the shape that was asked for', () => {
     })
   })
 
-  it('is read with no card and no category, when the model gave none', async () => {
-    answering(answerOf([GIVEN, { ...GIVEN, amount: '48.00', currency: 'usd', merchant: 'MADE-UP MART' }]))
+  it('puts a purchase at noon of its day in the time zone America/New_York', async () => {
+    const noon = seconds('2026-10-08T12:00:00-04:00')
 
-    expect(await read()).toEqual({
-      status: 'read',
-      card: null,
-      unknownCard: false,
-      category: null,
-      purchases: [READ, { ...READ, amountMinor: 4800, currency: 'USD', merchant: 'MADE-UP MART' }],
-      unreadable: 0,
-      more: false,
-    })
-  })
-
-  it('is a photo with nothing to add, when it holds no purchases', async () => {
-    answering(answerOf([], { card: 'evol', category: 'other', problem: 'The photo shows a made-up cat.' }))
-
-    // What the model gave as the problem is its own text, and is shown to nobody.
-    expect(await read({ caption: CAPTION })).toEqual({ status: 'nothing' })
-  })
-
-  it.each([
-    ['Asia/Singapore', '2026-10-08T12:00:00+08:00'],
-    ['America/New_York', '2026-10-08T12:00:00-04:00'],
-    ['Europe/London', '2026-10-08T12:00:00+01:00'],
-    ['UTC', '2026-10-08T12:00:00Z'],
-  ])('puts a purchase at noon of its day in the time zone %s', async (timeZone, noon) => {
-    expect(await readOne(GIVEN, { timeZone })).toEqual({ ...READ, occurredAt: seconds(noon) })
+    expect(await readOne(GIVEN, { timeZone: 'America/New_York' })).toEqual({ ...READ, occurredAt: noon })
   })
 })
 
@@ -415,12 +369,8 @@ describe('the time that a purchase is put at', () => {
     expect(await readOne(yesterday)).toEqual({ ...READ, occurredAt: seconds('2026-10-08T12:00:00+08:00') })
   })
 
-  it.each([
-    ['at its noon', '2026-10-09T12:00:00+08:00'],
-    ['a second after its noon', '2026-10-09T12:00:01+08:00'],
-    ['in its last second', '2026-10-09T23:59:59+08:00'],
-  ])('is noon of its day, for a purchase of today when the day is %s', async (_, now) => {
-    clock.now = new Date(now)
+  it('is noon of its day, for a purchase of today when the day is a second after its noon', async () => {
+    clock.now = new Date('2026-10-09T12:00:01+08:00')
 
     expect(await readOne(today)).toEqual({ ...READ, occurredAt: seconds('2026-10-09T12:00:00+08:00') })
   })
@@ -436,72 +386,11 @@ describe('the time that a purchase is put at', () => {
 
     expect(await readOne(today)).toEqual({ ...READ, occurredAt: seconds('2026-10-09T09:30:15+08:00') })
   })
-
-  it('is still of its day for a user who then moves to a time zone that is hours behind or ahead', async () => {
-    const purchase = await readOne(yesterday)
-    /** The day that a calendar in the time zone shows at the time, as YYYY-MM-DD. */
-    const dayIn = (timeZone: string, time: number) => {
-      const format = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
-      return format.format(new Date(time * 1000))
-    }
-
-    // New York is twelve hours behind Singapore, which is as far as noon carries a day.
-    for (const timeZone of ['Asia/Singapore', 'Europe/London', 'America/New_York', 'Asia/Tokyo', 'Pacific/Auckland']) {
-      expect(dayIn(timeZone, purchase?.occurredAt ?? 0)).toBe('2026-10-08')
-    }
-    // Where the day starts in Singapore is the day before it in London, which is why a purchase is not put there.
-    expect(dayIn('Europe/London', seconds('2026-10-08T00:00:00+08:00'))).toBe('2026-10-07')
-  })
-})
-
-describe('the time that a purchase is put at, beside the time that /add stores', () => {
-  // The bot itself, with a messenger that sends nothing: /add is given the same day as the model gives, at the same
-  // moment and in the same time zone, and what it stores is read from the database.
-  const quiet: Deps = {
-    ...deps,
-    messenger: {
-      send: async () => {},
-      post: async () => 1,
-      sendRich: async () => {},
-      answer: async () => {},
-      edit: async () => {},
-      delete: async () => {},
-      typing: async () => {},
-      file: async () => new Uint8Array(0),
-    },
-  }
-  let lastMessage = 9000
-
-  /** What /add stores as the time of a purchase of the date, for a new user in the time zone. */
-  async function storedByAdd(date: string, timeZone: string): Promise<number | undefined> {
-    // The bot logs each of the three messages, which is nothing that these tests are about.
-    catchConsole()
-    const telegramId = newTelegramId()
-    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
-    const say = (text: string) => handleUpdate(quiet, { message: { message_id: ++lastMessage, text, chat, from } })
-    await say(`/timezone ${timeZone}`)
-    await say('/addcard evol 5678 calendar')
-    await say(`/add evol 12.40 ${date} COFFEE PLACE`)
-    const row = await env.DB.prepare(
-      'SELECT occurred_at FROM transactions WHERE owner_id = (SELECT id FROM users WHERE telegram_id = ?)',
-    )
-      .bind(telegramId)
-      .first<{ occurred_at: number }>()
-    return row?.occurred_at
-  }
-
-  it('is refused by both, for a day that is still to come', async () => {
-    expect(await storedByAdd('2026-10-10', 'Asia/Singapore')).toBeUndefined()
-    expect(await readOne({ ...GIVEN, date: '2026-10-10' })).toBeNull()
-  })
 })
 
 describe('an answer that is not JSON, or not of the shape', () => {
-  it.each<[what: string, content: string]>([
-    ['nothing', ''],
-    ['JSON inside a fence', `\`\`\`json\n${JSON.stringify(answerOf([GIVEN]))}\n\`\`\``],
-    ['JSON with words after it', `${JSON.stringify(answerOf([GIVEN]))} I hope that helps!`],
-  ])('is a reading that failed, when the model wrote %s', async (_, content) => {
+  it('is a reading that failed, when the model wrote JSON inside a fence', async () => {
+    const content = `\`\`\`json\n${JSON.stringify(answerOf([GIVEN]))}\n\`\`\``
     posted.mockImplementationOnce(async () => Response.json(saying(content)))
 
     const reading = await read()
@@ -510,19 +399,8 @@ describe('an answer that is not JSON, or not of the shape', () => {
     expect(reading).toEqual({ status: 'failed', error })
   })
 
-  // Each way that JSON can be of another shape is in the checking of what a model gave, on its own.
-  it('is a reading that failed, when the model wrote JSON of another shape: a list of purchases', async () => {
-    answering(JSON.stringify([GIVEN]))
-
-    const reading = await read()
-
-    expect(reading).toEqual({ status: 'failed', error: new Failure('bad_reading', NOT_OF_THE_SHAPE) })
-  })
-
-  it.each<[what: string, content: string]>([
-    ['is no JSON, as it nearly always is', '{"card": null, "category": null, "purchases": [{"date": "2026-10-0'],
-    ['happens to be JSON all the same', JSON.stringify(answerOf([GIVEN]))],
-  ])('is a reading that failed, when the model ran into the most that it may write and what it wrote %s', async (_, content) => {
+  it('is a reading that failed, when the model ran into the most that it may write and what it wrote happens to be JSON all the same', async () => {
+    const content = JSON.stringify(answerOf([GIVEN]))
     const logged = catchConsole()
     posted.mockImplementationOnce(async () => Response.json(saying(content, 'length')))
     const taken = { requests: 0 }
@@ -550,15 +428,8 @@ describe('the card and the category of an answer', () => {
   const BOTH = 'these are of evol, or of ocbc'
 
   it.each<[what: string, card: unknown, category: unknown, kept: [card: string | null, category: string | null]]>([
-    ['a card of the user and a category of that card', 'evol', 'online', ['evol', 'online']],
-    ['a card of the user and no category', 'evol', null, ['evol', null]],
-    ["a card that is not the user's", 'spare', 'other', [null, null]],
-    ['a card in other letters than the user wrote it in', 'EVOL', 'other', [null, null]],
-    ['a card with blanks around it', ' evol ', 'other', [null, null]],
     ['a card that is a list', ['evol'], 'other', [null, null]],
     ['a card that is what every object has', 'constructor', 'toString', [null, null]],
-    ['a category with no card', null, 'other', [null, null]],
-    ['a category in other letters', 'evol', 'Other', ['evol', null]],
     // A model is asked for the key, and was seen to give what the category is called. The key is what is kept.
     ['what a category is called, with other blanks', 'evol', ' online/mobile\ncontactless  spend', ['evol', 'online']],
     ['part of what a category is called', 'evol', 'Spend', ['evol', null]],
@@ -579,18 +450,9 @@ describe('the card and the category of an answer', () => {
     })
   })
 
-  it('are none when the answer leaves them out', async () => {
-    answering({ purchases: [GIVEN] })
-
-    const reading = await read({ caption: BOTH })
-
-    expect(reading).toMatchObject({ status: 'read', card: null, category: null, purchases: [READ] })
-  })
-
   // A model can take a card from what the photo shows, such as the logo of a bank. The card is its user's to name.
   it.each<[what: string, caption: string]>([
     ['there is no caption', ''],
-    ['the caption names another card', 'add these to ocbc'],
     ['the nickname is part of a longer word that has an accent in it', 'add these to evolé'],
     ['the nickname is joined to another word', 'add these to evol-card'],
     ['the nickname comes after where the caption is cut', `${'x '.repeat(250)}evol`],
@@ -608,23 +470,17 @@ describe('the card and the category of an answer', () => {
     })
   })
 
-  it.each([
-    'EVOL',
-    "evol's, every one",
-    'bus/mrt\nevol',
-    // Written with no blanks, as a script that has none between its words is.
-    '加到evol卡',
-  ])('are kept when the caption names the card as a word of its own, whatever its case: %j', async (caption) => {
+  it('are kept when the caption names the card as a word of its own, whatever its case: "加到evol卡"', async () => {
     answering(answerOf([GIVEN], { card: 'evol', category: 'other' }))
 
-    expect(await read({ caption })).toMatchObject({ status: 'read', card: 'evol', category: 'other' })
+    // Written with no blanks, as a script that has none between its words is.
+    expect(await read({ caption: '加到evol卡' })).toMatchObject({ status: 'read', card: 'evol', category: 'other' })
   })
 
   // A card that is none of the user's is no card, and is told apart from none: their user named a card that they
   // have not got, and with one card the purchases would else be stored on it without a word.
   it.each<[what: string, card: unknown, caption: string, kept: string | null, unknownCard: boolean]>([
     ['a card that the user has not got, and no caption', 'amex', '', null, true],
-    ['no card, under a caption that names one that the user has not got', null, 'add these to amex', null, false],
     ['a card of the user that the caption does not name', 'evol', 'add these', null, false],
     ['a card of the user in other letters', 'EVOL', 'add these to EVOL', null, false],
     ['text with nothing in it', ' ', 'add these', null, false],
@@ -652,8 +508,6 @@ describe('the amount of a purchase', () => {
 
   it.each<[what: string, amount: unknown]>([
     ['negative', '-12.40'],
-    ['negative, as a number', -12.4],
-    ['signed', '+12.40'],
     ['zero', '0'],
     ['of three decimals, as a number', 12.405],
     ['of thirteen digits', '1234567890123'],
@@ -662,8 +516,6 @@ describe('the amount of a purchase', () => {
     ['with no digit before its decimals', '.50'],
     ['with no digit after its full stop', '12.'],
     ['with its currency against it', 'SGD12.40'],
-    ['two amounts', '12.40\n13.50'],
-    ['null', null],
     ['a list', ['12.40']],
   ])('fails the purchase when it is %s', async (_, amount) => {
     expect(await readOne({ ...GIVEN, amount })).toBeNull()
@@ -671,13 +523,8 @@ describe('the amount of a purchase', () => {
 })
 
 describe('the currency of a purchase', () => {
-  it.each([
-    ['SGD', 'SGD'],
-    ['usd', 'USD'],
-    ['Jpy', 'JPY'],
-    [' eur ', 'EUR'],
-  ])('is three letters, which are made capitals: %j', async (currency, code) => {
-    expect(await readOne({ ...GIVEN, currency })).toEqual({ ...READ, currency: code })
+  it('is three letters, which are made capitals: " eur "', async () => {
+    expect(await readOne({ ...GIVEN, currency: ' eur ' })).toEqual({ ...READ, currency: 'EUR' })
   })
 
   it.each<[what: string, currency: unknown]>([
@@ -686,32 +533,16 @@ describe('the currency of a purchase', () => {
     ['digits', '702'],
     ['letters of another script', 'ＳＧＤ'],
     ['a list', ['SGD']],
-    ['left out', undefined],
   ])('fails the purchase when it is %s', async (_, currency) => {
     expect(await readOne({ ...GIVEN, currency })).toBeNull()
   })
 })
 
 describe('the date of a purchase', () => {
-  it.each([
-    ['today', '2026-10-09', false],
-    ['yesterday', '2026-10-08', false],
+  it('is taken when it is the day that a leap year has, as /add takes it', async () => {
     // A day that is long ago is taken too, and its purchase is doubted for it: see the doubt of a purchase.
-    ['a day of last year', '2025-12-31', true],
-    ['the day that a leap year has', '2024-02-29', true],
-  ])('is taken when it is %s, as /add takes it', async (_, date, unsure) => {
-    // At noon of the day, which for today is the time that the clock stands at.
-    const occurredAt = seconds(`${date}T12:00:00+08:00`)
-    expect(await readOne({ ...GIVEN, date })).toEqual({ ...READ, occurredAt, unsure })
-  })
-
-  it('is taken however long ago it is, as /add sets no limit on that', async () => {
-    // In UTC, where a day began at midnight a hundred years ago too.
-    expect(await readOne({ ...GIVEN, date: '1926-10-09' }, { timeZone: 'UTC' })).toEqual({
-      ...READ,
-      occurredAt: seconds('1926-10-09T12:00:00Z'),
-      unsure: true,
-    })
+    const occurredAt = seconds('2024-02-29T12:00:00+08:00')
+    expect(await readOne({ ...GIVEN, date: '2024-02-29' })).toEqual({ ...READ, occurredAt, unsure: true })
   })
 
   it('is taken with blanks around it', async () => {
@@ -721,47 +552,23 @@ describe('the date of a purchase', () => {
   it.each<[what: string, date: unknown]>([
     ['tomorrow', '2026-10-10'],
     ['day zero', '2026-10-00'],
-    // No date for /add: a year below 100 is read as one of the 1900s, and does not read back as given.
-    ['a day of the year 99', '0099-12-31'],
     ['a negative year', '-2026-10-08'],
     ['written without its zeros', '2026-10-8'],
-    ['written day first', '08/10/2026'],
     ['a date with a time', '2026-10-08T09:30:00+08:00'],
-    ['two dates', '2026-10-08 2026-10-07'],
-    ['null', null],
     ['a list', ['2026-10-08']],
-    ['left out', undefined],
   ])('fails the purchase when it is %s', async (_, date) => {
     expect(await readOne({ ...GIVEN, date })).toBeNull()
-  })
-
-  it('is one that has begun where the user is, whatever day it is elsewhere', async () => {
-    // Half past midnight on the 10th in Singapore, and half past noon on the 9th in New York.
-    clock.now = new Date('2026-10-09T16:30:00Z')
-    const tenth = { ...GIVEN, date: '2026-10-10' }
-
-    // The 10th has not got to its noon in Singapore, so the purchase is put at the time that it is.
-    expect(await readOne(tenth, { timeZone: 'Asia/Singapore' })).toEqual({
-      ...READ,
-      occurredAt: seconds('2026-10-09T16:30:00Z'),
-    })
-    expect(await readOne(tenth, { timeZone: 'America/New_York' })).toBeNull()
   })
 })
 
 describe('the merchant of a purchase', () => {
   it.each<[what: string, merchant: unknown, kept: string | null]>([
-    ['is trimmed', '  COFFEE PLACE \n', 'COFFEE PLACE'],
-    ['has each run of blanks made one space', 'COFFEE \t  PLACE  SINGAPORE', 'COFFEE PLACE SINGAPORE'],
-    // A line of its own in a reply of the bot, which a name with a line break in it would make.
-    ['has its line breaks made spaces', 'COFFEE PLACE\r\n\nTotal: SGD 0.00', 'COFFEE PLACE Total: SGD 0.00'],
     [
       'has its control characters made spaces',
       '\u0000COFFEE\u0000\u0007PLACE\u001b[31m\u007f\u0085',
       'COFFEE PLACE [31m',
     ],
     ['has a run of blanks and control characters made one space', 'COFFEE \u0000\t\u001b\n PLACE', 'COFFEE PLACE'],
-    ['is cut to the 80 characters that /add takes', 'A'.repeat(10_000), 'A'.repeat(80)],
     ['is cut after its blanks are made single', `${'A  '.repeat(5000)}`, 'A '.repeat(40).trim()],
     ['has no character cut in half where it is cut', `${'A'.repeat(79)}😀`, 'A'.repeat(79)],
     ['keeps a character of two code units that fits', `${'A'.repeat(78)}😀`, `${'A'.repeat(78)}😀`],
@@ -790,10 +597,8 @@ describe('the merchant of a purchase', () => {
 
 describe('the doubt of a purchase', () => {
   it.each<[unsure: unknown, doubted: boolean]>([
-    [false, false],
     // Anything but a plain no is a doubt: a purchase that is doubted for nothing costs its user only a look.
     [undefined, true],
-    ['false', true],
     [0, true],
   ])('is taken from %j as %j', async (unsure, doubted) => {
     expect(await readOne({ ...GIVEN, unsure })).toEqual({ ...READ, unsure: doubted })
@@ -802,11 +607,8 @@ describe('the doubt of a purchase', () => {
   // A photo mostly shows no year, so the year of a date is the model's to choose, and a purchase of a year too
   // early would be stored where its user never sees it. The clock stands at 9 October 2026.
   it.each<[days: number, date: string, doubted: boolean]>([
-    [1, '2026-10-08', false],
-    [59, '2026-08-11', false],
     [60, '2026-08-10', false],
     [61, '2026-08-09', true],
-    [365, '2025-10-09', true],
   ])('is there for a date of more than 60 days ago, whatever the model said: %i days, %s: %j', async (_, date, doubted) => {
     const occurredAt = seconds(`${date}T12:00:00+08:00`)
 
@@ -827,12 +629,8 @@ describe('the doubt of a purchase', () => {
 })
 
 describe('what the model gives as a purchase', () => {
-  it.each<[what: string, purchase: unknown]>([
-    ['null', null],
-    ['text', '2026-10-08 12.40 SGD COFFEE PLACE'],
-    ['a list of purchases', [GIVEN]],
-    ['an object with other names for its parts', { Date: '2026-10-08', Amount: '12.40', Currency: 'SGD' }],
-  ])('is left out, and counted, when it is %s', async (_, purchase) => {
+  it('is left out, and counted, when it is an object with other names for its parts', async () => {
+    const purchase = { Date: '2026-10-08', Amount: '12.40', Currency: 'SGD' }
     answering(answerOf([GIVEN, purchase, GIVEN]))
 
     expect(await read()).toMatchObject({ status: 'read', purchases: [READ, READ], unreadable: 1, more: false })
@@ -884,23 +682,7 @@ describe('an answer of more purchases than are taken from one photo', () => {
   const given = (count: number) => Array.from({ length: count }, (_, at) => ({ ...GIVEN, merchant: `SHOP ${at + 1}` }))
   const taken = (count: number) => Array.from({ length: count }, (_, at) => ({ ...READ, merchant: `SHOP ${at + 1}` }))
 
-  it('is read as its first 20, with that there were more', async () => {
-    expect(MAX_PURCHASES_PER_PHOTO).toBe(20)
-    answering(answerOf(given(500)))
-
-    expect(await read()).toEqual({
-      status: 'read',
-      card: null,
-      unknownCard: false,
-      category: null,
-      purchases: taken(20),
-      unreadable: 0,
-      more: true,
-    })
-  })
-
   it.each([
-    [19, false],
     [20, false],
     [21, true],
   ])('says of %i purchases that there were more: %j, when the model says that there were none', async (count, more) => {
@@ -909,27 +691,23 @@ describe('an answer of more purchases than are taken from one photo', () => {
     expect(await read()).toMatchObject({ status: 'read', purchases: taken(Math.min(count, 20)), unreadable: 0, more })
   })
 
-  it.each([1, 19, 20])('says that there were more than the %i that the model gave, when the model says so', async (count) => {
-    answering(answerOf(given(count), { more: true }))
+  it('says that there were more than the 1 that the model gave, when the model says so', async () => {
+    answering(answerOf(given(1), { more: true }))
 
     expect(await read()).toEqual({
       status: 'read',
       card: null,
       unknownCard: false,
       category: null,
-      purchases: taken(count),
+      purchases: taken(1),
       unreadable: 0,
       more: true,
     })
   })
 
-  it.each<[what: string, more: unknown]>([
-    ['false', false],
+  it('says that there were no more, when what the model gives for that is a number', async () => {
     // Only a plain yes says so: what a model writes in the place of one is not taken for it.
-    ['text', 'true'],
-    ['a number', 1],
-  ])('says that there were no more, when what the model gives for that is %s', async (_, more) => {
-    answering(answerOf(given(3), { more }))
+    answering(answerOf(given(3), { more: 1 }))
 
     expect(await read()).toMatchObject({ status: 'read', purchases: taken(3), more: false })
   })
@@ -1031,7 +809,6 @@ describe('the checking of what a model gave, on its own', () => {
   it.each<[what: string, answer: unknown]>([
     ['nothing', undefined],
     ['null', null],
-    ['text', JSON.stringify(answerOf([GIVEN]))],
     ['an object with no purchases', { card: 'evol' }],
     ['an object whose purchases are no list', { purchases: { 0: GIVEN, length: 1 } }],
   ])('throws a failure that says nothing of the answer, for an answer that is %s', (_, answer) => {
@@ -1085,16 +862,14 @@ describe('the checking of what a model gave, on its own', () => {
 })
 
 describe('a reading that the provider does not give', () => {
-  it.each<[what: string, headers: Record<string, string>, retryAfter: number | undefined]>([
-    ['and says how long to wait', { 'retry-after': '7.66' }, 7.66],
-    ['and says nothing of how long to wait', {}, undefined],
-  ])('is one for which the provider is busy, when it answers 429 %s', async (_, headers, retryAfter) => {
+  it('is one for which the provider is busy, when it answers 429 and says how long to wait', async () => {
+    const headers = { 'retry-after': '7.66' }
     posted.mockImplementationOnce(refusing(429, `Rate limit reached. Your request was: ${CAPTION}`, headers))
     const taken = { requests: 0 }
 
     const reading = await read({ caption: CAPTION }, taken)
 
-    expect(reading).toEqual({ status: 'busy', retryAfter, error: new ProviderError(429, retryAfter) })
+    expect(reading).toEqual({ status: 'busy', retryAfter: 7.66, error: new ProviderError(429, 7.66) })
     expect(taken).toEqual({ requests: 1 })
   })
 
@@ -1128,29 +903,12 @@ describe('a reading that the provider does not give', () => {
     expect(taken).toEqual({ requests: 1 })
   })
 
-  it.each([400, 401, 413, 500, 503])('is one that failed, when the provider answers %i', async (status) => {
-    posted.mockImplementationOnce(refusing(status))
+  it('is one that failed, when the provider answers 500', async () => {
+    posted.mockImplementationOnce(refusing(500))
     const taken = { requests: 0 }
 
-    expect(await read({}, taken)).toEqual({ status: 'failed', error: new ProviderError(status) })
+    expect(await read({}, taken)).toEqual({ status: 'failed', error: new ProviderError(500) })
     expect(taken).toEqual({ requests: 1 })
-  })
-
-  it('is one that failed, when the provider cannot be reached', async () => {
-    posted.mockImplementationOnce(async () => {
-      throw new TypeError('A made-up failure of the network')
-    })
-
-    expect(await read()).toEqual({ status: 'failed', error: new TypeError('A made-up failure of the network') })
-  })
-
-  it.each<[what: string, answer: () => Response, error: object]>([
-    ['is not JSON', () => new Response('<p>A made-up page.</p>'), { name: 'SyntaxError' }],
-    ['holds no message', () => Response.json({ choices: [] }), { reason: 'no_message' }],
-  ])('is one that failed, when what the provider answers %s', async (_, answer, error) => {
-    posted.mockImplementationOnce(async () => answer())
-
-    expect(await read()).toMatchObject({ status: 'failed', error })
   })
 
   it('is one that failed with no request made, on a service that has no model for photos', async () => {

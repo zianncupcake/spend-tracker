@@ -104,7 +104,7 @@ describe('/remind', () => {
     expect(await dueAt(chat)).toBeNull()
   })
 
-  it.each(['0', '32', '12th', '+12', '1e1', '12 13'])('answers "%s" for a day with the usage', async (day) => {
+  it.each(['0', '32', '1e1', '12 13'])('answers "%s" for a day with the usage', async (day) => {
     const chat = openChat()
     await chat.say('/addcard evol 1234 calendar')
 

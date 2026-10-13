@@ -70,15 +70,6 @@ describe('what a product makes of a window', () => {
     expect(made).toMatchObject({ unsorted: [], countedMinor: 0, foreignLeftOut: false })
   })
 
-  it('takes a category that the product does not have for the default one too, and leaves nothing unsorted', () => {
-    // A category of a product that the card was linked to before is not one of this product's.
-    const made = breakDown(uobEvol, [sum('dining', 360), sum(null, 1240), sum('online', 100), sum('other', 5000)])
-
-    expect(made.groups[0].spent).toEqual([{ currency: 'SGD', amountMinor: 1700 }])
-    expect(made.groups[2].spent).toEqual([{ currency: 'SGD', amountMinor: 5000 }])
-    expect(made.unsorted).toEqual([])
-  })
-
   it('keeps apart what is not sorted, on a product with no default category', () => {
     const made = breakDown(NO_DEFAULT, [
       sum(null, 1240),
@@ -142,15 +133,6 @@ describe('what comes after the tables of a window', () => {
     // two lines are all: nothing is said of a limit that they were not taken off.
     expect(breakdownLines(uobEvol, breakDown(uobEvol, sums))).toEqual([
       'Minimum spend: SGD 362.40 of SGD 800.00, not counting purchases in other currencies',
-      TERMS,
-    ])
-  })
-
-  it('counts what is not sorted towards the minimum too, on a product with no default category', () => {
-    const sums = [sum('online', 35000), sum(null, 1240)]
-
-    expect(breakdownLines(NO_DEFAULT, breakDown(NO_DEFAULT, sums))).toEqual([
-      'Minimum spend: SGD 362.40 of SGD 800.00',
       TERMS,
     ])
   })

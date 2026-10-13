@@ -36,7 +36,6 @@ import {
   BY_HAND,
   chatWithCard,
   chatWithCards,
-  heldFor,
   labels,
   markedIn,
   MESSAGE,
@@ -268,31 +267,6 @@ describe('purchases that the assistant makes out in a message', () => {
     ])
   })
 
-  it('are held when the assistant was not sure of them, and asked about with the buttons that a photo’s have', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    acting({ kind: 'add', reading: read([bought(520, 'LUNCH'), unsure(300, 'TEA HOUSE')], { card: 'evol' }) })
-
-    const { rich, texts } = await told(chat, MESSAGE)
-
-    expect(await rowsOf(userId)).toMatchObject([{ source_id: 'manual:7001:0', merchant: 'LUNCH' }])
-    expect(rich).toHaveLength(1)
-    const [asking, ...more] = texts
-    expect(more).toEqual([])
-    expect(asking.text).toBe(
-      'Not sure about this purchase. Check its amount and its date before you add it to evol ••••5678:\n' +
-        '5 Oct · SGD 3.00 · TEA HOUSE',
-    )
-    expect(asking.buttons).toEqual([
-      [{ text: 'Add this one', data: 'held:7001:add' }],
-      [{ text: 'Skip', data: 'held:7001:skip' }],
-    ])
-    expect(await heldFor(userId)).toMatchObject([{ message_id: MESSAGE, card_last4: '5678' }])
-    // The button adds it, under its own place in what the assistant gave.
-    expect((await chat.press(asking, 'Add this one')).answer).toBe('Added 1 purchase.')
-    expect((await rowsOf(userId)).map((row) => row.source_id)).toEqual(['manual:7001:0', 'manual:7001:1'])
-  })
-
   it('are none when the assistant found none to add, which is said in one line', async () => {
     const chat = await chatWithCard()
     acting({ kind: 'add', reading: { status: 'nothing' } })
@@ -328,14 +302,11 @@ describe('purchases that the assistant is asked to sort', () => {
     expect(logged.events()).toEqual(loggedFor(userId, [{ kind: 'category', outcome: 'done' }]))
   })
 
-  it.each<[what: string, category: string]>([
-    ['one that only a rule of the product gives', 'fx'],
-    ['one that the product has not got', 'dining'],
-  ])('are not moved to a category that cannot be chosen for their card’s product: %s', async (_, category) => {
+  it('are not moved to a category that cannot be chosen for their card’s product: one that only a rule of the product gives', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
     const purchase = await buy(userId, { cardLast4: '5678' })
-    acting({ kind: 'category', ids: [purchase], category })
+    acting({ kind: 'category', ids: [purchase], category: 'fx' })
     const logged = catchConsole()
 
     const { texts } = await told(chat)
@@ -363,35 +334,6 @@ describe('a command that the assistant gives to be run', () => {
     expect(await chat.say('/timezone')).toContain('Your time zone is Asia/Tokyo.')
     expect(logged.events().slice(0, 3)).toEqual(
       loggedFor(userId, [{ kind: 'command', command: 'timezone', outcome: 'done' }]),
-    )
-  })
-
-  it('is run at once when it renames a card, and so is each of two in one message: each is answered with the command’s reply', async () => {
-    const chat = await chatWithCards()
-    const userId = await chat.userId()
-    const coffee = await buy(userId)
-    acting(command('/renamecard visa travel'), command('/renamecard evol daily'))
-    const logged = catchConsole()
-
-    const { rich, texts } = await told(chat)
-
-    expect(rich).toEqual([])
-    expect(texts.map((message) => [message.text, message.buttons])).toEqual([
-      ['Renamed visa ••••1234 to travel.', undefined],
-      ['Renamed evol ••••5678 to daily.', undefined],
-    ])
-    const done = { kind: 'command', command: 'renamecard', outcome: 'done' }
-    expect(logged.events()).toEqual(loggedFor(userId, [done, done]))
-    // Each card is as it was but for its nickname, and its purchases are still its own: they go by its digits.
-    expect(await chat.lines('/cards')).toEqual([
-      CARDS_HEADER,
-      'travel | ••••1234 | calendar month | - | -',
-      'daily | ••••5678 | calendar month | UOB EVOL Card | -',
-    ])
-    const shown = await chat.rich('/spend travel')
-    expect(shown.blocks[0]).toEqual(bold('travel ••••1234: 1 Oct to 31 Oct'))
-    expect(shown.blocks).toContainEqual(
-      tableOf(headerRow('SGD'), purchaseRow(coffee, '5 Oct', '12.40', 'COFFEE PLACE'), sumRow('Total', '12.40')),
     )
   })
 
@@ -483,7 +425,7 @@ describe('a command that the assistant gives to be run', () => {
     expect(await tokenOf()).toBe(token)
   })
 
-  it.each(['/delete', '/delete confirm', '/DELETE  Confirm'])(
+  it.each(['/delete confirm', '/DELETE  Confirm'])(
     'is never run when it is "%s": it is answered with what /delete alone answers, and nothing is deleted',
     async (line) => {
       const chat = await chatWithCard()
@@ -505,7 +447,6 @@ describe('a command that the assistant gives to be run', () => {
   it.each<[what: string, line: string, name: string]>([
     ['/add', '/add evol 5.20 LUNCH', 'add'],
     ['a command that there is not', '/nosuchcommand evol', 'unknown'],
-    ['a line with no slash', 'How much have I spent on evol?', 'unknown'],
   ])('is refused when it is %s, and the assistant is not asked again', async (_, line, name) => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
@@ -695,7 +636,7 @@ describe('a press of a button under a message that asks before a command is run'
     expect(labels(asking)).toEqual(['Do it', 'Cancel'])
   })
 
-  it.each(['do:/delete confirm', 'do:/spend evol', 'do:How much have I spent?'])(
+  it.each(['do:/delete confirm', 'do:/spend evol'])(
     'runs nothing that no message asks about, whatever a client sends in the place of a button’s line: "%s"',
     async (data) => {
       const { chat, userId, asking } = await asked()

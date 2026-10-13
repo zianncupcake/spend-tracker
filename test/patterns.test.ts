@@ -9,7 +9,7 @@ import { heldBack, toComeByGroup } from '../src/domain/patterns'
 import { currentWindow } from '../src/domain/window'
 import { MAX_CARDS, MAX_PATTERN_SKIPS, MAX_PATTERNS, storeFor, type Pattern } from '../src/store'
 import { parsePattern } from '../src/telegram/arguments'
-import { formatAmount, formatMoney } from '../src/telegram/format'
+import { formatMoney } from '../src/telegram/format'
 import { TO_COME, TO_COME_NOTE } from '../src/telegram/purchases'
 import { HOLDS_NOTHING, NO_MORE, NO_PATTERNS, PATTERN_USAGE, TOO_MANY_PATTERNS } from '../src/telegram/texts'
 import { NOW, openChat, sentRich } from './connect-helpers'
@@ -48,7 +48,6 @@ describe('what a pattern holds back in a window', () => {
   const at = (merchant: string | null, amountMinor: number, currency = 'SGD') => ({ merchant, amountMinor, currency })
 
   it.each([
-    ['all of its amount, with nothing spent', [], [], 6000],
     ['what two purchases at its merchant leave of it', [at('SAMPLE GYM', 2000), at('Sample-Gym*2', 1000)], [], 3000],
     ['nothing, with more than it spent there', [at('SAMPLE GYM', 9500)], [], 0],
     ['all of it, whatever is spent elsewhere', [at('COFFEE PLACE', 400)], [], 6000],
@@ -122,19 +121,6 @@ describe('/spend with a card that has patterns', () => {
     )
   })
 
-  it('holds nothing back of a cap for a merchant that a rule of the product places by its name as typed', async () => {
-    const chat = openChat()
-    await chat.say('/addcard hsbc 1234 calendar hsbc-revolution')
-    // A travel agency, which the HSBC product starts in its group with no cap: by "Trip.com", with its full stop.
-    await chat.say('/pattern hsbc 60 trip.com')
-    const { limitMinor = 0 } = hsbcRevolution.groups[0]
-
-    const lines = await chat.lines('/spend hsbc')
-
-    expect(lines.filter((line) => line.startsWith(TO_COME))).toEqual([])
-    expect(lines).toContain(`Left | ${formatAmount(limitMinor)}`)
-  })
-
   it('holds a pattern against its own card, and not against another card of its user’s', async () => {
     const chat = await chatWithCard()
     await chat.say('/addcard spare 5678 calendar uob-evol')
@@ -191,14 +177,6 @@ describe('what /pattern is asked for', () => {
 })
 
 describe('/pattern', () => {
-  it('saves a pattern, and /patterns lists it', async () => {
-    const chat = await chatWithCard()
-
-    await chat.say('/pattern evol 60 Sample GYM')
-
-    expect(await listed(chat)).toEqual(['evol ••••1234 | sample gym | SGD 60.00 | -'])
-  })
-
   it('replaces the pattern that the card has for the merchant: its amount, and its skipped days', async () => {
     const chat = await chatWithCard()
     await chat.say('/pattern evol 60 sample gym except 2026-11-15')

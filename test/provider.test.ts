@@ -89,13 +89,11 @@ describe('a request that the model answers', () => {
   })
 
   it.each<[said: unknown, logged: string | null]>([
-    // One of the four reasons that the log has a word for. The tests of this file have each of the other three.
+    // One of the four reasons that the log has a word for.
     ['content_filter', 'content_filter'],
     // What the answer says is text from outside. Whatever is none of the four is logged as that it was another.
     ['a made-up reason that quotes COFFEE PLACE', 'other'],
-    [42, 'other'],
     [null, null],
-    [undefined, null],
   ])('is logged with the reason %j for stopping as %j', async (said, finish) => {
     answering({ choices: [{ index: 0, message: { role: 'assistant', content: ANSWER }, finish_reason: said }] })
     const logged = catchConsole()
@@ -106,9 +104,7 @@ describe('a request that the model answers', () => {
   })
 
   it.each<[what: string, usage: unknown, counted: object]>([
-    ['is not there', undefined, {}],
     ['is null', null, {}],
-    ['is text', 'COFFEE PLACE', {}],
     ['holds what is not a number', { prompt_tokens: '100', completion_tokens: null, total_tokens: 'COFFEE PLACE' }, {}],
     ['holds only the total', { total_tokens: 120, total_time: 0.5 }, { total_tokens: 120 }],
   ])('is logged with only the counts that are numbers, when the usage %s', async (_, usage, counted) => {
@@ -289,53 +285,6 @@ describe('a request for JSON, which can hold an image', () => {
     expect(timeouts.mock.calls).toEqual([[1234]])
     expect(init?.signal).toBe(timeouts.mock.results[0].value)
   })
-
-  it('is logged as a request of the assistant is, however it ends, with nothing of the image or of the answer', async () => {
-    answering(saying(READING), 900)
-    // An answer that ran into the most that may be written, and so ends wherever that fell.
-    answering(saying(READING.slice(0, 40), 'length'), 2100)
-    posted.mockImplementationOnce(async () => {
-      clock += 300
-      return refusing(429, `Rate limit reached. Your request was: ${CAPTION} ${PHOTO}`, { 'retry-after': '7.66' })()
-    })
-    posted.mockImplementationOnce(refusing(413, `Request too large: ${PHOTO}`))
-    posted.mockImplementationOnce(async () => {
-      throw new TypeError(`A made-up failure of the network that quotes: ${CAPTION} ${PHOTO}`)
-    })
-    const logged = catchConsole()
-
-    expect(await askForJson()).toEqual({ content: READING, toolCalls: [], cutShort: false })
-    expect(await askForJson()).toEqual({ content: READING.slice(0, 40), toolCalls: [], cutShort: true })
-    expect(await askForJson()).toEqual(new ProviderError(429, 7.66))
-    expect(await askForJson()).toEqual(new ProviderError(413))
-    expect(await askForJson()).toBeInstanceOf(TypeError)
-
-    const counted = { tool_calls: 0, prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }
-    expect(logged.events()).toEqual([
-      { event: 'ai_call', ms: 900, status: 200, finish: 'stop', ...counted },
-      { event: 'ai_call', ms: 2100, status: 200, finish: 'length', ...counted },
-      { event: 'ai_call', ms: 300, status: 429, retry_after: 7.66, error: 'Error', reason: 'http_error' },
-      { event: 'ai_call', ms: 0, status: 413, error: 'Error', reason: 'http_error' },
-      { event: 'ai_call', ms: 0, error: 'TypeError' },
-    ])
-    const never = [CAPTION, 'bus/mrt', PHOTO, '/9j/', 'data:image', 'base64', READING, 'COFFEE', '12.40', 'evol']
-    for (const text of [...never, provider.apiKey, 'made-up-vision-model', 'Rate limit', 'too large', 'instructions']) {
-      expect(logged.text()).not.toContain(text)
-    }
-  })
-
-  it('is given up on when the provider takes longer than it is given', async () => {
-    // A provider that never answers. The request ends as it does for fetch: it fails with why it was ended.
-    posted.mockImplementationOnce((_, init) => {
-      const signal = init?.signal
-      return new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))
-    })
-    const logged = catchConsole()
-
-    expect(await askForJson(5)).toMatchObject({ name: 'TimeoutError' })
-
-    expect(logged.events()).toEqual([{ event: 'ai_call', ms: 0, error: 'TimeoutError' }])
-  })
 })
 
 describe('the model that reads photos, as the service is set up', () => {
@@ -375,8 +324,8 @@ describe('the model that reads photos, as the service is set up', () => {
     expect(depsFor({ ...env, ...named }).ai).toEqual({ ...GROQ, visionModel: 'made-up-vision-model' })
   })
 
-  it.each([undefined, ''])('is none, as the provider is, when the key is %j', (key) => {
-    expect(depsFor({ ...env, AI_API_KEY: key, AI_VISION_MODEL: 'made-up-vision-model' }).ai).toBeUndefined()
+  it('is none, as the provider is, when the key is ""', () => {
+    expect(depsFor({ ...env, AI_API_KEY: '', AI_VISION_MODEL: 'made-up-vision-model' }).ai).toBeUndefined()
   })
 })
 

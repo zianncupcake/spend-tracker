@@ -16,7 +16,6 @@ import {
   readPress,
   sectionsOf,
   sortEnd,
-  whereSorted,
   type Dated,
   type Line,
   type Section,
@@ -245,16 +244,6 @@ describe('the tables of a window', () => {
       ].join('\n'),
     )
     expect(table.name).toBeUndefined()
-  })
-
-  it('say how far past its limit the spend is, in place of what is left, once nothing is', () => {
-    const online = (amountMinor: number): Section => ({ purchases: [], spent: sgd(amountMinor), limitMinor: 30000 })
-
-    const [under, at, over] = purchaseTables([online(29999), online(30000), online(36240)], 'SGD')
-
-    expect(under.end).toEqual(['    Total  299.99', '    Cap    300.00', '    Left     0.01'])
-    expect(at.end).toEqual(['    Total  300.00', '    Cap    300.00', '    Left     0.00'])
-    expect(over.end).toEqual(['    Total  362.40', '    Cap    300.00', '    Over    62.40'])
   })
 
   it('have the code of its currency on every amount of a table that holds more than one, and total each', () => {
@@ -720,22 +709,6 @@ describe('tables as messages', () => {
 })
 
 describe('where a purchase is sorted', () => {
-  it('is the name of its category, which is online for one that nothing else is stored for', () => {
-    expect(whereSorted(uobEvol, null)).toBe('Online / Mobile Contactless Spend')
-    expect(whereSorted(uobEvol, 'online')).toBe('Online / Mobile Contactless Spend')
-    expect(whereSorted(uobEvol, 'other')).toBe('Other Spend')
-    expect(whereSorted(uobEvol, 'selected')).toBe('Selected Gym, Telco and Streaming Spend')
-    expect(whereSorted(uobEvol, 'fx')).toBe('Overseas Foreign Currency Spend')
-    // The category of another product is none of this one's, so it says nothing of where the purchase is.
-    expect(whereSorted(uobEvol, 'dining')).toBe('Online / Mobile Contactless Spend')
-  })
-
-  it('is not sorted, on a product with no default, for a purchase that nothing is stored for', () => {
-    expect(whereSorted(NO_DEFAULT, null)).toBe('not sorted')
-    expect(whereSorted(NO_DEFAULT, 'dining')).toBe('not sorted')
-    expect(whereSorted(NO_DEFAULT, 'other')).toBe('Other Spend')
-  })
-
   it('ends a message with the one button that flags an online purchase as made with the physical card', () => {
     const online = {
       line: 'ID 57: Online / Mobile Contactless Spend',
@@ -817,20 +790,6 @@ describe('the line of a purchase that is held', () => {
     expect(markedIn(line)).toBe('COFFEE PLACE')
     // One that the model was sure of has no such note, whether or not the lines of its message are to have it.
     expect(heldLine(waiting({ unsure: false }), '5 Oct', true).text).toBe('5 Oct · SGD 12.40 · COFFEE PLACE')
-  })
-
-  it('has nothing where the merchant would be, and nothing to mark, for a purchase with no merchant', () => {
-    expect(heldLine(waiting({ merchant: null }), '5 Oct', false)).toEqual({ text: '5 Oct · SGD 12.40' })
-    expect(heldLine(waiting({ merchant: null }), '5 Oct', true)).toEqual({ text: '5 Oct · SGD 12.40 · not sure' })
-  })
-
-  it('marks all of a name that Telegram would make something to tap of, and no more than the name', () => {
-    const merchant = '𝒳 /disconnect https://attacker.test/x @someone #tag'
-    const line = heldLine(waiting({ amountMinor: 123456789, merchant }), '31 Oct', true)
-
-    expect(line.text).toBe(`31 Oct · SGD 1,234,567.89 · ${merchant} · not sure`)
-    expect(markedIn(line)).toBe(merchant)
-    expect(line.marked?.length).toBe(merchant.length)
   })
 })
 

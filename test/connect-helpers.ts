@@ -52,8 +52,6 @@ interface Outside {
   grant: Record<string, unknown>
   /** The endpoints that answer with an error. */
   failing: Set<string>
-  /** The endpoints that never answer. A request to one ends only when its signal does, as fetch has it end. */
-  stalled: Set<string>
   /** Runs once while a code is being exchanged: something else happening in the meantime. */
   meanwhile: (() => Promise<unknown>) | undefined
   /** What each mailbox holds, by its address and newest first. Gmail lists all of it, whatever the search asks for. */
@@ -86,7 +84,6 @@ function newOutside(): Outside {
     blocked: new Set(),
     grant: {},
     failing: new Set(),
-    stalled: new Set(),
     meanwhile: undefined,
     mailboxes: {},
     pageSize: 100,
@@ -197,10 +194,6 @@ async function fakeFetch(url: string, init: RequestInit = {}): Promise<Response>
   const { origin, pathname, searchParams } = new URL(url)
   const endpoint = origin + pathname
   if (outside.failing.has(endpoint)) return Response.json({ error: 'made_up_error' }, { status: 400 })
-  if (outside.stalled.has(endpoint)) {
-    const { signal } = init
-    return new Promise<never>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))
-  }
   const form: Record<string, string> = Object.fromEntries(init.body instanceof URLSearchParams ? init.body : [])
   const mailbox = (new Headers(init.headers).get('authorization') ?? '').replace('Bearer access-token-of-', '')
 

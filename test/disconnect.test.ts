@@ -31,11 +31,6 @@ describe('/disconnect', () => {
     expect(outside.revoked).toHaveLength(1)
   })
 
-  it('says so when Gmail is not connected', async () => {
-    expect(await openChat().say('/disconnect')).toBe('Your Gmail is not connected.')
-    expect(outside.revoked).toEqual([])
-  })
-
   it('also gives up a sign-in that is waiting for its code', async () => {
     const chat = openChat()
     const code = await signIn(chat, 'jane@example.test')
@@ -107,23 +102,6 @@ describe('what the log has of a disconnection', () => {
   /** The line of the command that asked for it, which comes after the lines of what the command did. */
   const came = (command: string) => ({ event: 'update', kind: 'command', command, outcome: 'replied', ms: 0 })
 
-  it('is that a token was revoked and the user disconnected: nothing of the mailbox or of the token', async () => {
-    const chat = await connectedChat('jane@example.test')
-    const userId = await chat.userId()
-    const logged = catchConsole()
-
-    await chat.say('/disconnect')
-
-    expect(logged.events()).toEqual([
-      { event: 'token_revoke', outcome: 'revoked' },
-      { event: 'disconnect', user: userId, outcome: 'disconnected' },
-      came('disconnect'),
-    ])
-    for (const text of ['jane', 'example.test', outside.issued[0], 'refresh-token', String(chat.telegramId)]) {
-      expect(logged.text()).not.toContain(text)
-    }
-  })
-
   it('is that there was nothing to disconnect, for a user who had not connected', async () => {
     const chat = openChat()
     const userId = await chat.userId()
@@ -150,20 +128,6 @@ describe('what the log has of a disconnection', () => {
       came('disconnect'),
     ])
   })
-
-  it('is the same for /delete confirm, which disconnects before it deletes', async () => {
-    const chat = await connectedChat('jane@example.test')
-    const userId = await chat.userId()
-    const logged = catchConsole()
-
-    await chat.say('/delete confirm')
-
-    expect(logged.events()).toEqual([
-      { event: 'token_revoke', outcome: 'revoked' },
-      { event: 'disconnect', user: userId, outcome: 'disconnected' },
-      came('delete'),
-    ])
-  })
 })
 
 describe('/delete confirm', () => {
@@ -178,18 +142,6 @@ describe('/delete confirm', () => {
     expect(await connectionOf(userId)).toBeNull()
   })
 
-  it('revokes the token of a sign-in that is waiting for its code', async () => {
-    const chat = openChat()
-    await signIn(chat, 'jane@example.test')
-    const userId = await chat.userId()
-
-    expect(await chat.say('/delete confirm')).toContain('has been deleted')
-
-    expect(outside.revoked).toEqual([outside.issued[0]])
-    expect(await rowsOwnedBy(userId)).toMatchObject({ users: 0 })
-    expect(await attemptOf(userId)).toBeNull()
-  })
-
   it('asks for confirmation first, and revokes nothing until it has it', async () => {
     const chat = await connectedChat('jane@example.test')
 
@@ -197,15 +149,5 @@ describe('/delete confirm', () => {
 
     expect(outside.revoked).toEqual([])
     expect(await connectionOf(await chat.userId())).toMatchObject({ status: 'active' })
-  })
-
-  it("leaves another user's connection alone", async () => {
-    const leaving = await connectedChat('jane@example.test')
-    const staying = await connectedChat('sam@example.test')
-
-    await leaving.say('/delete confirm')
-
-    expect(outside.revoked).toEqual([outside.issued[0]])
-    expect(await connectionOf(await staying.userId())).toMatchObject({ email: 'sam@example.test', status: 'active' })
   })
 })

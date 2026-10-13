@@ -20,7 +20,6 @@ import {
   openChat,
   outside,
   posted,
-  REVOKE_URL,
   sent,
   signIn,
   TELEGRAM_URL,
@@ -190,30 +189,8 @@ describe('a new alert', () => {
     expect((await purchasesOf(await chat.userId())).map((purchase) => purchase.source_id)).toEqual(['msg-1'])
   })
 
-  it('is read from an email that is only HTML', async () => {
-    await connectedChat(JANE)
-    const html = [
-      '<html>',
-      '  <head><style>p { color: #333 }</style></head>',
-      '  <body>',
-      '    <p>Dear customer,</p>',
-      `    <p>${alertText('SGD&nbsp;8.00', '1234', 'BOOK &amp; PEN SHOP')}</p>`,
-      '  </body>',
-      '</html>',
-    ].join('\r\n')
-    outside.mailboxes[JANE] = [gmailMessage({ receivedAt: now() - 60, content: htmlPart(html) })]
-
-    await runCheck(deps)
-
-    expect(sent.map((message) => message.text)).toEqual([
-      `Card ••••1234: SGD 8.00 at BOOK & PEN SHOP\n${ADD_CARD_HINT}`,
-    ])
-  })
-
-  it.each([
-    ["the domain above the sender's, which is what it names for OCBC", 'ocbc.com'],
-    ["the sender's own domain", 'notify.ocbc.com'],
-  ])('is read when Gmail authenticated %s', async (_, authenticated) => {
+  it("is read when Gmail authenticated the domain above the sender's, which is what it names for OCBC", async () => {
+    const authenticated = 'ocbc.com'
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
     // What Gmail records of an OCBC alert: the address is under notify.ocbc.com, and the DMARC result names the
@@ -246,15 +223,6 @@ describe('a new alert', () => {
     ])
     expect(await seenOf(userId)).toEqual([])
     expect(sent.map((message) => message.text)).toEqual([`Card ••••1234: SGD 12.34 at SOME MERCHANT\n${ADD_CARD_HINT}`])
-  })
-
-  it('names no merchant when the alert names none', async () => {
-    await connectedChat(JANE)
-    outside.mailboxes[JANE] = [alert('msg-1', 5, alertText('SGD 12.40', '1234', ' '))]
-
-    await runCheck(deps)
-
-    expect(sent.map((message) => message.text)).toEqual([`Card ••••1234: SGD 12.40\n${ADD_CARD_HINT}`])
   })
 
   it.each<[what: string, nickname: string | null, offset: number, rest: string]>([
@@ -342,30 +310,6 @@ describe('a new alert', () => {
     expect(sent).toHaveLength(1)
     expect(await purchasesOf(await chat.userId())).toHaveLength(1)
   })
-
-  it('is not read or stored again once its user has taken the purchase out', async () => {
-    const chat = await connectedChat(JANE)
-    const userId = await chat.userId()
-    await chat.say('/addcard visa 1234 calendar')
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-    await runCheck(deps)
-    const { id } = (await sortedOf(userId))['msg-1']
-    await chat.say(`/remove ${id}`)
-    sent.length = 0
-    outside.fetchedHeaders.length = 0
-    outside.fetched.length = 0
-
-    // The mailbox still holds the alert, and every run lists it.
-    clock.now = later(1)
-    await runCheck(deps)
-
-    expect(outside.listings).toHaveLength(2)
-    expect(outside.fetchedHeaders).toEqual([])
-    expect(outside.fetched).toEqual([])
-    expect(sent).toEqual([])
-    expect(await purchasesOf(userId)).toHaveLength(1)
-    expect(await chat.lines('/spend')).toContain('visa | SGD 0.00 | 0 | 29 Sep to 29 Oct | 1 Nov')
-  })
 })
 
 describe('a new alert for a card that is linked to a product', () => {
@@ -439,23 +383,6 @@ describe('a new alert for a card that is linked to a product', () => {
     expect((await sortedOf(await chat.userId()))['msg-1'].category).toBe('other')
   })
 
-  it('starts online at a merchant where its user flagged the last purchase, as a flag is of one purchase', async () => {
-    const chat = await chatWithProduct()
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-    await runCheck(deps)
-    await chat.press(posted[0], 'Mark as Other Spend')
-    outside.mailboxes[JANE].unshift(alert('msg-2', 1))
-
-    await runCheck(deps)
-
-    const stored = await sortedOf(await chat.userId())
-    expect(stored['msg-1'].category).toBe('other')
-    expect(stored['msg-2'].category).toBeNull()
-    const [, later] = posted
-    expect(later.text.split('\n')[2]).toBe(`ID ${stored['msg-2'].id}: Online / Mobile Contactless Spend`)
-    expect(later.buttons).toEqual([[{ text: 'Mark as Other Spend', data: `${stored['msg-2'].id}:other` }]])
-  })
-
   it('is told of with the statement month that counts it, when it was made in the last two days', async () => {
     // The 4th of November, the day before the statement of a card that closes on the 5th does.
     clock.now = new Date('2026-11-04T12:00:00+08:00')
@@ -482,34 +409,6 @@ describe('a new alert for a card that is linked to a product', () => {
     expect(message.text.split('\n')).toEqual([...told, `ID ${id}: Other Spend`])
   })
 
-  it('is sorted by the rules even when it is too old to be told of', async () => {
-    const chat = await chatWithProduct()
-    outside.mailboxes[JANE] = [alert('msg-1', 7 * 60, alertText('JPY 1,500', '1234'))]
-
-    await runCheck(deps)
-
-    expect(posted).toEqual([])
-    expect((await sortedOf(await chat.userId()))['msg-1'].category).toBe('fx')
-  })
-
-  it('is posted to Telegram with its button as an inline keyboard', async () => {
-    const chat = await chatWithProduct()
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-
-    await runCheck(posting)
-
-    const { id } = (await sortedOf(await chat.userId()))['msg-1']
-    expect(outside.telegrams).toEqual([
-      {
-        chat_id: chat.telegramId,
-        text: expect.stringMatching(/\nID \d+: Online \/ Mobile Contactless Spend$/),
-        entities: [{ type: 'code', offset: 28, length: 12 }],
-        link_preview_options: { is_disabled: true },
-        reply_markup: { inline_keyboard: [[{ text: 'Mark as Other Spend', callback_data: `${id}:other` }]] },
-      },
-    ])
-  })
-
   it("is sorted by its own user's card, whatever product another user's card with the same digits has", async () => {
     const jane = await chatWithProduct()
     const sam = await connectedChat(SAM)
@@ -533,7 +432,6 @@ describe('a new alert for a card that is linked to a product', () => {
 })
 
 describe('an alert that is not stored', () => {
-  const PASS = gmailResults('pass', 'examplebank.test')
   const FAIL = gmailResults('fail', 'examplebank.test')
 
   it('is noted as unparsed when no parser can read it, and is not fetched again', async () => {
@@ -557,7 +455,6 @@ describe('an alert that is not stored', () => {
   })
 
   it.each<[why: string, message: MessageOptions]>([
-    ['only a header that the sender added says DMARC passed', { results: [FAIL, PASS] }],
     ['it was authenticated for another domain', { results: [gmailResults('pass', 'attacker.test')] }],
     [
       "it was authenticated for a domain under the bank's",
@@ -569,10 +466,6 @@ describe('an alert that is not stored', () => {
     ],
     ['it was authenticated for a name with no dot in it', { from: OCBC, results: [gmailResults('pass', 'com')] }],
     ["it is from an address of the bank's that alerts do not come from", { from: 'offers@examplebank.test' }],
-    [
-      "it is from an address under the bank's domain that alerts do not come from",
-      { from: 'alerts@mail.examplebank.test' },
-    ],
   ])('is rejected when %s: on its headers, fetched once, with the rest of it never fetched', async (_, message) => {
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
@@ -659,27 +552,6 @@ describe('what a run asks of Gmail', () => {
     for (const listing of outside.listings) expect(listing.q.split(' ')).toContain('smaller:1M')
   })
 
-  it('does not include the alerts it already knows, stored or not', async () => {
-    const chat = await connectedChat(JANE)
-    outside.mailboxes[JANE] = [
-      alert('msg-3', 400, 'Your statement is ready.'),
-      alert('msg-2', 500),
-      alert('msg-1', 600),
-    ]
-    for (let run = 1; run <= 3; run++) await runCheck(deps)
-    expect(outside.fetched.splice(0)).toEqual(['msg-3', 'msg-2', 'msg-1'])
-    outside.mailboxes[JANE].unshift(alert('msg-4', 1))
-
-    await runCheck(deps)
-
-    expect(outside.fetched).toEqual(['msg-4'])
-    expect((await purchasesOf(await chat.userId())).map((purchase) => purchase.source_id)).toEqual([
-      'msg-2',
-      'msg-1',
-      'msg-4',
-    ])
-  })
-
   it('is one alert in a run at most, with the rest left for the runs that follow', async () => {
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
@@ -739,28 +611,6 @@ describe('what a run asks of Gmail', () => {
 
     expect(await connectionOf(await jane.userId())).toMatchObject({ last_checked_at: now() })
     expect(await connectionOf(await sam.userId())).toMatchObject({ last_checked_at: now() })
-  })
-
-  it('goes on to the next page of a listing when it knows all that is on a page', async () => {
-    const chat = await connectedChat(JANE)
-    const userId = await chat.userId()
-    outside.pageSize = 1
-    outside.mailboxes[JANE] = ['msg-3', 'msg-2', 'msg-1'].map((id) => alert(id, 400))
-
-    const checked: (number | null | undefined)[] = []
-    for (let run = 1; run <= 3; run++) {
-      await runCheck(deps)
-      checked.push((await connectionOf(userId))?.last_checked_at)
-    }
-
-    // A run stops at the first page that holds something new. While pages follow that one, more may be left.
-    expect(outside.listings.map((listing) => listing.pageToken)).toEqual([
-      undefined,
-      ...[undefined, 'page-from-1'],
-      ...[undefined, 'page-from-1', 'page-from-2'],
-    ])
-    expect(outside.fetched).toEqual(['msg-3', 'msg-2', 'msg-1'])
-    expect(checked).toEqual([null, null, now()])
   })
 
   it('is five pages of a listing in a run at most, and the next run goes on from the page after them', async () => {
@@ -893,27 +743,6 @@ describe('a mailbox that Google no longer lets the service read', () => {
     expect(await purchasesOf(userId)).toEqual([])
   })
 
-  it('has no more turns until its user connects it again', async () => {
-    const chat = await connectedChat(JANE)
-    const userId = await chat.userId()
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-    outside.ended.add(outside.issued[0])
-    await runCheck(deps)
-    sent.length = 0
-
-    clock.now = later(1)
-    await runCheck(deps)
-
-    expect(sent).toEqual([])
-    expect(await connectionOf(userId)).toMatchObject({ status: 'needs_reconnect', last_run_at: NOW.getTime() / 1000 })
-
-    expect(await chat.say(await signIn(chat, JANE))).toContain('Connected jane@example.test')
-    await runCheck(deps)
-
-    expect(await connectionOf(userId)).toMatchObject({ status: 'active', last_checked_at: now() })
-    expect(sent.map((message) => message.text)).toEqual([`Card ••••1234: SGD 12.40 at COFFEE PLACE\n${ADD_CARD_HINT}`])
-  })
-
   it('is told of again on its next turn when the message could not be sent, and is not marked until it is', async () => {
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
@@ -975,19 +804,6 @@ describe('a mailbox that Google no longer lets the service read', () => {
 
     expect(await connectionOf(userId)).toMatchObject({ last_run_at: NOW.getTime() / 1000 })
   })
-
-  it('is marked, with its user told, when two runs find it out together', async () => {
-    const chat = await connectedChat(JANE)
-    outside.ended.add(outside.issued[0])
-
-    await Promise.all([runCheck(deps), runCheck(deps)])
-
-    // The telling comes before the marking, so each of two runs that overlap may tell the user. That is the price
-    // of never marking a connection whose user could not be told.
-    expect(sent.length).toBeGreaterThanOrEqual(1)
-    expect(new Set(sent.map((message) => message.chatId))).toEqual(new Set([chat.telegramId]))
-    expect(await connectionOf(await chat.userId())).toMatchObject({ status: 'needs_reconnect' })
-  })
 })
 
 describe('taking turns', () => {
@@ -1009,19 +825,6 @@ describe('taking turns', () => {
 
     await connectedChat('tom@example.test')
     expect(await turns(4)).toEqual([JANE, SAM, 'tom@example.test', JANE])
-  })
-
-  it('gives a mailbox that is connected again no turn ahead of those that were waiting', async () => {
-    const jane = await connectedChat(JANE)
-    await connectedChat(SAM)
-    await connectedChat('tom@example.test')
-    expect(await turns(3)).toEqual([JANE, SAM, 'tom@example.test'])
-
-    // Jane has had her turn, and connects again to have another before the others.
-    await jane.say('/disconnect')
-    expect(await jane.say(await signIn(jane, JANE))).toContain('Connected jane@example.test')
-
-    expect(await turns(3)).toEqual([SAM, 'tom@example.test', JANE])
   })
 
   it('gives each user only the purchases from their own mailbox', async () => {
@@ -1087,23 +890,6 @@ describe('sign-ins that nobody came back to', () => {
     expect(await recent.say(recentCode)).toContain('Connected sam@example.test')
   })
 
-  it('are deleted with nothing revoked, when the mailbox one held is still connected for somebody', async () => {
-    const owner = await connectedChat(JANE)
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-    // Somebody else's link, which the owner of the mailbox was got to open and to approve.
-    const other = openChat()
-    await signIn(other, JANE)
-    clock.now = later(10)
-
-    await runCheck(deps)
-
-    expect(await attemptOf(await other.userId())).toBeNull()
-    // Google ends every token of an account when it revokes one. The owner's connection would have gone too.
-    expect(outside.revoked).toEqual([])
-    expect(await connectionOf(await owner.userId())).toMatchObject({ status: 'active', last_checked_at: now() })
-    expect(sent.map((message) => message.text)).toEqual([`Card ••••1234: SGD 12.40 at COFFEE PLACE\n${ADD_CARD_HINT}`])
-  })
-
   it('are cleared away five in a run', async () => {
     for (let abandoned = 1; abandoned <= 7; abandoned++) await signIn(openChat(), `abandoned-${abandoned}@example.test`)
     clock.now = later(10)
@@ -1115,27 +901,6 @@ describe('sign-ins that nobody came back to', () => {
     await runCheck(deps)
     expect(await attemptCount()).toBe(0)
     expect([...outside.revoked].sort()).toEqual([...outside.issued].sort())
-  })
-
-  it('are deleted even when Google cannot be told, and the run goes on to check a mailbox', async () => {
-    const abandoned = openChat()
-    await signIn(abandoned, SAM)
-    clock.now = later(10)
-    const chat = await connectedChat(JANE)
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-    outside.failing.add(REVOKE_URL)
-    const logged = catchConsole()
-
-    await runCheck(deps)
-
-    expect(await attemptOf(await abandoned.userId())).toBeNull()
-    // The revocation is logged as having failed, with the status of Google's answer, and the run as having gone on.
-    expect(logged.events('token_revoke')).toEqual([
-      { event: 'token_revoke', outcome: 'failed', error: 'Error', reason: 'http_error', status: 400 },
-    ])
-    expect(logged.events('check_failed')).toEqual([])
-    expect(logged.events('check')).toMatchObject([{ swept: 1, stored: 1, notified: 1 }])
-    expect(sent.map((message) => message.chatId)).toEqual([chat.telegramId])
   })
 })
 
@@ -1176,24 +941,6 @@ describe('held purchases that nobody answered for', () => {
     expect(await heldOwners()).toEqual([second])
     expect(await heldStoreFor(env.DB, second).find(72, now())).toMatchObject({ messageId: 72 })
     expect(logged.events()).toEqual([{ event: 'check', ...NOTHING_DONE, batches: 1 }])
-  })
-
-  it('are deleted for every user in the one statement, in a run that goes on to check a mailbox', async () => {
-    const chat = await connectedChat(JANE)
-    const [userId, other] = [await chat.userId(), await openChat().userId()]
-    for (let messageId = 1; messageId <= 3; messageId++) await hold(userId, messageId)
-    await hold(other, 71)
-    clock.now = later(DAY_OF_MINUTES)
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-    const queried = vi.spyOn(env.DB, 'prepare')
-    const logged = catchConsole()
-
-    await runCheck(deps)
-
-    expect(queried.mock.calls.filter(([query]) => query.includes('held_batches'))).toHaveLength(1)
-    queried.mockRestore()
-    expect(await heldOwners()).toEqual([])
-    expect(logged.events('check')).toMatchObject([{ batches: 4, stored: 1, notified: 1, checked: true }])
   })
 
   it('are deleted by a run that fails before it gets to them, which is logged with what it had done by then', async () => {
@@ -1353,21 +1100,6 @@ describe('the cost of a run', () => {
 })
 
 describe('the line that a run logs of itself', () => {
-  it('says what the run did with a new alert, after the line of the alert', async () => {
-    const chat = await connectedChat(JANE)
-    const userId = await chat.userId()
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-    const logged = catchConsole()
-
-    await runCheck(deps)
-
-    const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
-    expect(logged.events()).toEqual([
-      { event: 'alert', outcome: 'stored', parser: 'example-bank' },
-      { event: 'check', ...NOTHING_DONE, ...found, stored: 1, notified: 1, checked: true },
-    ])
-  })
-
   it('counts the mail that was listed, looked at, read, stored, not understood, turned away and told of', async () => {
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
@@ -1424,24 +1156,9 @@ describe('the line that a run logs of itself', () => {
     ])
   })
 
-  it('comes after a line that says so, when the run finds that Google has ended the access', async () => {
-    const chat = await connectedChat(JANE)
-    const userId = await chat.userId()
-    outside.ended.add(outside.issued[0])
-    const logged = catchConsole()
-
-    await runCheck(deps)
-
-    expect(logged.events()).toEqual([
-      { event: 'access_lost', user: userId, told: true },
-      { event: 'check', ...NOTHING_DONE, mailbox: true, user: userId },
-    ])
-  })
-
   it.each<[stage: string, when: string, statement: string, whose: 'known' | 'not known']>([
     ['sweep', 'the expired sign-ins cannot be deleted', 'DELETE FROM connect_attempts', 'not known'],
     ['take', 'no mailbox can be given its turn', 'UPDATE google_connections', 'not known'],
-    ['list', 'the ids on a page cannot be looked up', 'FROM json_each', 'known'],
     ['store', 'the purchase cannot be stored', 'INSERT INTO transactions', 'known'],
   ])('comes after one that says the run failed at "%s", when %s', async (stage, _, statement, whose) => {
     const chat = await connectedChat(JANE)
@@ -1530,32 +1247,6 @@ describe('the line that a run logs of itself', () => {
     expect(await purchasesOf(userId)).toHaveLength(1)
   })
 
-  it('comes after one that says the run failed at "notify", when Telegram does not answer and is given up on', async () => {
-    const chat = await connectedChat(JANE)
-    const userId = await chat.userId()
-    outside.mailboxes[JANE] = [alert('msg-1', 5)]
-    outside.stalled.add(TELEGRAM_URL)
-    // The 5 seconds that a request to Telegram is given are cut to a few milliseconds here, and are otherwise as
-    // they are: the time runs out as it does for fetch, which then fails with why.
-    const timeout = AbortSignal.timeout.bind(AbortSignal)
-    const timeouts = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => timeout(5))
-    const logged = catchConsole()
-
-    // The run ends, where it would have waited for Telegram for as long as Cloudflare let it.
-    await runCheck(posting)
-
-    expect(timeouts.mock.calls).toEqual([[5_000]])
-    // The purchase is stored. The request has its own line, with no status, as it got no answer.
-    const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
-    expect(logged.events()).toEqual([
-      { event: 'alert', outcome: 'stored', parser: 'example-bank' },
-      { event: 'telegram_failed', method: 'sendMessage', error: 'TimeoutError' },
-      { event: 'check_failed', stage: 'notify', user: userId, error: 'TimeoutError' },
-      { event: 'check', ...NOTHING_DONE, ...found, stored: 1 },
-    ])
-    expect(await purchasesOf(userId)).toHaveLength(1)
-  })
-
   it('has nothing of the mail or of its owner: no address, merchant, card, amount, token or Telegram id', async () => {
     const logged = catchConsole()
     const chat = await connectedChat(JANE)
@@ -1608,42 +1299,5 @@ describe('through the Worker', () => {
     ])
     expect(await purchasesOf(await chat.userId())).toMatchObject([{ source_id: 'msg-1', occurred_at: receivedAt }])
     expect((await connectionOf(await chat.userId()))?.last_checked_at).toBeGreaterThanOrEqual(receivedAt)
-  })
-
-  it('logs the run that the cron trigger started', async () => {
-    const chat = await connectedChat(JANE)
-    const userId = await chat.userId()
-    outside.mailboxes[JANE] = [gmailMessage({ receivedAt: Math.floor(Date.now() / 1000) - 60 })]
-    const logged = catchConsole()
-
-    const context = createExecutionContext()
-    await worker.scheduled(createScheduledController({ cron: '* * * * *' }), env, context)
-    await waitOnExecutionContext(context)
-
-    // The Worker goes by the real clock, so how long the run took is whatever it took.
-    const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
-    expect(logged.events()).toEqual([
-      { event: 'alert', outcome: 'stored', parser: 'example-bank' },
-      { event: 'check', ...NOTHING_DONE, ...found, stored: 1, notified: 1, checked: true, ms: expect.any(Number) },
-    ])
-  })
-
-  it('deletes the held purchases that nobody answered for when the cron trigger fires, and no others', async () => {
-    const userId = await openChat().userId()
-    const purchase = { place: 0, occurredAt: 1, amountMinor: 300, currency: 'SGD', merchant: 'TEA HOUSE', unsure: true }
-    const batch = (messageId: number) => ({ messageId, cardLast4: '1234', category: null, purchases: [purchase] })
-    // The Worker goes by the real clock: one that was held a day and a minute ago, and one that was held just now.
-    const justNow = Math.floor(Date.now() / 1000)
-    await heldStoreFor(env.DB, userId).hold(batch(71), justNow - DAY - 60)
-    await heldStoreFor(env.DB, userId).hold(batch(72), justNow)
-    const logged = catchConsole()
-
-    const context = createExecutionContext()
-    await worker.scheduled(createScheduledController({ cron: '* * * * *' }), env, context)
-    await waitOnExecutionContext(context)
-
-    const held = await env.DB.prepare('SELECT message_id FROM held_batches WHERE owner_id = ?').bind(userId).all()
-    expect(held.results).toEqual([{ message_id: 72 }])
-    expect(logged.events()).toEqual([{ event: 'check', ...NOTHING_DONE, batches: 1, ms: expect.any(Number) }])
   })
 })

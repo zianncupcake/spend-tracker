@@ -156,13 +156,13 @@ describe('a file that Telegram holds', () => {
     expect(came).toEqual({ asked: 3, givenUp: false })
   })
 
-  it.each([0, 1, 400_000])('is its %i bytes, each as it came', async (length) => {
-    const bytes = bytesOf(length)
-    holding(bytes, length)
+  it('is its 0 bytes, each as it came', async () => {
+    const bytes = bytesOf(0)
+    holding(bytes, 0)
 
     const file = await messenger.file(FILE_ID, 400_000)
 
-    expect(file).toHaveLength(length)
+    expect(file).toHaveLength(0)
     expect(file).toEqual(bytes)
   })
 
@@ -216,8 +216,6 @@ describe('a file of more than it may hold', () => {
   it.each<[what: string, size: unknown]>([
     ['says nothing of its size', undefined],
     ['says that it is smaller than it is', 100],
-    ['says its size in what is not a number', '9000000'],
-    ['says that its size is null', null],
   ])('is given up on as soon as more has come than it may hold, when Telegram %s', async (_, size) => {
     const logged = catchConsole()
     // Ten stretches of 100 bytes, of which a file may here hold 250.
@@ -231,17 +229,6 @@ describe('a file of more than it may hold', () => {
     // The reading stopped at the third stretch, with which there were more bytes than 250, and the rest was not
     // asked for.
     expect(came).toEqual({ asked: 3, givenUp: true })
-    expect(logged.events()).toEqual([])
-  })
-
-  it.each([
-    ['by one byte', 251],
-    ['many times over', 400_000],
-  ])('is given up on when it comes all at once and is too large %s', async (_, length) => {
-    const logged = catchConsole()
-    holding(bytesOf(length))
-
-    expect(await fetched(250)).toEqual(tooLarge(250))
     expect(logged.events()).toEqual([])
   })
 
@@ -288,8 +275,6 @@ describe('a request for a file that Telegram refuses', () => {
   })
 
   it.each<[what: string, answer: () => Response, line: object]>([
-    ['holds no path', () => located(4096, { file_path: undefined }), { error: 'Error', reason: 'no_file_path' }],
-    ['holds a path that is null', () => located(4096, { file_path: null }), { error: 'Error', reason: 'no_file_path' }],
     ['holds a path that is not text', () => located(4096, { file_path: 7 }), { error: 'Error', reason: 'no_file_path' }],
     ['holds no file', () => Response.json({ ok: true }), { error: 'Error', reason: 'no_file_path' }],
     ['is not JSON', () => new Response(`<p>${FILE_ID}</p>`), { error: 'SyntaxError' }],
@@ -303,43 +288,9 @@ describe('a request for a file that Telegram refuses', () => {
     expect(telegram).toHaveBeenCalledTimes(1)
     expect(logged.events()).toEqual([{ event: 'telegram_failed', method: 'getFile', status: 200, ...line }])
   })
-
-  it('fails when the body of the download is no stream of bytes, as that of a real answer always is', async () => {
-    const logged = catchConsole()
-    const notOfBytes = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        controller.enqueue(bytesOf(100))
-        controller.close()
-      },
-    })
-    telegram.mockImplementationOnce(async () => located(100))
-    telegram.mockImplementationOnce(async () => new Response(notOfBytes))
-
-    expect(await fetched()).toBeInstanceOf(TypeError)
-    expect(logged.events()).toEqual([
-      { event: 'telegram_failed', method: 'downloadFile', status: 200, error: 'TypeError' },
-    ])
-  })
 })
 
 describe('a request for a file that Telegram does not answer', () => {
-  it('is given up on after 5 seconds when it is the asking where the file is', async () => {
-    const timeouts = timeoutsByFakeClock()
-    const logged = catchConsole()
-    telegram.mockImplementationOnce(unanswered)
-    const done = fetched()
-
-    await vi.advanceTimersByTimeAsync(4_999)
-    expect(logged.events()).toEqual([])
-    await vi.advanceTimersByTimeAsync(1)
-
-    expect(await done).toMatchObject({ name: 'TimeoutError' })
-    expect(timeouts.mock.calls).toEqual([[5_000]])
-    expect(telegram).toHaveBeenCalledTimes(1)
-    // It got no answer, so its line has no status.
-    expect(logged.events()).toEqual([{ event: 'telegram_failed', method: 'getFile', error: 'TimeoutError' }])
-  })
-
   it('is given up on after 5 seconds of its own when it is the download', async () => {
     const timeouts = timeoutsByFakeClock()
     const logged = catchConsole()

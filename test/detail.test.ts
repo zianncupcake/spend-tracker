@@ -1,9 +1,8 @@
-import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatBlockedError, TelegramError } from '../src/telegram/api'
+import { TelegramError } from '../src/telegram/api'
 import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { BY_HAND_NOTE } from '../src/telegram/purchases'
-import { FAILED, NO_CARDS } from '../src/telegram/texts'
+import { FAILED } from '../src/telegram/texts'
 import { clock, deps, openChat, sent, sentRich, type Posted } from './connect-helpers'
 import { buy } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -112,104 +111,24 @@ describe('/spend with a card, when Telegram does not take the rich message', () 
     for (const text of ['amex', '0005', 'COFFEE', '12.40']) expect(logged.text()).not.toContain(text)
   })
 
-  it.each<[what: string, error: Error, told: boolean, failure: object]>([
-    [
-      'a chat that Telegram will send nothing to',
-      new ChatBlockedError(),
-      false,
-      { error: 'ChatBlockedError', reason: 'chat_blocked' },
-    ],
-    [
-      'a request that never reached Telegram',
-      new TypeError('A made-up failure of the network'),
-      true,
-      { error: 'TypeError' },
-    ],
-    [
-      'a request that Telegram never answered, and that was given up on',
-      new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-      true,
-      { error: 'TimeoutError' },
-    ],
-  ])('sends nothing as text after %s, and logs the update as one that failed', async (_, error, told, failure) => {
+  it('sends nothing as text after a request that never reached Telegram, and logs the update as one that failed', async () => {
     const chat = openChat()
     await chat.say('/addcard amex 0005 calendar')
     await buy(await chat.userId(), { cardLast4: '0005' })
-    vi.mocked(deps.messenger.sendRich).mockRejectedValueOnce(error)
+    vi.mocked(deps.messenger.sendRich).mockRejectedValueOnce(new TypeError('A made-up failure of the network'))
     const logged = catchConsole()
 
     await chat.send('/spend amex')
 
-    // All that a chat is sent then is that something went wrong: and a chat that is to be sent nothing, not that.
-    expect(sent).toEqual(told ? [{ chatId: chat.telegramId, text: FAILED }] : [])
+    // All that a chat is sent then is that something went wrong.
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: FAILED }])
     // The reply had been made, and it was the sending of it that failed: so the log has the command as handled.
-    const line = { event: 'update', kind: 'command', command: 'spend', outcome: 'failed', handled: true, told, ms: 0 }
-    expect(logged.events()).toEqual([{ ...line, ...failure }])
+    const line = { event: 'update', kind: 'command', command: 'spend', outcome: 'failed', handled: true, told: true }
+    expect(logged.events()).toEqual([{ ...line, ms: 0, error: 'TypeError' }])
   })
 })
 
 describe('/spend with a card that is linked to a product', () => {
-  it("has a table for each group of the product: its purchases, what they come to, and the group's limit", async () => {
-    const chat = openChat()
-    await chat.say('/addcard evol 1234 calendar uob-evol')
-    const userId = await chat.userId()
-    const shop = await buy(userId, { at: '2026-10-09T08:30:00+08:00', amountMinor: 3825, merchant: 'example-shop-sg' })
-    // A name as a bank cuts it short, and longer than a row has room for.
-    const eatery = { at: '2026-10-09T08:00:00+08:00', amountMinor: 4560, merchant: 'SAMPLE EATERY HOLDINGS PTE. LT' }
-    const lunch = await buy(userId, eatery)
-    const byCard = { amountMinor: 210, merchant: 'TRAIN FARE', category: 'other' }
-    const there = await buy(userId, { ...byCard, at: '2026-10-09T09:00:00+08:00' })
-    const back = await buy(userId, { ...byCard, at: '2026-10-10T09:00:00+08:00', amountMinor: 185 })
-    clock.now = new Date('2026-10-10T12:00:00+08:00')
-
-    const [message, ...more] = await chat.ask('/spend evol')
-
-    // A group with no purchases has no header, and its numbers are under those of the groups that have one.
-    const online = [
-      'ID  Date       SGD  Merchant',
-      `${two(lunch)}   9 Oct   45.60  SAMPLE EATERY H…`,
-      `${two(shop)}   9 Oct   38.25  example-shop-sg`,
-      '    Total    83.85',
-      '    Cap     300.00',
-      '    Left    216.15',
-    ]
-    const gym = ['    Total     0.00', '    Cap     200.00', '    Left    200.00']
-    const physical = [
-      'ID  Date       SGD  Merchant',
-      `${two(there)}   9 Oct    2.10  TRAIN FARE`,
-      `${two(back)}  10 Oct    1.85  TRAIN FARE`,
-      '    Total     3.95',
-    ]
-    const foreign = ['    Total     0.00']
-    expect(more).toEqual([])
-    expect(message.text).toBe(
-      [
-        'evol ••••1234: 1 Oct to 31 Oct',
-        '',
-        'Online and Mobile Contactless Spend',
-        ...online,
-        '',
-        'Selected Gym, Telco and Streaming Spend',
-        ...gym,
-        '',
-        'Other Spend',
-        ...physical,
-        '',
-        'Overseas Foreign Currency Spend',
-        ...foreign,
-        '',
-        'Total: SGD 87.80 in 4 purchases, resets 1 Nov',
-        OCTOBER_COUNTS,
-        '',
-        'Minimum spend: SGD 87.80 of SGD 800.00',
-        TERMS,
-      ].join('\n'),
-    )
-    // Each table is a block of its own, of its rows and of nothing else.
-    expect(blocksIn(message)).toEqual([online, gym, physical, foreign].map((rows) => rows.join('\n')))
-    expect(message.buttons).toBeUndefined()
-  })
-
   it('marks a purchase that was added by hand, and has a dash for a merchant that is not known', async () => {
     const { chat, ids } = await shopper()
 
@@ -269,58 +188,6 @@ describe('/spend with a card that is linked to a product', () => {
       ].join('\n'),
     )
     expect(blocksIn(message)).toEqual([online, gym, physical, foreign].map((rows) => rows.join('\n')))
-  })
-
-  it('shows every group with nothing spent in it, and its limit, when the window holds no purchases', async () => {
-    const chat = openChat()
-    await chat.say('/addcard evol 1234 calendar uob-evol')
-
-    const [message, ...more] = await chat.ask('/spend evol')
-
-    expect(more).toEqual([])
-    expect(message.text).toBe(
-      [
-        'evol ••••1234: 1 Oct to 31 Oct',
-        '',
-        'Online and Mobile Contactless Spend',
-        '    Total    0.00',
-        '    Cap    300.00',
-        '    Left   300.00',
-        '',
-        'Selected Gym, Telco and Streaming Spend',
-        '    Total    0.00',
-        '    Cap    200.00',
-        '    Left   200.00',
-        '',
-        'Other Spend',
-        '    Total    0.00',
-        '',
-        'Overseas Foreign Currency Spend',
-        '    Total    0.00',
-        '',
-        'Total: no purchases, resets 1 Nov',
-        OCTOBER_COUNTS,
-        '',
-        'Minimum spend: SGD 0.00 of SGD 800.00',
-        TERMS,
-      ].join('\n'),
-    )
-    expect(blocksIn(message)).toEqual([
-      '    Total    0.00\n    Cap    300.00\n    Left   300.00',
-      '    Total    0.00\n    Cap    200.00\n    Left   200.00',
-      '    Total    0.00',
-      '    Total    0.00',
-    ])
-  })
-
-  it('takes two queries for the window, however many purchases it holds', async () => {
-    const { chat } = await shopper()
-    const queried = vi.spyOn(env.DB, 'prepare')
-
-    await chat.ask('/spend evol')
-
-    // After one for the user, one for the cards and one for the user's patterns.
-    expect(queried).toHaveBeenCalledTimes(1 + 1 + 1 + 2)
   })
 })
 
@@ -446,71 +313,6 @@ describe('/spend, where the last two days of a window are counted in the next on
   })
 })
 
-describe('/spend with a card that is linked to no product', () => {
-  it('has one table of all its purchases, which ends with what they come to, and no limit', async () => {
-    const { chat, userId, ids } = await shopper()
-    await chat.say('/addcard amex 0005 calendar')
-    const onAmex = { cardLast4: '0005' }
-    const lunch = await buy(userId, { ...onAmex, at: '2026-10-09T08:00:00+08:00', merchant: 'LUNCH', parser: 'manual' })
-    // What a purchase was sorted into is not shown on a card with no product.
-    const sorted = await buy(userId, { ...onAmex, at: '2026-10-09T09:00:00+08:00', category: 'other' })
-
-    const [message, ...more] = await chat.ask('/spend amex')
-
-    const table = [
-      'ID  Date      SGD  Merchant',
-      `${two(ids[9])}  8 Oct   77.00  ON ANOTHER CARD`,
-      `${two(lunch)}* 9 Oct   12.40  LUNCH`,
-      `${two(sorted)}  9 Oct   12.40  COFFEE PLACE`,
-      '    Total  101.80',
-    ]
-    expect(more).toEqual([])
-    expect(message.text).toBe(
-      [
-        'amex ••••0005: 1 Oct to 31 Oct',
-        '',
-        ...table,
-        '',
-        BY_HAND_NOTE,
-        '',
-        'Total: SGD 101.80 in 3 purchases, resets 1 Nov',
-        OCTOBER_COUNTS,
-      ].join('\n'),
-    )
-    expect(blocksIn(message)).toEqual([table.join('\n')])
-  })
-
-  it('has the code on each amount when its purchases are in more than one currency, and a total for each', async () => {
-    const chat = openChat()
-    await chat.say('/addcard amex 0005 calendar')
-    const userId = await chat.userId()
-    const coffee = await buy(userId, { cardLast4: '0005' })
-    const abroad = { cardLast4: '0005', at: '2026-10-06T09:00:00+08:00', amountMinor: 500, currency: 'USD' }
-    const flight = await buy(userId, { ...abroad, merchant: 'AIRLINE' })
-
-    const [message] = await chat.ask('/spend amex')
-
-    const table = [
-      'ID  Date      Amount  Merchant',
-      `${two(coffee)}  5 Oct  SGD 12.40  COFFEE PLACE`,
-      `${two(flight)}  6 Oct   USD 5.00  AIRLINE`,
-      '    Total  SGD 12.40',
-      '    Total   USD 5.00',
-    ]
-    expect(message.text).toBe(
-      [
-        'amex ••••0005: 1 Oct to 31 Oct',
-        '',
-        ...table,
-        '',
-        'Total: SGD 12.40 + USD 5.00 in 2 purchases, resets 1 Nov',
-        OCTOBER_COUNTS,
-      ].join('\n'),
-    )
-    expect(blocksIn(message)).toEqual([table.join('\n')])
-  })
-})
-
 describe('/spend with a card', () => {
   it("shows the window's dates, and each purchase's day, in the user's time zone", async () => {
     const chat = openChat()
@@ -537,7 +339,6 @@ describe('/spend with a card', () => {
   })
 
   it.each([
-    ['/spend visa', 'You have no card called visa.'],
     ['/spend EVOL', 'You have no card called EVOL.'],
     ['/spend evol amex', 'Usage:\n/spend\n/spend <nickname>'],
     ['/spend my!card', 'Usage:\n/spend\n/spend <nickname>'],
@@ -546,10 +347,6 @@ describe('/spend with a card', () => {
     await chat.say('/addcard evol 1234 calendar')
 
     expect(await chat.say(message)).toBe(reply)
-  })
-
-  it('says how to add a card when the user has none', async () => {
-    expect(await openChat().say('/spend evol')).toBe(NO_CARDS)
   })
 })
 

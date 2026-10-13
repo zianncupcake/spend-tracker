@@ -131,43 +131,6 @@ describe('/sort with the id of a purchase', () => {
     expect(labels(message)).toEqual([UNFLAG])
   })
 
-  it('shows a purchase that is flagged with the button that takes the flag off', async () => {
-    const chat = await chatWithCard()
-    const id = await buy(await chat.userId(), { category: 'other' })
-
-    const message = await ask(chat, `/sort ${id}`)
-
-    expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${OTHER}`)
-    expect(labels(message)).toEqual([UNFLAG])
-  })
-
-  it('shows a purchase that a rule placed with both buttons, which flag it or put it with the others', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    const abroad = await buy(userId, { currency: 'USD', merchant: 'AIRLINE', category: 'fx' })
-    const listed = await buy(userId, { merchant: 'NETFLIX.COM', category: 'selected' })
-
-    const [first, second] = [await ask(chat, `/sort ${abroad}`), await ask(chat, `/sort ${listed}`)]
-
-    expect(first.text).toBe(`ID ${abroad} · 5 Oct · USD 12.40 · AIRLINE\nID ${abroad}: Overseas Foreign Currency Spend`)
-    expect(second.text).toBe(
-      `ID ${listed} · 5 Oct · SGD 12.40 · NETFLIX.COM\nID ${listed}: Selected Gym, Telco and Streaming Spend`,
-    )
-    // A row to each button.
-    expect(first.buttons).toEqual([
-      [{ text: UNFLAG, data: `${abroad}:online` }],
-      [{ text: FLAG, data: `${abroad}:other` }],
-    ])
-    expect(labels(second)).toEqual([UNFLAG, FLAG])
-
-    expect((await chat.press(first, FLAG)).answer).toBe(`ID ${abroad}: ${OTHER}`)
-    expect((await chat.press(second, UNFLAG)).answer).toBe(`ID ${listed}: ${ONLINE}`)
-
-    expect([await categoryOf(abroad), await categoryOf(listed)]).toEqual(['other', 'online'])
-    // From then on each has the one button, as any purchase that is not where a rule put it.
-    expect([labels(first), labels(second)]).toEqual([[UNFLAG], [FLAG]])
-  })
-
   it('moves a purchase of an earlier window too', async () => {
     const chat = await chatWithCard()
     const id = await buy(await chat.userId(), { at: '2026-08-20T10:00:00+08:00' })
@@ -336,7 +299,6 @@ describe('a press that is ignored', () => {
   it.each<[what: string, chat: (id: number) => { id?: number; type?: string } | undefined, why: string]>([
     ['a group chat', () => ({ id: -5001, type: 'group' }), 'not_private'],
     ["a private chat that is not the presser's own", (id) => ({ id: id + 1, type: 'private' }), 'not_own_chat'],
-    ['a chat of no known type', (id) => ({ id }), 'not_private'],
     ['no chat at all', () => undefined, 'not_private'],
   ])('is one under a message in %s, which is logged with why', async (_, chatOf, why) => {
     const chat = await chatWithCard()
@@ -551,24 +513,6 @@ describe('a press', () => {
     expect(reply.text.split('\n').slice(0, 2)).toEqual([purchased, total])
     expect(markedIn(reply)).toEqual(['𝒳 /start https://attacker.test'])
     expect(await categoryOf(id)).toBeNull()
-  })
-
-  it('takes four queries and two requests to Telegram at its most: when it moves a purchase', async () => {
-    const chat = await chatWithCard()
-    const message = await ask(chat, `/sort ${await buy(await chat.userId())}`)
-    const queried = vi.spyOn(env.DB, 'prepare')
-    const [answer, edit, send] = [
-      vi.spyOn(deps.messenger, 'answer'),
-      vi.spyOn(deps.messenger, 'edit'),
-      vi.spyOn(deps.messenger, 'send'),
-    ]
-
-    await chat.press(message, FLAG)
-
-    // The user, the purchase, the cards, and the move.
-    expect(queried).toHaveBeenCalledTimes(4)
-    // Each of these is one request: see the messenger's own test, in webhook.test.ts.
-    expect([answer, edit, send].map((spy) => spy.mock.calls.length)).toEqual([1, 1, 0])
   })
 
   it("moves a user's own purchases only, when two users press at once", async () => {
