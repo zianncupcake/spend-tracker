@@ -164,8 +164,8 @@ describe('/addcard and /cards', () => {
     ])
     expect(listed).toEqual([
       CARDS_HEADER,
-      'visa | ••••1234 | statement closes on the 15th of the month | -',
-      'amex | ••••0005 | calendar month | -',
+      'visa | ••••1234 | statement closes on the 15th of the month | - | -',
+      'amex | ••••0005 | calendar month | - | -',
     ])
   })
 
@@ -178,8 +178,8 @@ describe('/addcard and /cards', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      `${longest} | ••••0000 | statement closes on the 1st of the month | -`,
-      'My_card-2 | ••••9999 | statement closes on the 31st of the month | -',
+      `${longest} | ••••0000 | statement closes on the 1st of the month | - | -`,
+      'My_card-2 | ••••9999 | statement closes on the 31st of the month | - | -',
     ])
   })
 
@@ -212,7 +212,7 @@ describe('/addcard and /cards', () => {
     expect(await chat.say('/addcard visa 5678 calendar')).toContain('You already have a card')
     expect(await chat.say('/addcard other 1234 statement 15')).toContain('You already have a card')
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | - | -'])
   })
 
   it('says how to add a card when there are none', async () => {
@@ -264,7 +264,7 @@ describe('/cards', () => {
     const chat = await chatWithCards()
 
     // As Telegram is posted it: this is all of the `rich_message`, and no text is sent with it. A card that is
-    // linked to no product has a dash for its product.
+    // linked to no product has a dash for its product, and one with no reminder has a dash for that.
     const header = (text: string) => ({ text, is_header: true })
     expect(await chat.rich('/cards')).toEqual({
       skip_entity_detection: true,
@@ -273,15 +273,22 @@ describe('/cards', () => {
           type: 'table',
           is_bordered: true,
           cells: [
-            [header('Nickname'), header('Card'), header('Window'), header('Product')],
+            [header('Nickname'), header('Card'), header('Window'), header('Product'), header('Reminder')],
             [
               { text: 'visa' },
               { text: '••••1234' },
               { text: 'statement closes on the 5th of the month' },
               { text: '-' },
+              { text: '-' },
             ],
-            [{ text: 'evol' }, { text: '••••5678' }, { text: 'calendar month' }, { text: 'UOB EVOL Card' }],
-            [{ text: 'amex' }, { text: '••••0005' }, { text: 'calendar month' }, { text: '-' }],
+            [
+              { text: 'evol' },
+              { text: '••••5678' },
+              { text: 'calendar month' },
+              { text: 'UOB EVOL Card' },
+              { text: '-' },
+            ],
+            [{ text: 'amex' }, { text: '••••0005' }, { text: 'calendar month' }, { text: '-' }, { text: '-' }],
           ],
         },
       ],
@@ -310,7 +317,7 @@ describe('/removecard', () => {
 
     expect(await chat.say('/removecard visa')).toBe('Removed visa.')
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'amex | ••••0005 | calendar month | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'amex | ••••0005 | calendar month | - | -'])
     expect(await chat.say('/removecard visa')).toBe('You have no card called visa.')
   })
 
@@ -332,8 +339,8 @@ describe('/renamecard', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'travel | ••••1234 | statement closes on the 15th of the month | UOB EVOL Card',
-      'amex | ••••0005 | calendar month | -',
+      'travel | ••••1234 | statement closes on the 15th of the month | UOB EVOL Card | -',
+      'amex | ••••0005 | calendar month | - | -',
     ])
     // A purchase goes by the digits of its card, so the card has it still: test/actions.test.ts has it in the tables
     // of /spend with the new nickname.
@@ -355,8 +362,8 @@ describe('/renamecard', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'visa | ••••1234 | calendar month | -',
-      'amex | ••••0005 | calendar month | -',
+      'visa | ••••1234 | calendar month | - | -',
+      'amex | ••••0005 | calendar month | - | -',
     ])
   })
 
@@ -375,7 +382,7 @@ describe('/renamecard', () => {
 
     expect(await chat.say(message)).toBe(RENAME_CARD_USAGE)
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | - | -'])
   })
 })
 
@@ -649,7 +656,8 @@ describe('a message that was edited', () => {
     expect(sent.map((each) => each.text)).toEqual(['Added visa ••••1234: calendar month.', EDITED])
     // The card is there still: the table of /cards has its row.
     await handleUpdate(deps, privateMessage(telegramId, '/cards'))
-    expect(rich.map((each) => linesOf(each.message))).toEqual([[CARDS_HEADER, 'visa | ••••1234 | calendar month | -']])
+    const row = 'visa | ••••1234 | calendar month | - | -'
+    expect(rich.map((each) => linesOf(each.message))).toEqual([[CARDS_HEADER, row]])
   })
 
   it('is answered so whatever it says, and for somebody whom nothing is stored about', async () => {
@@ -801,7 +809,7 @@ describe('what the log has of an update', () => {
     // The names at the start of the lines of the list, each of them once: /spend is there with and without a card.
     const lines = (await chat.say('/help')).split('\n')
     const listed = [...new Set(lines.flatMap((line) => /^\/([a-z]+)/.exec(line)?.[1] ?? []))]
-    expect(listed).toHaveLength(18)
+    expect(listed).toHaveLength(19)
     const logged = catchConsole()
 
     for (const name of listed) await chat.reply(`/${name}`)

@@ -2,6 +2,7 @@
 // texts are made from. What a model is told is not here: see toldOf in ./actions.
 
 import { ATTEMPT_MINUTES } from '../connect'
+import { REMINDER_HOUR } from '../domain/reminder'
 import {
   MAX_BY_HAND_PER_DAY,
   MAX_CARDS,
@@ -44,6 +45,15 @@ The amount is what you spend at the merchant in a month, in the card's own curre
 The merchant has ${MIN_PATTERN_LETTERS} letters or digits or more, in ${MAX_PATTERN_MERCHANT} plain characters at most.
 After "except" come the days on which no charge will come, ${MAX_PATTERN_SKIPS} of them at most.`
 
+/** When a reminder comes on its day, as a clock shows it. */
+const REMINDER_TIME = `${String(REMINDER_HOUR).padStart(2, '0')}:00`
+
+export const REMIND_USAGE = `Usage:
+/remind <nickname> <day>
+/remind <nickname> none
+The day is a day of the month, from 1 to 31. The reminder comes at ${REMINDER_TIME} on that day, by your time zone.
+In a month that has no such day, it comes on the last day of the month.`
+
 export const COMMANDS = `Commands:
 /addcard <nickname> <last4> statement <day> - track a card by statement cycle; <day> is the day of the month it closes
 /addcard <nickname> <last4> calendar - track a card by calendar month
@@ -60,6 +70,7 @@ export const COMMANDS = `Commands:
 /sort <purchase id> - move one purchase to another category
 /patterns - list what you spend every month at a merchant, which is held back from what is left of a cap
 /pattern <nickname> <amount> <merchant> - save such a monthly amount for a card, or remove it with none
+/remind <nickname> <day> - be reminded of a card's bill on that day of every month, or remove the reminder with none
 /timezone - show the time zone that your cards' windows are counted in
 /timezone <name> - change it, for example /timezone Asia/Tokyo
 /connect - connect your Gmail, so that your bank's alerts can be read
@@ -244,6 +255,36 @@ export const PATTERN_REMOVED = 'Removed this pattern:'
 export const SAVE_PATTERN = 'Save this pattern? It replaces the one that the card has for this merchant, if it has one.'
 
 export const REMOVE_PATTERN = 'Remove this pattern?'
+
+// What the bot says of the reminder of a card's bill. `card` is the card as the bot names one: see `label` in
+// ./replies.
+
+/** What a reminder says. */
+export function billDue(card: string): string {
+  return `Reminder: the bill of ${card} is due.`
+}
+
+/** What /remind answers once a reminder is set. `next` is when the next one comes, by the clock of `timeZone`. */
+export function reminderSet(card: string, day: number, next: string, timeZone: string): string {
+  return (
+    `You will be reminded of the bill of ${card} on day ${day} of every month. The next reminder comes on ${next} ` +
+    `(${timeZone}).`
+  )
+}
+
+export function reminderRemoved(card: string): string {
+  return `${card} has no reminder now.`
+}
+
+// What is asked before /remind is run for the assistant.
+
+export function askReminder(card: string, day: number): string {
+  return `Remind you of the bill of ${card} on day ${day} of every month?`
+}
+
+export function askNoReminder(card: string): string {
+  return `Remove the reminder of ${card}?`
+}
 
 export const TOO_MANY_BY_HAND =
   `You have added ${MAX_BY_HAND_PER_DAY} purchases by hand in the last 24 hours, which is as many as can be added ` +

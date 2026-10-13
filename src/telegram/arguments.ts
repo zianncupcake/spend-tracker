@@ -1,6 +1,6 @@
 // What a user types after a command, and the reading of it: the patterns that the words are held to, the card
-// that /addcard's words describe, the purchase that /add's describe, what /pattern's ask for, and the name of a
-// time zone.
+// that /addcard's words describe, the purchase that /add's describe, what /pattern's and /remind's ask for, and the
+// name of a time zone.
 
 import { productOf } from '../catalogue'
 import { lettersOf } from '../catalogue/merchants'
@@ -138,6 +138,18 @@ export function parsePattern(args: string[]): PatternAsked | null {
   const dated = days.every(isDay) && skips.length <= MAX_PATTERN_SKIPS && (except < 0 || skips.length > 0)
   if (amountMinor === 0 || merchant === null || !dated) return null
   return { nickname, merchant, save: { amountMinor, skips } }
+}
+
+/**
+ * What /remind's arguments ask for, or null when they are none of what it takes: a card, and the day of the month
+ * on which to be reminded of its bill. With "none" for the day the reminder is taken away, and `day` is null.
+ */
+export function parseReminder(args: string[]): { nickname: string; day: number | null } | null {
+  const [nickname = '', given = ''] = args
+  if (args.length !== 2 || !NICKNAME.test(nickname)) return null
+  if (given.toLowerCase() === 'none') return { nickname, day: null }
+  const day = DAY.test(given) ? Number(given) : 0
+  return day >= 1 && day <= 31 ? { nickname, day } : null
 }
 
 /**

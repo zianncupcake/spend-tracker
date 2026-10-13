@@ -120,9 +120,9 @@ const CHANGING = ['addcard', 'renamecard', 'product', 'timezone'] as const
  * The commands that are asked about first, whatever the model had read: those that remove or revoke. They are the
  * taking out of a purchase or of a card, the giving up of the access to a Gmail, the removing of an assistant's
  * token, the making of a new one, which ends the one that there is, the starting of a sign-in, which cancels one
- * that is waiting for its code, and the removing of a pattern or the saving of one, which takes the place of the
- * one that there is. The assistant runs none of them: each waits for its user to press a button. So they are what
- * a press may run, but for the commands above: see CONFIRMABLE in ../log.
+ * that is waiting for its code, and the removing of a pattern or of a reminder, or the saving of one, which takes
+ * the place of the one that there is. The assistant runs none of them: each waits for its user to press a button.
+ * So they are what a press may run, but for the commands above: see CONFIRMABLE in ../log.
  */
 const ASKED_FIRST = CONFIRMABLE.filter((name) => !CHANGING.some((changing) => changing === name))
 

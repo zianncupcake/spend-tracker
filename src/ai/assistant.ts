@@ -530,7 +530,8 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[]): string 
       '[product key], /addcard <nickname> <last4> calendar [product key], /removecard <nickname>, /renamecard ' +
       '<nickname> <new nickname>, /product <nickname> <product key>|none, /remove <purchase id>, /pattern ' +
       '<nickname> <amount a month> <merchant> [except <skipped YYYY-MM-DD> ...], /pattern <nickname> <merchant> ' +
-      "none, /timezone <IANA name>, /connect or /disconnect for the user's Gmail, /mcp or /mcp revoke for another " +
+      'none, /remind <nickname> <day of the month>|none for a bill reminder, /timezone <IANA name>, /connect or ' +
+      "/disconnect for the user's Gmail, /mcp or /mcp revoke for another " +
       "assistant's access, /delete for all that is stored about the user, and these, which only show things: " +
       '/cards, /patterns, /status of the Gmail, /products.',
     'To find the id of a purchase that the user describes, call find_purchases first.',

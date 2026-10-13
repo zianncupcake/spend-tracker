@@ -5,14 +5,23 @@ import type { Deps } from '../deps'
 import { CONFIRMABLE, log } from '../log'
 import { findUser, storeFor, type User } from '../store'
 import { connectStoreFor } from '../store-connect'
-import { NICKNAME, parseCard, parsePattern, PURCHASE_ID, timeZoneNamed } from './arguments'
+import { NICKNAME, parseCard, parsePattern, parseReminder, PURCHASE_ID, timeZoneNamed } from './arguments'
 import { commandIn, ran } from './commands'
 import { formatAmount, formatShortDate, maskLast4 } from './format'
 import { confirmButtons, inMessages, purchaseLine, type Line } from './purchases'
 import { describeCard, label, patternLine } from './replies'
 import { sendReply } from './sending'
 import { codeWithin, declined, type Carried, type Handling, type Press } from './shared'
-import { CANCELLED, NOT_DONE, REMOVE_PATTERN, SAVE_PATTERN, SEE_REPLY, SEND_YOURSELF } from './texts'
+import {
+  askNoReminder,
+  askReminder,
+  CANCELLED,
+  NOT_DONE,
+  REMOVE_PATTERN,
+  SAVE_PATTERN,
+  SEE_REPLY,
+  SEND_YOURSELF,
+} from './texts'
 
 /**
  * Asks before a command is run: with a message that says what would be done and to what, and with a button that
@@ -135,6 +144,15 @@ export async function confirmFor(
       const except = save.skips.length > 0 ? ['except', ...save.skips] : []
       const line = ['/pattern', nickname, formatAmount(save.amountMinor), merchant, ...except].join(' ')
       return confirmation(line, [{ text: SAVE_PATTERN }, patternLine(card, merchant, save)])
+    }
+    case 'remind': {
+      const asked = parseReminder(args)
+      if (!asked) return declined(NOT_DONE)
+      const { nickname, day } = asked
+      const card = (await storeFor(db, user.id).listCards()).find((each) => each.nickname === nickname)
+      if (!card) return declined(`You have no card called ${nickname}.`)
+      const text = day === null ? askNoReminder(label(card)) : askReminder(label(card), day)
+      return confirmation(`/remind ${nickname} ${day ?? 'none'}`, [{ text }])
     }
   }
 }

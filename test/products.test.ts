@@ -88,8 +88,8 @@ describe('/product', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'evol | ••••1234 | statement closes on the 5th of the month | UOB EVOL Card',
-      'amex | ••••0005 | calendar month | -',
+      'evol | ••••1234 | statement closes on the 5th of the month | UOB EVOL Card | -',
+      'amex | ••••0005 | calendar month | - | -',
     ])
     expect(await store.listCards()).toEqual([
       { nickname: 'evol', last4: '1234', windowType: 'statement', statementDay: 5, product: 'uob-evol' },
@@ -100,8 +100,8 @@ describe('/product', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'evol | ••••1234 | statement closes on the 5th of the month | -',
-      'amex | ••••0005 | calendar month | -',
+      'evol | ••••1234 | statement closes on the 5th of the month | - | -',
+      'amex | ••••0005 | calendar month | - | -',
     ])
     expect((await store.listCards())[0]).toEqual({
       nickname: 'evol',
@@ -132,7 +132,7 @@ describe('/product', () => {
 
     expect(await chat.say(message)).toBe(reply)
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | -'])
   })
 
   it("links a user's own card, and not the card that another user calls the same", async () => {
@@ -141,8 +141,8 @@ describe('/product', () => {
 
     await chat.say('/product evol uob-evol')
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | UOB EVOL Card'])
-    expect(await bystander.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | UOB EVOL Card | -'])
+    expect(await bystander.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | -'])
   })
 
   it("sorts the purchases of the card's current window that the product's rules settle, and no others", async () => {

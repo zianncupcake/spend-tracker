@@ -66,12 +66,13 @@ export function label(card: Card): string {
 }
 
 /**
- * A card in one line, with its window and, when it is linked to one, the name of its product: as the bot says which
- * card it has added, and as /cards lists a card when its reply is sent as text.
+ * A card in one line, with its window and, when it has them, the name of its product and the day of its reminder:
+ * as the bot says which card it has added, and as /cards lists a card when its reply is sent as text.
  */
 export function describeCard(card: Card): string {
   const product = productOf(card.product)
-  return `${label(card)}: ${describeWindow(card)}${product ? `, ${product.name}` : ''}`
+  const reminder = card.remindDay === undefined ? '' : `, reminder on day ${card.remindDay}`
+  return `${label(card)}: ${describeWindow(card)}${product ? `, ${product.name}` : ''}${reminder}`
 }
 
 export function spendLine(each: CardTotals, timeZone: string): string {
@@ -107,8 +108,8 @@ function paragraphOf(text: string): RichBlock {
 
 /**
  * A user's cards, as /cards shows them: one table, with a row for each card. A card that is linked to no product
- * has a dash where the name of its product would be, as a purchase with no merchant has one for its merchant. As
- * text, it is a line for each card: see describeCard.
+ * has a dash where the name of its product would be, as a purchase with no merchant has one for its merchant, and
+ * a card with no reminder has one for the day of its reminder. As text, it is a line for each card: see describeCard.
  */
 export function cardsReply(cards: Card[]): Tabled {
   const rows = cards.map((card) => [
@@ -116,8 +117,10 @@ export function cardsReply(cards: Card[]): Tabled {
     maskLast4(card.last4),
     describeWindow(card),
     productOf(card.product)?.name ?? '-',
+    card.remindDay === undefined ? '-' : `day ${card.remindDay}`,
   ])
-  return tabled([tableOf(['Nickname', 'Card', 'Window', 'Product'], rows)], () => cards.map(describeCard).join('\n'))
+  const header = ['Nickname', 'Card', 'Window', 'Product', 'Reminder']
+  return tabled([tableOf(header, rows)], () => cards.map(describeCard).join('\n'))
 }
 
 /**

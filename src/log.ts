@@ -42,6 +42,7 @@ export const COMMAND_NAMES = [
   'sort',
   'patterns',
   'pattern',
+  'remind',
   'timezone',
   'connect',
   'code',
@@ -66,6 +67,7 @@ export const CONFIRMABLE = [
   'product',
   'timezone',
   'pattern',
+  'remind',
 ] as const
 
 /**
@@ -104,6 +106,7 @@ export interface Events {
     user: number | null
   }
   access_lost: { user: number; told: boolean }
+  reminder: { user: number | null; outcome: 'sent' | 'blocked' | 'failed' }
   alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | null }
   connect_link: { user: number }
   connect_callback: {

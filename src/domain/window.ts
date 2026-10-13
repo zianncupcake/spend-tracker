@@ -119,13 +119,22 @@ export function startOfDay(year: number, month: number, day: number, timeZone: s
   return new Date(toInstant(Date.UTC(year, month - 1, day), wallClock(timeZone)))
 }
 
+/**
+ * The instant at which the clock of the time zone reads the hour on a calendar day. That is not always so many
+ * hours after the day began: the clocks may have changed since. `month` and `day` are as `startOfDay` takes them.
+ */
+export function hourOfDay(year: number, month: number, day: number, hour: number, timeZone: string): Date {
+  return new Date(toInstant(Date.UTC(year, month - 1, day, hour), wallClock(timeZone)))
+}
+
 /** The calendar day that an instant falls on in the time zone. `month` is 1 to 12. */
 export function dayOf(instant: Date, timeZone: string): { year: number; month: number; day: number } {
   const shown = new Date(wallClock(timeZone)(instant.getTime()))
   return { year: shown.getUTCFullYear(), month: shown.getUTCMonth() + 1, day: shown.getUTCDate() }
 }
 
-function daysInMonth(year: number, month: number): number {
+/** How many days a month has. `month` is 0 to 11, and one outside that carries over, as for Date.UTC. */
+export function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
 }
 
@@ -147,14 +156,14 @@ function wallClock(timeZone: string): WallClock {
   }
 }
 
-/** The instant at which a wall-time midnight begins in the clock's time zone. */
-function toInstant(midnight: number, clock: WallClock): number {
+/** The instant at which the clock reads a wall time: the midnight that a day begins at, or an hour of a day. */
+function toInstant(wallTime: number, clock: WallClock): number {
   const offset = (instant: number) => clock(instant) - instant
-  const before = midnight - offset(midnight - DAY_MS)
-  const after = midnight - offset(midnight + DAY_MS)
-  // The two differ only when the clocks change around this midnight. `after`
+  const before = wallTime - offset(wallTime - DAY_MS)
+  const after = wallTime - offset(wallTime + DAY_MS)
+  // The two differ only when the clocks change around this time. `after`
   // is right once they have changed. Otherwise `before` is, which also covers
   // a change that skips midnight (the day then begins at the change) or
   // repeats it (the day begins at the first of the two).
-  return clock(before) !== midnight && clock(after) === midnight ? after : before
+  return clock(before) !== wallTime && clock(after) === wallTime ? after : before
 }

@@ -45,6 +45,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/patterns` | Lists your monthly patterns. |
 | `/pattern <nickname> <amount> <merchant>` | Saves what you spend with a card at a merchant in a month. `except <YYYY-MM-DD> ...` after the merchant gives the days on which a charge will not come. |
 | `/pattern <nickname> <merchant> none` | Removes a pattern. |
+| `/remind <nickname> <day>` | Reminds you of a card's bill at 09:00 on that day of every month, by your time zone, and on the last day of a month that has no such day. With `none` for the day, it removes the reminder. |
 | `/timezone` | Shows the time zone that your cards' windows are counted in. |
 | `/timezone <name>` | Changes it. The name is an IANA one, such as `Asia/Tokyo`. |
 | `/connect` | Connects your Gmail, so that your bank's alerts can be read. |
@@ -72,7 +73,7 @@ at once. The model only works out what was asked for: the bot's own code does it
 
 What removes or revokes something waits for a tap on "Do it" under the bot's message: taking out a purchase or a
 card, disconnecting the Gmail, making or removing the token of `/mcp`, starting a new sign-in, and saving or
-removing a pattern, as one that is saved takes the place of the one that there is. So does a change
+removing a pattern or a reminder, as one that is saved takes the place of the one that there is. So does a change
 that the model asks for after it has looked purchases up, as a merchant's name is text that somebody else wrote.
 `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
 
@@ -312,6 +313,7 @@ There are two places to read the log:
 | `check` | A scheduled run of the mail check, as it ends, whether or not it failed: what it listed, read and stored, and how long it took. |
 | `check_failed` | A run that failed, with the `stage` that it failed at. It is written before the `check` line of the same run. |
 | `access_lost` | A run found that Google no longer honours the token of a mailbox. `told` is whether its user was told. |
+| `reminder` | A reminder of a card's bill that a scheduled run had to send, before the `check` line of the same run: `sent`, `blocked` by its chat, which is passed over until the next month, or `failed`. One that could not be sent is tried again ten minutes later while it is still that day for its user. One whose next day could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. |
 | `alert` | An alert that was given to the parser of its bank: `stored`, `duplicate` or `unparsed`. An `unparsed` is what a bank that has changed the wording of its alerts looks like. |
 | `connect_link` | `/connect` gave a user a sign-in link. |
 | `connect_callback` | Google sent a browser back to `/oauth/callback`, with what came of it. |
@@ -391,6 +393,8 @@ a minute with no `check` line, or an `update` that was `deferred` with nothing a
   outbound requests and 50 database queries. So the mail check, which runs once a minute, checks one mailbox in a
   run and reads one alert at the most. With N mailboxes connected, each has its turn every N minutes: a purchase
   can be told of some minutes after it was made, and a new connection takes a while to get through its 35 days.
+  Before it checks the mail, a run sends one reminder that is due, the one that has been due longest. So reminders
+  that are due at the same time go out a minute apart.
 - A user can have 20 cards and 50 patterns, and can add 100 purchases by hand in 24 hours, those that are read
   from a photo or added by the assistant among them. `/spend <nickname>` lists the latest 200 purchases of a
   window, and still totals them all. What was spent at a pattern's merchant is counted from those 200.
