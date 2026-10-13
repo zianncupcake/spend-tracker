@@ -1,5 +1,6 @@
-import { productOf, startingCategory } from '../catalogue'
+import { productOf, ruledByCode, startingCategory, unplaced } from '../catalogue'
 import type { Product } from '../catalogue/types'
+import { codesFoundFor } from '../mcc-lookup'
 import type { Card, Store } from '../store'
 import { countedIn, currentWindow } from './window'
 
@@ -11,15 +12,29 @@ import { countedIn, currentWindow } from './window'
 export const WINDOW_LIMIT = 200
 
 /**
- * The category that is stored for a new purchase on the card. Null when the card is linked to no product, and when
- * no rule of its product places the purchase: see `startingCategory`.
+ * The category that each new purchase on the card starts in, in their order: what is stored for a purchase from an
+ * alert and for one that is added by hand alike. Null when the card is linked to no product, and when nothing places
+ * the purchase. A rule of the product comes first: see `startingCategory`. A purchase that no rule placed on a
+ * product that goes by the codes of merchants, which is when `unplaced` holds, goes by what ../mcc-lookup finds.
  */
-export function startingCategoryOn(
+export async function startingCategoriesOn(
   card: Card | undefined,
-  purchase: { currency: string; merchant: string | null },
-): string | null {
+  purchases: { currency: string; merchant: string | null }[],
+): Promise<(string | null)[]> {
   const product = productOf(card?.product)
-  return product ? startingCategory(product, purchase) : null
+  if (!product) return purchases.map(() => null)
+  const categories = purchases.map((purchase) => startingCategory(product, purchase))
+  const open = purchases.flatMap(({ currency, merchant }, at) =>
+    merchant !== null && unplaced(product, { currency, category: categories[at] }) ? [{ at, merchant }] : [],
+  )
+  const codes = await codesFoundFor(open.map(({ merchant }) => merchant))
+  open.forEach(({ at }, nth) => {
+    // The stores that were found can differ in their codes. The purchase is placed only when the product puts them
+    // all in one category.
+    const [category, ...others] = new Set(codes[nth].map((code) => ruledByCode(product, code)))
+    if (others.length === 0) categories[at] = category ?? null
+  })
+  return categories
 }
 
 /**

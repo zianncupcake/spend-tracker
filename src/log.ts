@@ -109,6 +109,7 @@ export interface Events {
   reminder: { user: number | null; outcome: 'sent' | 'blocked' | 'failed' }
   review: { user: number | null; outcome: 'offered' | 'nothing' | 'blocked' | 'failed'; offered: number }
   alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | null }
+  mcc_lookup: { outcome: 'found' | 'none' | 'failed' }
   connect_link: { user: number }
   connect_callback: {
     outcome:
@@ -250,6 +251,7 @@ export type Reason =
   | 'no_file_path'
   | 'no_vision_model'
   | 'cut_short'
+  | 'no_stores'
 
 /**
  * An error that this codebase throws of its own accord. It says what went wrong twice: in its message, for whoever

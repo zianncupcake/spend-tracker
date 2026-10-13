@@ -25,6 +25,7 @@ export const PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profi
 export const MESSAGES_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages'
 export const REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
 export const TELEGRAM_URL = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`
+const STORES_URL = 'https://www.check-mcc.sg/api/store/search'
 
 /** What the stand-in for Google and Telegram has been sent, and how it is to answer. */
 interface Outside {
@@ -72,6 +73,13 @@ interface Outside {
    * question is asked. With none left, a request to the provider is one that a test should not have made.
    */
   model: (object | (() => Response | Promise<Response>))[]
+  /** The words that check-mcc.sg was asked for the stores of, oldest first. */
+  searches: string[]
+  /**
+   * How check-mcc.sg answers a search, whatever the word: with these stores, each with its `Store` and its `MCC`, or
+   * with whatever a function returns.
+   */
+  stores: object[] | (() => Response | Promise<Response>)
 }
 
 function newOutside(): Outside {
@@ -92,6 +100,8 @@ function newOutside(): Outside {
     fetched: [],
     completions: [],
     model: [],
+    searches: [],
+    stores: [],
   }
 }
 
@@ -182,9 +192,10 @@ afterEach(() => {
 })
 
 /**
- * Google, Telegram and the AI provider are reached with the global fetch. This
- * takes its place, so no test signs in to anything real, or asks a real model
- * anything. Its Google has an account for every authorisation code:
+ * Google, Telegram, the AI provider and check-mcc.sg are reached with the global
+ * fetch. This takes its place, so no test signs in to anything real, or asks a
+ * real model or the real list of stores anything. Its Google has an account for
+ * every authorisation code:
  * "code-for-jane@example.test" is exchanged for tokens of the mailbox
  * jane@example.test, and each token names the mailbox it is for. As at Google,
  * revoking one token of an account ends them all. Its AI provider says what a
@@ -275,14 +286,25 @@ async function fakeFetch(url: string, init: RequestInit = {}): Promise<Response>
       outside.completions.push({ key, body: JSON.parse(String(init.body)) })
       const reply = outside.model.shift()
       if (reply === undefined) throw new Error('A test made a request it should not have')
-      const { signal } = init
-      // As fetch does: a request whose time runs out before it is answered fails with why it was ended.
-      const ended = new Promise<never>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))
-      return Promise.race([typeof reply === 'function' ? reply() : Response.json(reply), ended])
+      return unlessEnded(init.signal, typeof reply === 'function' ? reply() : Response.json(reply))
+    }
+    case STORES_URL: {
+      outside.searches.push(searchParams.get('q') ?? '')
+      const { stores } = outside
+      return unlessEnded(init.signal, typeof stores === 'function' ? stores() : Response.json({ merchants: stores }))
     }
     default:
       throw new Error('A test made a request it should not have')
   }
+}
+
+/** As fetch does: a request whose time runs out before it is answered fails with why it was ended. */
+function unlessEnded(signal: AbortSignal | null | undefined, answer: Response | Promise<Response>): Promise<Response> {
+  const ended = new Promise<never>((_, reject) => {
+    if (signal?.aborted) reject(signal.reason)
+    signal?.addEventListener('abort', () => reject(signal.reason))
+  })
+  return Promise.race([answer, ended])
 }
 
 /** The mailbox that a refresh token of the stand-in's Google is for. */

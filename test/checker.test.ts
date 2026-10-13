@@ -1069,8 +1069,9 @@ describe('the cost of a run', () => {
     const turnedAway = HEADER_CHECKS_PER_RUN - MESSAGES_PER_RUN
     const lookalikes = Array.from({ length: turnedAway }, (_, index) => lookalike(`lookalike-${index}`))
     // And then as many purchases as a run reads, each one to tell the user of with a card's total. The card is
-    // linked to a product, whose rules sort a purchase with no query more.
-    await chat.say('/addcard visa 1234 calendar uob-evol')
+    // linked to a product that goes by the codes of merchants, so the code of each purchase's merchant is asked
+    // for: its rules sort a purchase with no query more.
+    await chat.say('/addcard visa 1234 calendar hsbc-revolution')
     const fresh = Array.from({ length: MESSAGES_PER_RUN }, (_, index) => alert(`fresh-${index}`, 5))
     outside.mailboxes[JANE] = [...known, ...lookalikes, ...fresh]
     const asked = vi.spyOn(globalThis, 'fetch')
@@ -1087,9 +1088,11 @@ describe('the cost of a run', () => {
     expect(outside.fetched).toHaveLength(MESSAGES_PER_RUN)
     expect(outside.telegrams).toHaveLength(MESSAGES_PER_RUN)
     expect(await connectionOf(userId)).toMatchObject({ last_checked_at: now() })
-    // 5 revocations, 1 token, 5 pages, the headers of 10 messages, and a message and a Telegram post for each purchase.
-    expect(requests).toBe(5 + 1 + 5 + HEADER_CHECKS_PER_RUN + 2 * MESSAGES_PER_RUN)
-    expect(requests).toBe(23)
+    // 5 revocations, 1 token, 5 pages, the headers of 10 messages, and a message, a search for the code of its
+    // merchant and a Telegram post for each purchase.
+    expect(outside.searches).toHaveLength(MESSAGES_PER_RUN)
+    expect(requests).toBe(5 + 1 + 5 + HEADER_CHECKS_PER_RUN + 3 * MESSAGES_PER_RUN)
+    expect(requests).toBe(24)
     // The sweep and a look for each of its 5 mailboxes, the sweep of the held purchases, the turn, 5 pages, the page
     // token, a note of each message turned away, 3 for each purchase (find its card, store it, total the card), and
     // the mark.

@@ -23,7 +23,8 @@ import type { Mcc, Product } from './types'
 // 3. Whether a purchase is an Eligible Transaction goes by how it was made and by a category code of its merchant,
 //    and an alert email says neither. So a purchase is taken for one until its user marks it otherwise: it is the
 //    limit that a user watches, and to count too much against it is the safer mistake. Two things place a purchase
-//    with nobody choosing: the rule for travel agencies below, and the code of a merchant that ./merchants knows.
+//    with nobody choosing: the rule for travel agencies below, and the code of a merchant, which ./merchants knows
+//    or ../mcc-lookup finds.
 //
 // A purchase at a travel agency is no Eligible Transaction. The travel codes of the terms are those of airlines (3000
 // to 3350, 4511), car rental (3351 to 3500), lodging (3501 to 3999, 7011) and cruise lines (4411), and the code of

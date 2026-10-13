@@ -65,6 +65,10 @@ describe('the privacy policy', () => {
     for (const words of ['photo', 'Photo', 'caption']) expect(text).not.toContain(words)
   })
 
+  it('names the service that is asked for the category code of a merchant', async () => {
+    expect(await policy(false)).toContain('check-mcc.sg')
+  })
+
   // The one sentence here whose wording is not the service's own: Google requires it of an app that reads Gmail.
   it('says of what it gets from Google what Google requires it to say', async () => {
     expect(await policy(true)).toContain(

@@ -48,21 +48,26 @@ const NAMES = MERCHANTS.map(([name, mcc]) => ({ name: lettersOf(name), mcc }))
 /**
  * What tells whether the text of a merchant holds a name, which is given as `lettersOf` makes it. Only letters and
  * digits are compared, as an alert does not keep to a name's blanks: it has "fp*Food Panda" for foodpanda. A name
- * begins where a word of the text does, or "TOKO INDONESIA" would hold koi, and it may end inside a word.
+ * begins where a word of the text does, or "TOKO INDONESIA" would hold koi, and it may end inside a word. With
+ * `wholeWords` it may not: it ends where a word of the text does, as a name from outside this list is to, or
+ * "SAMPLE MARTINI BAR" would hold "Sample Mart".
  */
-export function namedIn(merchant: string): (name: string) => boolean {
+export function namedIn(merchant: string, wholeWords = false): (name: string) => boolean {
   // The words are joined once, and a name is tried only where one of them starts, which is at 40 places at the
   // most: a request has little CPU time, and a card's window can hold 200 purchases to look for 50 names in.
   const words = wordsOf(merchant)
   const joined = words.join('')
   const starts: number[] = []
+  const ends = new Set<number>()
   let at = 0
   for (const word of words) {
     starts.push(at)
     at += word.length
+    ends.add(at)
   }
+  const whole = (start: number, name: string) => !wholeWords || ends.has(start + name.length)
   // Nothing holds an empty name, which would be at every one of those places.
-  return (name) => name !== '' && starts.some((start) => joined.startsWith(name, start))
+  return (name) => name !== '' && starts.some((start) => joined.startsWith(name, start) && whole(start, name))
 }
 
 /**

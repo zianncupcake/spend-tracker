@@ -1,4 +1,4 @@
-import { startingCategoryOn } from './domain/sorting'
+import { startingCategoriesOn } from './domain/sorting'
 import { log } from './log'
 import { parseAlert, parserOf } from './parsers'
 import type { AlertEmail } from './parsers/types'
@@ -28,7 +28,7 @@ async function ingest(store: Store, email: AlertEmail): Promise<IngestResult> {
   const transaction = parseAlert(email)
   if (!transaction) return { status: 'unparsed' }
   const card = (await store.listCards()).find((each) => each.last4 === transaction.cardLast4)
-  const category = startingCategoryOn(card, transaction)
+  const [category] = await startingCategoriesOn(card, [transaction])
   const id = await store.insertTransaction({ ...transaction, sourceId: email.sourceId, category })
   if (id === null) return { status: 'duplicate' }
   return { status: 'stored', transaction: { ...transaction, id, category }, card }
