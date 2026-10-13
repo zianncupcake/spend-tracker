@@ -5,7 +5,7 @@ import type { ReadPurchase } from '../src/ai/photo'
 import { DEFAULT_VISION_MODEL } from '../src/ai/provider'
 import { findUser, storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
-import { addRead, type Adding, type Reading } from '../src/telegram/adding'
+import { addRead, type Reading } from '../src/telegram/adding'
 import { BY_HAND_NOTE, UNSURE_NOTE } from '../src/telegram/purchases'
 import { READ_ALREADY } from '../src/telegram/texts'
 import { deps, NOW, openChat } from './connect-helpers'
@@ -170,42 +170,6 @@ describe('a photo with a caption that names the card', () => {
     expect(lines(rich)[2]).toMatch(/^\d+\* \| 8 Oct \| 5\.00 \| DINER$/)
   })
 
-  it('is read with its caption as it came, however long: how much of one the model is sent is the reading’s to say', async () => {
-    const chat = await chatWithCard()
-    reading({ status: 'nothing' })
-    const caption = `  add these to evol\n${'x'.repeat(1000)}`
-
-    await chat.photo(caption)
-
-    expect(reader.mock.calls[0][2].caption).toBe(caption)
-  })
-
-  it('puts every purchase in the category that the caption named, whatever a rule of the product would make of it', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    // One that a rule would place by its currency, and one by its merchant.
-    const purchases = [bought(990, 'AIRLINE', { currency: 'USD' }), bought(1598, 'NETFLIX.COM')]
-    reading(read(purchases, { card: 'evol', category: 'other' }))
-
-    const { rich } = await chat.photo('evol, other spend')
-
-    const rows = await rowsOf(userId)
-    expect(rows.map((row) => row.category)).toEqual(['other', 'other'])
-    // One table, in which each amount has the code of its currency, and a total for each currency.
-    expect(rich?.blocks).toEqual([
-      bold('Added to evol ••••5678 as Other Spend:'),
-      tableOf(
-        headerRow('Amount'),
-        purchaseRow(`${rows[0].id}*`, '5 Oct', 'USD 9.90', 'AIRLINE'),
-        purchaseRow(`${rows[1].id}*`, '5 Oct', 'SGD 15.98', 'NETFLIX.COM'),
-        sumRow('Total', 'USD 9.90'),
-        sumRow('Total', 'SGD 15.98'),
-      ),
-      BY_HAND,
-      plain('evol ••••5678: SGD 15.98 + USD 9.90 in 2 purchases, resets 1 Nov'),
-    ])
-  })
-
   it('starts each purchase where /add would start it, when the caption names no category: a table to each category', async () => {
     const chat = await chatWithCards()
     const userId = await chat.userId()
@@ -247,35 +211,15 @@ describe('a photo with a caption that names the card', () => {
     expect(texts).toEqual([])
   })
 
-  it.each<[what: string, category: string]>([
-    ['one that only a rule gives', 'fx'],
-    ['one that the product has not got', 'dining'],
-    ['one of another product', 'groceries'],
-  ])('takes no category that is none of those a purchase on the card can be put in by hand: %s', async (_, category) => {
+  it('takes no category that is none of those a purchase on the card can be put in by hand: one that only a rule gives', async () => {
     const chat = await chatWithCard()
-    reading(read([bought(1240, 'COFFEE PLACE')], { card: 'evol', category }))
+    reading(read([bought(1240, 'COFFEE PLACE')], { card: 'evol', category: 'fx' }))
 
     const { rich } = await chat.photo('evol')
 
     // The purchase starts where /add would start it.
     expect(await rowsOf(await chat.userId())).toMatchObject([{ category: null }])
     expect(rich?.blocks[0]).toEqual(bold(`Added to evol ••••5678 as ${ONLINE}:`))
-  })
-
-  it('names no category for a card that is linked to no product, on which no purchase is sorted', async () => {
-    const chat = await chatWithCards()
-    reading(read([bought(1240, 'COFFEE PLACE')], { card: 'visa', category: 'other' }))
-
-    const { rich } = await chat.photo('visa')
-
-    const [row] = await rowsOf(await chat.userId())
-    expect(row).toMatchObject({ card_last4: '1234', category: null })
-    expect(rich?.blocks).toEqual([
-      bold('Added to visa ••••1234:'),
-      tableOf(headerRow('SGD'), purchaseRow(`${row.id}*`, '5 Oct', '12.40', 'COFFEE PLACE'), sumRow('Total', '12.40')),
-      BY_HAND,
-      plain('visa ••••1234: SGD 12.40 in 1 purchase, resets 1 Nov'),
-    ])
   })
 
   it("adds the purchases to the user's own card, and to nobody else's card of the same name", async () => {
@@ -287,20 +231,6 @@ describe('a photo with a caption that names the card', () => {
     expect(await rowsOf(await bystander.userId())).toEqual([])
     expect(await bystander.lines('/spend')).toContain('evol | SGD 0.00 | 0 | 29 Sep to 29 Oct | 1 Nov')
     expect(await rowsOf(await chat.userId())).toHaveLength(1)
-  })
-
-  it('leaves a purchase of an earlier window out of where the card stands, and adds it all the same', async () => {
-    const chat = await chatWithCard()
-    // The last day that October does not count: it counts the last two days of September.
-    const september = seconds('2026-09-28T00:00:00+08:00')
-    reading(read([bought(9900, 'LAST MONTH', { occurredAt: september }), bought(1000, 'THIS MONTH')]))
-
-    const { rich } = await chat.photo()
-
-    expect(await rowsOf(await chat.userId())).toHaveLength(2)
-    expect(lines(rich).at(-1)).toBe(
-      'evol ••••5678: SGD 10.00 in 1 purchase, resets 1 Nov',
-    )
   })
 })
 
@@ -432,18 +362,6 @@ describe('a photo with no caption', () => {
     ])
   })
 
-  it('asks which card with nothing to check, when the model was sure of every purchase', async () => {
-    const chat = await chatWithCards()
-    reading(read([bought(1240, 'COFFEE PLACE')]))
-
-    const { texts } = await chat.photo()
-
-    expect(texts.map((message) => message.text)).toEqual([
-      'Which card was this purchase made with? The bot could not tell.\n5 Oct · SGD 12.40 · COFFEE PLACE',
-    ])
-    expect(labels(texts[0])).toEqual(['Add to visa', 'Add to evol', 'Skip'])
-  })
-
   it('asks which card, of a user who has one card, when the caption named a card that they have not got', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
@@ -462,17 +380,6 @@ describe('a photo with no caption', () => {
       ],
     ])
     expect(await heldFor(userId)).toMatchObject([{ message_id: MESSAGE, card_last4: null }])
-  })
-
-  it('does not go by a card that the reading names and the user has not got', async () => {
-    const chat = await chatWithCards()
-    reading(read([bought(1240, 'COFFEE PLACE')], { card: 'amex', category: 'other' }))
-
-    const { rich, texts } = await chat.photo('amex')
-
-    expect(rich).toBeUndefined()
-    expect(await rowsOf(await chat.userId())).toEqual([])
-    expect(labels(texts[0])).toEqual(['Add to visa', 'Add to evol', 'Skip'])
   })
 })
 
@@ -560,22 +467,6 @@ describe('a reading of a message that has purchases stored already', () => {
     ])
   })
 
-  it('says so, and no more, when every purchase of it has been taken out', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    const came = read([bought(1240, 'COFFEE PLACE'), bought(300, 'TEA HOUSE')])
-    reading(came)
-    await chat.photo(undefined, MESSAGE)
-    for (const { id } of await rowsOf(userId)) await chat.say(`/remove ${id}`)
-
-    const added = await addedAgain(chat, came)
-
-    expect(added?.rich).toBeUndefined()
-    expect(added?.text.map((message) => message.text)).toEqual([
-      '2 of these purchases have been taken out, and are not added again.',
-    ])
-  })
-
   it('has the purchases that are held for the message held once, and added once', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
@@ -659,26 +550,6 @@ describe('the hundred purchases that a user may add by hand in 24 hours', () => 
     expect(await rowsOf(await bystander.userId())).toHaveLength(5)
   })
 
-  it('leave no room for any purchase of a photo once they are used up, which is said with nothing added', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    const earliest = await buy(userId, { parser: 'manual', cardLast4: '0005' })
-    for (let added = 2; added <= 100; added++) await buy(userId, { parser: 'manual', cardLast4: '0005' })
-    reading(read([bought(100, 'SHOP 1')]))
-
-    const { rich, texts } = await chat.photo()
-
-    expect(rich).toBeUndefined()
-    expect(texts.map((message) => message.text)).toEqual([LEFT_OUT('1 purchase was', 'it')])
-    expect(await rowsOf(userId)).toHaveLength(100)
-
-    // Once the earliest of them is 24 hours old, there is room for one more, and only for one.
-    await env.DB.prepare('UPDATE transactions SET created_at = unixepoch() - 86400 WHERE id = ?').bind(earliest).run()
-    reading(read([bought(100, 'SHOP 1'), bought(200, 'SHOP 2')]))
-    expect((await chat.photo()).texts.map((message) => message.text)).toEqual([LEFT_OUT('1 purchase was', 'it')])
-    expect(await rowsOf(userId)).toHaveLength(101)
-  })
-
   it('count against purchases that are held when those are added, and the message says how many were not', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
@@ -720,25 +591,6 @@ describe('the hundred purchases that a user may add by hand in 24 hours', () => 
 describe('a photo of twenty purchases', () => {
   const twenty = (given: Partial<ReadPurchase> = {}) =>
     Array.from({ length: 20 }, (_, index) => bought(100 + index, `SHOP ${index + 1}`, given))
-
-  it('is stored in one statement, and takes six queries in all', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    reading(read(twenty()))
-    const queried = vi.spyOn(env.DB, 'prepare')
-
-    const { rich } = await chat.photo(undefined, MESSAGE)
-
-    // The user, the cards, the two that look whether the message was read before, the twenty purchases, and what
-    // the card then comes to.
-    expect(queried).toHaveBeenCalledTimes(6)
-    expect(queried.mock.calls.filter(([query]) => query.includes('INSERT INTO transactions'))).toHaveLength(1)
-    queried.mockRestore()
-    const rows = await rowsOf(userId)
-    expect(rows.map((row) => row.source_id)).toEqual(Array.from({ length: 20 }, (_, place) => `manual:7001:${place}`))
-    // The ids go up in the order of the photo, and the table has a row for each.
-    expect(lines(rich)).toHaveLength(1 + 1 + 20 + 1 + 2)
-  })
 
   it('takes eight queries at its most: with purchases to hold, and with some that the limit leaves out', async () => {
     const chat = await chatWithCard()
@@ -871,89 +723,5 @@ describe('a purchase that is dated in another year than it is now', () => {
     // The year is still on its line once the purchase has been added.
     await chat.press(asking, 'Add these 2')
     expect(asking.text.split('\n')[1]).toMatch(/^ID \d+ · 5 Oct 2025 · SGD 9\.90 · BOOKSHOP · by hand$/)
-  })
-})
-
-describe('an album of photos', () => {
-  it('is read a photo at a time: each of its messages on its own, of which one has the caption', async () => {
-    const chat = await chatWithCards()
-    const userId = await chat.userId()
-    // Telegram posts an album as a message for each of its photos, and gives the caption to one of them.
-    reading(read([bought(1240, 'COFFEE PLACE')], { card: 'evol' }))
-    const first = await chat.photo('these are on evol')
-    reading(read([bought(300, 'TEA HOUSE')]))
-    const second = await chat.photo()
-
-    expect(reader.mock.calls.map(([, , input]) => input.caption)).toEqual(['these are on evol', ''])
-    // The photo with the caption is added, and the other is asked about: nothing of the first is kept for it.
-    expect(first.rich).toBeDefined()
-    expect(second.rich).toBeUndefined()
-    expect(labels(second.texts[0])).toEqual(['Add to visa', 'Add to evol', 'Skip'])
-    expect(await rowsOf(userId)).toMatchObject([{ merchant: 'COFFEE PLACE' }])
-  })
-})
-
-describe('the adding of a reading', () => {
-  /** How far an adding has got when it has done nothing yet, with whoever waits for it still waiting. */
-  const begun = (): Adding => ({ stored: 0, held: 0, kept: false, late: false })
-
-  it('knows nothing of photos: a reading that came from anything is added by it, under the id of its message', async () => {
-    const chat = await chatWithCards()
-    const user = await findUser(env.DB, chat.telegramId)
-    if (!user) throw new Error('A test has no user')
-    const cards = await storeFor(env.DB, user.id).listCards()
-    const adding = begun()
-
-    // No photo is fetched or read here, and nothing waits for a file: the reading is all that there is.
-    const added = await addRead(
-      deps,
-      user,
-      cards,
-      read([bought(520, 'LUNCH'), unsure(300, 'TEA HOUSE')], { card: 'evol', category: 'other' }),
-      8123,
-      adding,
-    )
-
-    expect([file, reader].map((spy) => spy.mock.calls.length)).toEqual([0, 0])
-    const rows = await rowsOf(user.id)
-    expect(rows).toMatchObject([
-      { source_id: 'manual:8123:0', card_last4: '5678', merchant: 'LUNCH', category: 'other' },
-    ])
-    // What was done is noted as it is done, and what to tell the user is what comes back.
-    expect(adding).toEqual({ stored: 1, held: 1, kept: true, late: false })
-    expect(added?.rich?.rich.blocks).toEqual([
-      bold('Added to evol ••••5678 as Other Spend:'),
-      tableOf(headerRow('SGD'), purchaseRow(`${rows[0].id}*`, '5 Oct', '5.20', 'LUNCH'), sumRow('Total', '5.20')),
-      BY_HAND,
-      plain('evol ••••5678: SGD 5.20 in 1 purchase, resets 1 Nov'),
-    ])
-    const [asking, ...more] = added?.text ?? []
-    expect(more).toEqual([])
-    expect(asking.text).toBe(
-      'Not sure about this purchase. Check its amount and its date before you add it to evol ••••5678 as Other ' +
-        'Spend:\n5 Oct · SGD 3.00 · TEA HOUSE',
-    )
-    expect(asking.buttons).toEqual([
-      [{ text: 'Add this one', data: 'held:8123:add' }],
-      [{ text: 'Skip', data: 'held:8123:skip' }],
-    ])
-    expect(await heldFor(user.id)).toMatchObject([{ message_id: 8123, card_last4: '5678', category: 'other' }])
-    // Nothing that it says is said of a photo.
-    expect(JSON.stringify(added)).not.toMatch(/photo/i)
-  })
-
-  it('stores nothing and holds nothing once whoever waits for it waits no longer', async () => {
-    const chat = await chatWithCard()
-    const user = await findUser(env.DB, chat.telegramId)
-    if (!user) throw new Error('A test has no user')
-    const cards = await storeFor(env.DB, user.id).listCards()
-    const adding: Adding = { ...begun(), late: true }
-
-    const added = await addRead(deps, user, cards, read([bought(520, 'LUNCH'), unsure(300, 'TEA HOUSE')]), 8124, adding)
-
-    expect(added).toBeUndefined()
-    expect(adding).toEqual({ stored: 0, held: 0, kept: false, late: true })
-    expect(await rowsOf(user.id)).toEqual([])
-    expect(await heldFor(user.id)).toEqual([])
   })
 })

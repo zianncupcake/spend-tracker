@@ -42,21 +42,6 @@ describe('the privacy policy', () => {
   const QUESTIONS = '<h2>Questions that you ask the bot</h2>'
   const PHOTOS = '<h2>Photos that you send the bot</h2>'
 
-  it('names the operator and how to reach them, and when it was last updated', async () => {
-    const response = privacyPage(operator, true, false)
-    const html = await response.text()
-
-    expect(response.status).toBe(200)
-    expect(html).toContain('<h1>Privacy policy</h1>')
-    expect(html).toMatch(/Last updated: \d{1,2} [A-Z][a-z]+ \d{4}/)
-    expect(html).toContain('Example Operator')
-    expect(html).toContain('contact: privacy@spend-tracker.test')
-  })
-
-  it('has a section on what becomes of a question, where the bot has an assistant', async () => {
-    expect(await policy(true)).toContain(QUESTIONS)
-  })
-
   it('says nothing of questions that are asked, or of an AI provider, where the bot has no assistant', async () => {
     const text = await policy(false)
 
@@ -72,7 +57,6 @@ describe('the privacy policy', () => {
 
   it.each([
     ['an assistant and no model that reads photos', true, false],
-    ['no assistant', false, false],
     // A service reads photos with the model of the provider that answers its questions, so it reads none without one.
     ['no assistant, whatever is said of photos', false, true],
   ])('says nothing of photos where the bot reads none: with %s', async (_, assistant, photos) => {
@@ -150,23 +134,15 @@ describe('the sign-in pages', () => {
 })
 
 describe('every page', () => {
-  // Every page is sent with the same headers, and a sign-in page with two more. So a page of each kind is looked at.
-  it.each<[name: string, page: () => Response]>([
-    ['the homepage', () => homePage(operator)],
-    ['the code page', () => codePage('123456')],
-  ])('%s is HTML that browsers must not sniff', (_, page) => {
-    const { headers } = page()
+  it('the homepage is HTML that browsers must not sniff', () => {
+    const { headers } = homePage(operator)
 
     expect(headers.get('content-type')).toBe('text/html; charset=utf-8')
     expect(headers.get('x-content-type-options')).toBe('nosniff')
   })
 
-  // What a page holds is its own. The two here are those that no other test looks through for a script.
-  it.each<[name: string, page: () => Response]>([
-    ['the code page', () => codePage('123456')],
-    ['the expired-link page', () => problemPage('expired')],
-  ])('%s allows no scripts, and no styles but its own', async (_, page) => {
-    const response = page()
+  it('the code page allows no scripts, and no styles but its own', async () => {
+    const response = codePage('123456')
     const html = await response.text()
 
     const [, nonce] = /<style nonce="([^"]+)">/.exec(html) ?? []

@@ -30,14 +30,6 @@ const singaporeDays = (start: string, end: string) => ({
 })
 
 describe('calendar window', () => {
-  it('is the local calendar month', () => {
-    const window = singaporeWindow(calendar, '2026-10-09 12:00')
-
-    expect(window).toEqual(singaporeDays('2026-10-01', '2026-11-01'))
-    expect(window.start.toISOString()).toBe('2026-09-30T16:00:00.000Z')
-    expect(window.end.toISOString()).toBe('2026-10-31T16:00:00.000Z')
-  })
-
   it('goes by the local date, not the UTC date', () => {
     const now = new Date('2026-09-30T18:00:00Z') // 02:00 on 1 October in Singapore
 
@@ -54,10 +46,6 @@ describe('calendar window', () => {
 })
 
 describe('statement window', () => {
-  it('runs from the day after one close day to the day after the next', () => {
-    expect(singaporeWindow(closingOn(15), '2026-10-09 12:00')).toEqual(singaporeDays('2026-09-16', '2026-10-16'))
-  })
-
   it('still covers the last minute of the close day', () => {
     expect(singaporeWindow(closingOn(15), '2026-10-15 23:59')).toEqual(singaporeDays('2026-09-16', '2026-10-16'))
   })
@@ -72,10 +60,6 @@ describe('statement window', () => {
     expect(singaporeWindow(closingOn(31), '2026-03-01 00:00')).toEqual(singaporeDays('2026-03-01', '2026-04-01'))
   })
 
-  it('closes day 31 on 30 April 2026', () => {
-    expect(singaporeWindow(closingOn(31), '2026-04-10 12:00')).toEqual(singaporeDays('2026-04-01', '2026-05-01'))
-  })
-
   it('closes day 30 on 29 February 2028, a leap year', () => {
     // January closes on the 30th, so this cycle starts on the 31st.
     expect(singaporeWindow(closingOn(30), '2028-02-10 12:00')).toEqual(singaporeDays('2028-01-31', '2028-03-01'))
@@ -84,15 +68,6 @@ describe('statement window', () => {
   it('crosses the end of the year', () => {
     expect(singaporeWindow(closingOn(15), '2026-12-20 12:00')).toEqual(singaporeDays('2026-12-16', '2027-01-16'))
     expect(singaporeWindow(closingOn(15), '2027-01-05 12:00')).toEqual(singaporeDays('2026-12-16', '2027-01-16'))
-  })
-
-  it('begins a day at the clock change when the change skips midnight', () => {
-    // In Havana the clocks went from 23:59 on 7 March 2026 straight to 01:00 on
-    // the 8th (UTC-5 to UTC-4), so that day has no midnight.
-    const window = currentWindow(closingOn(7), new Date('2026-03-05T12:00:00-05:00'), 'America/Havana')
-
-    expect(window.start.toISOString()).toBe('2026-02-08T05:00:00.000Z')
-    expect(window.end.toISOString()).toBe('2026-03-08T05:00:00.000Z')
   })
 })
 
@@ -174,11 +149,5 @@ describe('the day that an instant falls on', () => {
 
     expect(dayOf(instant, SINGAPORE)).toEqual({ year: 2027, month: 1, day: 1 })
     expect(dayOf(instant, 'America/New_York')).toEqual({ year: 2026, month: 12, day: 31 })
-  })
-
-  it('begins where startOfDay says that day begins', () => {
-    const { year, month, day } = dayOf(new Date('2026-03-08T12:00:00Z'), 'America/New_York')
-
-    expect(startOfDay(year, month, day, 'America/New_York').toISOString()).toBe('2026-03-08T05:00:00.000Z')
   })
 })

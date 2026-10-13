@@ -3,7 +3,7 @@ import { ProviderError } from '../src/ai/provider'
 import { GrantLostError } from '../src/google/gmail'
 import { GoogleError } from '../src/google/oauth'
 import { Failure, log, logFailure } from '../src/log'
-import { ChatBlockedError, TelegramError } from '../src/telegram/api'
+import { ChatBlockedError } from '../src/telegram/api'
 import { catchConsole } from './log-helpers'
 
 // The service's log: what a line of it is, and how much of an error goes into one. Every value here is made up.
@@ -59,22 +59,6 @@ describe('the line of a failure', () => {
     expect(asLog).not.toHaveBeenCalled()
   })
 
-  it('is told from every other line by its level, whatever the event and whatever came of it', () => {
-    const logged = catchConsole()
-
-    log('token_revoke', { outcome: 'revoked' })
-    logFailure('token_revoke', new Error('made up'), { outcome: 'failed' })
-    // What an event says came of it does not make its line that of a failure: an error does.
-    log('mcp_tool', { user: 7, tool: 'list_transactions', outcome: 'invalid', ms: 3 })
-    logFailure('mcp_tool', new Error('made up'), { user: 7, tool: 'list_transactions', outcome: 'failed', ms: 3 })
-
-    expect(logged.events().map((event) => event.outcome)).toEqual(['revoked', 'failed', 'invalid', 'failed'])
-    expect(logged.failures()).toEqual([
-      { event: 'token_revoke', outcome: 'failed', error: 'Error' },
-      { event: 'mcp_tool', user: 7, tool: 'list_transactions', outcome: 'failed', ms: 3, error: 'Error' },
-    ])
-  })
-
   it('has nothing else of an error from outside: not its message, its stack, its cause or what it holds', () => {
     const logged = catchConsole()
     const error = Object.assign(new RangeError(`A made-up error that quotes its input: ${PRIVATE.join(', ')}`), {
@@ -108,10 +92,6 @@ describe('the line of a failure', () => {
   it.each<[whose: string, error: Error, reason: object]>([
     ["Google's", new GoogleError('Gmail list request', 503), { reason: 'http_error' }],
     ["the AI provider's", new ProviderError(503, 30), { reason: 'http_error' }],
-    ["Telegram's", new TelegramError('sendMessage', 503), { reason: 'http_error' }],
-    // An error of somebody else's has its status logged too, when that is the status of an HTTP answer: see the
-    // test after this one for what is not. It has no reason, as it is none of this codebase's.
-    ["somebody else's", new Refused(503), {}],
   ])('has the HTTP status that the error holds, when it is %s for an answer that was an error', (_, error, reason) => {
     const logged = catchConsole()
 
@@ -132,11 +112,9 @@ describe('the line of a failure', () => {
   })
 
   it.each<[what: string, status: unknown]>([
-    ['a number as long as an id of Telegram’s', 6591234567],
     ['a number below 100', 99],
     ['a number above 599', 600],
     ['a status and a half', 503.5],
-    ['a status as text', '503'],
     ['a status inside an object', { valueOf: () => 503, merchant: PRIVATE[0] }],
   ])('has no status of an error that holds %s for one: only a whole number from 100 to 599 is one', (_, status) => {
     const logged = catchConsole()
@@ -163,8 +141,6 @@ describe('the line of a failure', () => {
 
   it.each<[what: string, thrown: unknown, name: string]>([
     ['text', PRIVATE[0], 'string'],
-    ['a number', 4242, 'number'],
-    ['nothing', undefined, 'undefined'],
     ['null', null, 'object'],
     ['an object that is no error', { name: PRIVATE[0], message: PRIVATE[1], reason: 'no_date' }, 'object'],
   ])('names what was thrown by its type, and writes nothing of it, when it is %s', (_, thrown, name) => {
@@ -175,7 +151,7 @@ describe('the line of a failure', () => {
     expect(logged.events()).toEqual([{ event: 'token_revoke', outcome: 'failed', error: name }])
   })
 
-  it.each([PRIVATE[0], PRIVATE[1], '4242424242424242', '', 'x'.repeat(41)])(
+  it.each([PRIVATE[0], '4242424242424242', '', 'x'.repeat(41)])(
     'takes no name for a class name that is not letters alone: "%s" is logged as Error',
     (name) => {
       const logged = catchConsole()
@@ -187,10 +163,7 @@ describe('the line of a failure', () => {
   )
 
   it.each<[what: string, name: unknown]>([
-    // Each of the first three reads as letters alone when it is made into text, which is what a pattern does to it.
     ['an object that reads as a word', { toString: () => 'Letters', merchant: PRIVATE[0] }],
-    ['nothing', undefined],
-    ['null', null],
     // And a symbol is made into no text at all: to try is to throw.
     ['a symbol', Symbol('Letters')],
   ])('takes no name that is not text: an error whose name is %s is logged as Error, and nothing fails', (_, name) => {

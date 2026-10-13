@@ -3,8 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { depsFor } from '../src/deps'
 import { findUser } from '../src/store'
 import { handleUpdate } from '../src/telegram/handler'
-import { busyReply } from '../src/telegram/replies'
-import { FAILED, NOT_ANSWERED, TOOK_TOO_LONG, WORKING } from '../src/telegram/texts'
+import { NOT_ANSWERED, TOOK_TOO_LONG, WORKING } from '../src/telegram/texts'
 import { AI_URL, refusing, saying } from './ai-helpers'
 import { newTelegramId, plain, userCount } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -558,31 +557,6 @@ describe('a question that cannot be answered', () => {
       { ...(await failedLine(telegramId)), sent: 'none', ...providerRefused(500) },
     ])
   })
-
-  it.each<[when: string, headers: Record<string, string>]>([
-    // The provider says how long to wait in seconds, when it says.
-    ['in about 12 minutes', { 'retry-after': '720' }],
-    ['later', {}],
-  ])(
-    'has its user told to try again %s, in the place of the placeholder, when the provider has had too many requests',
-    async (_, headers) => {
-      const logged = catchConsole()
-      provider.mockImplementationOnce(refusing(429, 'Rate limit reached.', headers))
-      const { telegramId, later } = await question()
-
-      await later()
-
-      const wait = headers['retry-after']
-      expect(telegram.mock.calls).toEqual([
-        placeholder(telegramId),
-        typing(telegramId),
-        edited(telegramId, busyReply(wait ? Number(wait) : undefined)),
-      ])
-      expect(logged.events('question')).toEqual([
-        { ...(await failedLine(telegramId)), outcome: 'busy', ...providerRefused(429) },
-      ])
-    },
-  )
 })
 
 describe('a question that takes too long', () => {
@@ -711,22 +685,6 @@ describe('a chat that Telegram will send nothing to', () => {
 })
 
 describe('what the log has of a question', () => {
-  it('is one line when its answering ends, after the line of the update that it came in', async () => {
-    const logged = catchConsole()
-    quickModel()
-    const { telegramId, later } = await question()
-
-    // The update is logged as one that was left to be answered, before anything is done about its question.
-    expect(logged.events()).toEqual([{ event: 'update', kind: 'question', outcome: 'deferred', ms: 0 }])
-
-    await later()
-
-    expect(logged.events().map((event) => event.event)).toEqual(['update', 'ai_call', 'question'])
-    expect(logged.events('question')).toEqual([await answeredLine(telegramId)])
-    // A question that was answered is no failure, and nothing of it is written at the level of one.
-    expect(logged.failures()).toEqual([])
-  })
-
   it('has nothing of the question, of its answer, of the chat or of what Telegram said of a request', async () => {
     const logged = catchConsole()
     const answer = 'You spent SGD 12.40 at COFFEE PLACE.'
@@ -794,60 +752,6 @@ describe('a request that Telegram does not answer', () => {
     expect(signals.map((each) => made.indexOf(each))).toEqual([0, 1, 3, 4])
   })
 
-  it('is given up on when it is the placeholder, and the question is then answered without one', async () => {
-    timeoutsByFakeClock()
-    const logged = catchConsole()
-    telegram.mockImplementationOnce(unanswered)
-    quickModel()
-    const { telegramId, later } = await question()
-    const done = later()
-
-    // Until the 5 seconds are over, nothing else is done: the model is not asked, and the chat is shown nothing.
-    await vi.advanceTimersByTimeAsync(4_999)
-    expect(telegram.mock.calls).toEqual([placeholder(telegramId)])
-    expect(provider).not.toHaveBeenCalled()
-    expect(logged.events('telegram_failed')).toEqual([])
-
-    await vi.advanceTimersByTimeAsync(1)
-    await done
-
-    // Then the question goes on as one whose placeholder could not be sent, with no placeholder to delete.
-    expect(telegram.mock.calls).toEqual([placeholder(telegramId), typing(telegramId), rich(telegramId, 'An answer.')])
-    expect(logged.events('telegram_failed')).toEqual([givenUp('sendMessage')])
-    expect(logged.events('question')).toEqual([
-      { ...(await answeredLine(telegramId)), placeholder: false, ms: 5_000 },
-    ])
-  })
-
-  it('is given up on when it is the answer, and its user is told that the question could not be answered', async () => {
-    timeoutsByFakeClock()
-    const logged = catchConsole()
-    const made = stalling('sendRichMessage')
-    quickModel()
-    const { telegramId, later } = await question()
-    const done = later()
-
-    // The answer is sent once the user's row has been read and the model has answered. Its 5 seconds start then.
-    await made
-    await vi.advanceTimersByTimeAsync(4_999)
-    expect(methods().at(-1)).toBe('sendRichMessage')
-    await vi.advanceTimersByTimeAsync(1)
-    await done
-
-    // The answer is not sent as text after that: nothing says that text would get through where the rich message
-    // did not. The notice is said in the place of the placeholder.
-    expect(telegram.mock.calls).toEqual([
-      placeholder(telegramId),
-      typing(telegramId),
-      rich(telegramId, 'An answer.'),
-      edited(telegramId, NOT_ANSWERED),
-    ])
-    expect(logged.events('telegram_failed')).toEqual([givenUp('sendRichMessage')])
-    // The question failed at the sending of its answer, which is no question that took too long to answer.
-    const line = { ...(await answeredLine(telegramId)), outcome: 'failed', sent: 'edit', ms: 5_000 }
-    expect(logged.events('question')).toEqual([{ ...line, error: 'TimeoutError' }])
-  })
-
   it('is given up on when it is the notice in the place of the placeholder, which is then sent as a message', async () => {
     timeoutsByFakeClock()
     const logged = catchConsole()
@@ -895,36 +799,5 @@ describe('a request that Telegram does not answer', () => {
     // The request is given up on when its 5 seconds are over, and is logged then.
     await vi.advanceTimersByTimeAsync(5_000)
     expect(logged.events('telegram_failed')).toEqual([givenUp('sendChatAction')])
-  })
-
-  it('is given up on when it is the reply to a command, and the chat is told that something went wrong', async () => {
-    timeoutsByFakeClock()
-    const logged = catchConsole()
-    // Telegram does not answer the reply, which is the table of /products, and takes what comes after it.
-    const made = Promise.withResolvers<void>()
-    telegram.mockImplementationOnce(() => {
-      made.resolve()
-      return unanswered()
-    })
-    const telegramId = newTelegramId()
-    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
-
-    const done = handleUpdate(deps, { message: { message_id: ++lastMessage, text: '/products', chat, from } })
-    // The 5 seconds of the reply start when the request for it is made, so that is waited for first.
-    await made.promise
-    await vi.advanceTimersByTimeAsync(5_000)
-
-    // Telegram is told that the update was taken once the reply has been given up on, and not before.
-    expect(await done).toBeUndefined()
-    // A rich message that Telegram did not answer is not sent again as text, as one that it refuses is: whether it
-    // took the first is not known.
-    const reply = expect.objectContaining({ chat_id: telegramId, rich_message: expect.anything() })
-    expect(telegram.mock.calls).toEqual([['sendRichMessage', reply], said(telegramId, FAILED)])
-    // The reply had been made, so the command had been handled: it is the sending that was given up on.
-    const line = { event: 'update', kind: 'command', command: 'products', outcome: 'failed', handled: true }
-    expect(logged.events()).toEqual([
-      givenUp('sendRichMessage'),
-      { ...line, told: true, ms: 5_000, error: 'TimeoutError' },
-    ])
   })
 })

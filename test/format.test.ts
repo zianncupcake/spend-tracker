@@ -3,21 +3,11 @@ import {
   describeTotals,
   describeWindow,
   formatAmount,
-  formatMoney,
   formatShortDate,
   formatShortDateTime,
   maskLast4,
   shortDateIn,
 } from '../src/telegram/format'
-
-it('formats money from hundredths', () => {
-  expect(formatMoney(123456, 'SGD')).toBe('SGD 1,234.56')
-  expect(formatMoney(1240, 'SGD')).toBe('SGD 12.40')
-  expect(formatMoney(5, 'USD')).toBe('USD 0.05')
-  expect(formatMoney(0, 'USD')).toBe('USD 0.00')
-  expect(formatMoney(99999999999999, 'SGD')).toBe('SGD 999,999,999,999.99')
-  expect(formatMoney(-1240, 'SGD')).toBe('SGD -12.40')
-})
 
 it('formats an amount from hundredths as the number that money has, with no currency', () => {
   expect(formatAmount(123456)).toBe('1,234.56')

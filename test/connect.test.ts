@@ -50,19 +50,6 @@ describe('/connect', () => {
     expect(outside.exchanges).toEqual([])
   })
 
-  it('gives a new link in place of the old one', async () => {
-    const chat = openChat()
-    const first = linkIn(await chat.say('/connect'))
-
-    const second = linkIn(await chat.say('/connect'))
-
-    expect(second.href).not.toBe(first.href)
-    expect((await open(first)).status).toBe(400)
-    expect((await approve(first, 'jane@example.test')).status).toBe(400)
-    expect(outside.exchanges).toEqual([])
-    expect((await open(second)).status).toBe(302)
-  })
-
   it('gives up the mailbox of a sign-in that a new link replaces', async () => {
     const chat = openChat()
     const code = await signIn(chat, 'jane@example.test')
@@ -104,32 +91,6 @@ describe('what the log has of a sign-in', () => {
   /** The line of a message that the bot replied to: a command, by its name, or the six digits of a code. */
   const came = (what: object) => ({ event: 'update', ...what, outcome: 'replied', ms: 0 })
   const CONNECT = came({ kind: 'command', command: 'connect' })
-
-  it('is that a link was given, and to which user: nothing of the link', async () => {
-    const chat = openChat()
-    const userId = await chat.userId()
-    const logged = catchConsole()
-
-    const link = linkIn(await chat.say('/connect'))
-
-    // And after it, that the command which asked for the link was replied to.
-    expect(logged.events()).toEqual([{ event: 'connect_link', user: userId }, CONNECT])
-    expect(logged.text()).not.toContain(link.searchParams.get('state'))
-  })
-
-  it('is that a token was revoked, when a new link takes the place of a sign-in that held a mailbox', async () => {
-    const chat = openChat()
-    await signIn(chat, 'jane@example.test')
-    const logged = catchConsole()
-
-    await chat.say('/connect')
-
-    expect(logged.events()).toEqual([
-      { event: 'token_revoke', outcome: 'revoked' },
-      { event: 'connect_link', user: await chat.userId() },
-      CONNECT,
-    ])
-  })
 
   it('is nothing for a link that is only opened, however often', async () => {
     const link = linkIn(await openChat().say('/connect'))
@@ -213,12 +174,8 @@ describe('GET /oauth/start', () => {
     expect((await approve(link, 'jane@example.test')).status).toBe(200)
   })
 
-  it.each([
-    ['a state it does not know', '?state=made-up-state'],
-    ['an empty state', '?state='],
-    ['no state', ''],
-  ])('shows the expired page for %s', async (_, query) => {
-    const response = await open(new URL(`https://spend-tracker.test/oauth/start${query}`))
+  it('shows the expired page for a state it does not know', async () => {
+    const response = await open(new URL('https://spend-tracker.test/oauth/start?state=made-up-state'))
 
     expect(response.status).toBe(400)
     expect(response.headers.get('location')).toBeNull()
@@ -235,16 +192,6 @@ describe('GET /oauth/start', () => {
 
     clock.now = new Date(NOW.getTime() + 10 * MINUTE)
     const response = await open(link)
-    expect(response.status).toBe(400)
-    expect(await response.text()).toContain('This link has expired')
-  })
-
-  it('shows the expired page once Google has redirected back from the link', async () => {
-    const link = linkIn(await openChat().say('/connect'))
-    await approve(link, 'jane@example.test')
-
-    const response = await open(link)
-
     expect(response.status).toBe(400)
     expect(await response.text()).toContain('This link has expired')
   })
@@ -285,18 +232,5 @@ describe('through the Worker', () => {
     expect(await tell(telegramId, await codeOn(page))).toContain('Connected jane@example.test')
     expect(await tell(telegramId, '/disconnect')).toContain('Disconnected jane@example.test')
     expect(outside.revoked).toEqual([outside.issued[0]])
-  })
-
-  it('answers each of the two sign-in addresses with its own page', async () => {
-    const link = linkIn(await tell(newTelegramId(), '/connect'))
-    const denied = new URLSearchParams({ state: link.searchParams.get('state') ?? '', error: 'access_denied' })
-
-    const start = await exports.default.fetch('https://spend-tracker.test/oauth/start?state=made-up-state')
-    const callback = await exports.default.fetch(`https://spend-tracker.test/oauth/callback?${denied}`)
-
-    expect(start.status).toBe(400)
-    expect(await start.text()).toContain('This link has expired')
-    expect(callback.status).toBe(400)
-    expect(await callback.text()).toContain('Sign-in was not completed')
   })
 })

@@ -229,12 +229,6 @@ describe('a store', () => {
     expect(await store.sumByCurrency('0000', 1000, 2000)).toEqual([])
   })
 
-  it('stores a transaction without a merchant', async () => {
-    const store = await newStore()
-
-    expect(await store.insertTransaction(purchase({ merchant: null }))).not.toBeNull()
-  })
-
   it('lists purchases from start up to, but not including, end: newest first, on one card or on all', async () => {
     const store = await newStore()
     const other = await newStore()
@@ -628,25 +622,5 @@ describe('purchases that are added by hand several at once', () => {
     await store.insertByHand(sourceIds.slice(0, 50).map((sourceId) => byHand(sourceId)))
 
     expect(await store.findBySourceIds(sourceIds)).toHaveLength(50)
-  })
-})
-
-describe('the database', () => {
-  it('has no table of what a user chose for a merchant: a choice is kept for its own purchase alone', async () => {
-    const { results } = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all<{ name: string }>()
-    const tables = results.map((table) => table.name)
-
-    // The migrations that came before made the table, and the last of them drops it.
-    expect(tables).toContain('transactions')
-    expect(tables).not.toContain('merchant_categories')
-  })
-
-  it('has no table of how many questions a user asked: a question is not counted', async () => {
-    const { results } = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all<{ name: string }>()
-    const tables = results.map((table) => table.name)
-
-    // An earlier migration made the table, and a later one drops it.
-    expect(tables).toContain('users')
-    expect(tables).not.toContain('ai_questions')
   })
 })

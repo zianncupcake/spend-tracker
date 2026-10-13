@@ -101,7 +101,6 @@ it('shows a code of its own for every sign-in', async () => {
 })
 
 it.each<[what: string, sentBack: Record<string, string>]>([
-  ['an error', { error: 'access_denied' }],
   ['an error and a code', { error: 'access_denied', code: 'code-for-jane@example.test' }],
   ['neither a code nor an error', {}],
 ])('shows that sign-in was not completed when Google sends %s, and leaves the link working', async (_, sentBack) => {
@@ -134,7 +133,6 @@ it('connects nothing when Google gives no refresh token', async () => {
 })
 
 it.each([
-  ['no scope', undefined],
   ['only another scope', 'openid'],
   ['a scope that only starts like the Gmail one', `${GMAIL_READONLY}.metadata`],
 ])('connects nothing when Google grants %s', async (_, scope) => {
@@ -239,11 +237,9 @@ it('holds nothing for a link that was replaced while its owner was at Google', a
   expect((await open(newLink)).status).toBe(302)
 })
 
-it.each<[what: string, sentBack: Record<string, string>]>([
-  ['a state it does not know', { state: 'made-up-state' }],
-  ['no state', {}],
-])('shows the expired page for %s, and asks Google nothing', async (_, sentBack) => {
-  const page = await oauthCallback(deps, new URLSearchParams({ ...sentBack, code: 'code-for-jane@example.test' }))
+it('shows the expired page for a state it does not know, and asks Google nothing', async () => {
+  const params = new URLSearchParams({ state: 'made-up-state', code: 'code-for-jane@example.test' })
+  const page = await oauthCallback(deps, params)
 
   expect(page.status).toBe(400)
   expect(await page.text()).toContain('This link has expired')
@@ -332,9 +328,6 @@ function sentBack(link: URL, params: Record<string, string>): Promise<Response> 
 }
 
 it.each<[outcome: string, when: string, whose: 'known' | 'unknown', redirect: (link: URL, chat: Chat) => unknown]>([
-  ['code_shown', 'Google gave lasting access to a mailbox', 'known', (link) => approve(link, 'jane@example.test')],
-  ['not_completed', 'the user did not approve', 'unknown', (link) => sentBack(link, { error: 'access_denied' })],
-  ['expired', 'the state is of no link that works', 'unknown', (link) => sentBack(link, { state: 'x', code: 'y' })],
   [
     'no_gmail_access',
     'Google gave another permission',

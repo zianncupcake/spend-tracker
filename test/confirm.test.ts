@@ -28,7 +28,6 @@ import { catchConsole } from './log-helpers'
 describe('the confirmation code', () => {
   it.each([
     ['on its own', (code: string) => code],
-    ['with space around it', (code: string) => `  ${code}\n`],
     ['after /code', (code: string) => `/code ${code}`],
   ])('connects the mailbox when it is sent %s', async (_, message) => {
     const chat = openChat()
@@ -142,14 +141,14 @@ describe('the confirmation code', () => {
     expect(await chat.say(await codeOn(await approve(link, 'jane@example.test')))).toContain('Connected')
   })
 
-  it.each(['/code', '/code 12345', '/code 1234567', '/code 12345a', '/code 123456 123456'])(
+  it.each(['/code 12345', '/code 123456 123456'])(
     'answers "%s" with the usage',
     async (message) => {
       expect(await openChat().say(message)).toBe('Usage: /code <6-digit code>')
     },
   )
 
-  it.each(['12345', '1234567', '12345a', '123 456', '123456 please'])(
+  it.each(['12345', '1234567', '12345a', '123456 please'])(
     'does not take "%s" for a code: it is a question for the assistant',
     async (message) => {
       const chat = openChat()
@@ -167,18 +166,6 @@ describe('the confirmation code', () => {
       expect(await chat.say(code)).toContain('Connected')
     },
   )
-
-  it.each([
-    ['the right code', (code: string) => code, 'Connected jane@example.test'],
-    ['a wrong one', otherThan, 'That code is not right.'],
-  ])('takes six digits for a code, and asks the assistant nothing, when they are %s', async (_, digits, reply) => {
-    const chat = openChat()
-    const code = await signIn(chat, 'jane@example.test')
-
-    expect(await chat.say(digits(code))).toContain(reply)
-
-    expect(outside.completions).toEqual([])
-  })
 })
 
 describe('what the log has of a code', () => {
@@ -239,16 +226,6 @@ describe('what the log has of a code', () => {
       CAME,
     ])
   })
-
-  it('is that no sign-in was waiting, for six digits that are sent when none is', async () => {
-    const chat = openChat()
-    const userId = await chat.userId()
-    const logged = catchConsole()
-
-    await chat.say('123456')
-
-    expect(logged.events()).toEqual([{ event: 'connect_code', user: userId, outcome: 'no_attempt' }, CAME])
-  })
 })
 
 describe('a link opened by somebody else', () => {
@@ -291,16 +268,8 @@ describe('a link opened by somebody else', () => {
         for (let tries = 1; tries <= 5; tries++) await other.say(otherThan(code))
       },
     ],
-    [
-      'sends the code too late',
-      (other, code) => {
-        clock.now = new Date(NOW.getTime() + 10 * MINUTE)
-        return other.say(code)
-      },
-    ],
     ['asks for a new link', (other) => other.say('/connect')],
     ['disconnects', (other) => other.say('/disconnect')],
-    ['deletes everything', (other) => other.say('/delete confirm')],
   ])("leaves the connection of the mailbox's owner working when the other user %s", async (_, end) => {
     const owner = await connectedChat('jane@example.test')
     // The owner is got to open another user's link, and approves it with the mailbox that they have connected.

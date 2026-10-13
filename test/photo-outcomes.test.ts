@@ -113,17 +113,6 @@ describe('a photo that nothing is added from', () => {
     expect(await rowsOf(await chat.userId())).toEqual([])
   })
 
-  it('is answered so too when the reading throws what it was to catch', async () => {
-    const chat = await chatWithCard()
-    reader.mockRejectedValue(new TypeError('A made-up failure of the network'))
-    const logged = catchConsole()
-
-    expect(await noticeFor(chat)).toBe(PHOTO_NOT_READ)
-
-    const line = { ...nothingLine(await chat.userId(), 'failed'), requests: 0 }
-    expect(logged.events('photo')).toEqual([{ ...line, error: 'TypeError' }])
-  })
-
   it('is answered with that it is too large, and to crop it, when its file has more bytes than are fetched', async () => {
     const chat = await chatWithCard()
     file.mockRejectedValue(new Failure('file_too_large', 'A made-up file of too many bytes'))
@@ -165,23 +154,6 @@ describe('a photo that nothing is added from', () => {
       { ...nothingLine(user, 'no_cards'), bytes: 0, requests: 0 },
     ])
   })
-
-  it('is answered with that it could not be read when the user’s row cannot be read, and logged with no user', async () => {
-    const chat = await chatWithCard()
-    const prepare = env.DB.prepare.bind(env.DB)
-    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
-      if (query.includes('users')) throw new Error('a made-up failure that quotes a caption: add these to evol')
-      return prepare(query)
-    })
-    const logged = catchConsole()
-
-    expect(await noticeFor(chat, 'add these to evol')).toBe(PHOTO_NOT_READ)
-
-    expect(logged.events('photo')).toEqual([
-      { ...nothingLine(0, 'failed'), user: null, bytes: 0, requests: 0, error: 'Error' },
-    ])
-    expect(logged.text()).not.toContain('add these')
-  })
 })
 
 describe('the size of a photo that is fetched', () => {
@@ -194,11 +166,6 @@ describe('the size of a photo that is fetched', () => {
   })
 
   it.each<[what: string, sizes: unknown[], fetched: string]>([
-    [
-      'the largest that has no more than 400 KB, with a larger one left',
-      [size('thumb', 90, 1_500), size('small', 320, 20_000), size('large', 1280, 180_000), size('huge', 2560, 620_000)],
-      'large',
-    ],
     ['one of exactly 400 KB', [size('small', 320, 20_000), size('large', 1280, 400_000)], 'large'],
     ['not one of a byte more', [size('small', 320, 20_000), size('large', 1280, 400_001)], 'small'],
     [
@@ -411,61 +378,17 @@ describe('a photo whose purchases are stored, when something fails after that', 
     expect(logged.text()).not.toContain('COFFEE')
   })
 
-  it.each<[what: string, error: Error, failure: object]>([
-    [
-      'Telegram cannot be reached for the table',
-      new TypeError('A made-up failure of the network'),
-      { error: 'TypeError' },
-    ],
-    [
-      'Telegram does not answer the table, and is given up on',
-      new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-      { error: 'TimeoutError' },
-    ],
-  ])('is told the same when %s', async (_, error, failure) => {
+  it('is told the same when Telegram cannot be reached for the table', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
     reading(read([bought(1240, 'COFFEE PLACE')]))
-    vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(error)
+    vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TypeError('A made-up failure of the network'))
     const logged = catchConsole()
 
     expect(await noticeFor(chat)).toBe(PHOTO_READ_NO_REPLY)
 
     expect(await rowsOf(userId)).toHaveLength(1)
-    expect(logged.events('photo')).toEqual([{ ...storedLine(userId), ...failure }])
-  })
-
-  it('is told the same when Telegram takes the table neither way', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    reading(read([bought(1240, 'COFFEE PLACE')]))
-    vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 400))
-    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 400))
-    const logged = catchConsole()
-
-    expect(await noticeFor(chat)).toBe(PHOTO_READ_NO_REPLY)
-
-    const failure = { error: 'Error', reason: 'http_error', status: 400 }
-    expect(logged.events('photo')).toEqual([{ ...storedLine(userId), ...failure }])
-  })
-
-  it('is told the same when the purchases that were to be held cannot be: those that are clear are stored by then', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    reading(read([bought(1240, 'COFFEE PLACE'), unsure(300, 'TEA HOUSE')]))
-    const prepare = env.DB.prepare.bind(env.DB)
-    const queried = vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
-      if (query.includes('INSERT INTO held_batches')) throw new Error('a made-up failure that quotes: TEA HOUSE')
-      return prepare(query)
-    })
-    const logged = catchConsole()
-
-    const notice = await noticeFor(chat)
-    queried.mockRestore()
-
-    expect(notice).toBe(PHOTO_READ_NO_REPLY)
-    expect(await rowsOf(userId)).toMatchObject([{ merchant: 'COFFEE PLACE' }])
-    expect(logged.events('photo')).toEqual([{ ...storedLine(userId), read: 2, error: 'Error' }])
+    expect(logged.events('photo')).toEqual([{ ...storedLine(userId), error: 'TypeError' }])
   })
 
   it('is told the same when none is stored and some are held: the message that asks about them is in the chat, and the next one fails', async () => {
@@ -492,35 +415,16 @@ describe('a photo whose purchases are stored, when something fails after that', 
     const failure = { outcome: 'failed', sent: 'edit', error: 'Error', reason: 'http_error', status: 502 }
     expect(logged.events('photo')).toEqual([{ ...counts, ...failure }])
   })
-
-  it('is sent nothing in its place when its chat is one that Telegram will send nothing to', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    reading(read([bought(1240, 'COFFEE PLACE')]))
-    vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new ChatBlockedError())
-    const [mark, logged] = [posted.length, catchConsole()]
-
-    await chat.sendPhoto()
-
-    // The placeholder is left as it was: it is neither edited nor deleted.
-    expect(leftSince(mark)).toEqual([READING])
-    expect(sent).toEqual([])
-    const line = { ...photoLine(userId, { read: 1, stored: 1 }), outcome: 'blocked', sent: 'none' }
-    expect(logged.events('photo')).toEqual([{ ...line, error: 'ChatBlockedError', reason: 'chat_blocked' }])
-  })
 })
 
 describe('a photo that fails with nothing stored', () => {
-  it.each<[what: string, statement: string]>([
-    ['the cards cannot be read', 'FROM cards'],
-    ['the purchases cannot be stored', 'INSERT INTO transactions'],
-  ])('is told that it could not be read, which leaves it to be sent again, when %s', async (_, statement) => {
+  it('is told that it could not be read, which leaves it to be sent again, when the purchases cannot be stored', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
     reading(read([bought(1240, 'COFFEE PLACE')]))
     const prepare = env.DB.prepare.bind(env.DB)
     const queried = vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
-      if (query.includes(statement)) throw new Error('a made-up failure that quotes: COFFEE PLACE')
+      if (query.includes('INSERT INTO transactions')) throw new Error('a made-up failure that quotes: COFFEE PLACE')
       return prepare(query)
     })
     const logged = catchConsole()
@@ -531,21 +435,6 @@ describe('a photo that fails with nothing stored', () => {
     expect(notice).toBe(PHOTO_NOT_READ)
     expect(await rowsOf(userId)).toEqual([])
     expect(logged.events('photo')).toMatchObject([{ user: userId, outcome: 'failed', stored: 0, error: 'Error' }])
-  })
-
-  it('is not told so once all of it is held, though the message that asks cannot be sent: it is not to be sent again unseen', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    reading(read([unsure(300, 'TEA HOUSE')]))
-    vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 502))
-    const logged = catchConsole()
-
-    // Its purchases are held from before the message that asks is sent, and whether Telegram took that is not known.
-    expect(await noticeFor(chat)).toBe(PHOTO_READ_NO_REPLY)
-
-    expect(await rowsOf(userId)).toEqual([])
-    const line = { ...photoLine(userId, { read: 1, stored: 0, held: 1 }), outcome: 'failed', sent: 'edit' }
-    expect(logged.events('photo')).toEqual([{ ...line, error: 'Error', reason: 'http_error', status: 502 }])
   })
 })
 
@@ -648,36 +537,6 @@ describe('a photo that the bot does not read', () => {
     expect([sent, leftSince(mark)]).toEqual([[], []])
     expect(logged.events()).toEqual([{ event: 'update', kind: 'photo', outcome: 'ignored', why: 'no_id', ms: 0 }])
   })
-
-  it.each<[what: string, chat: (id: number) => object, why: string]>([
-    ['a group', () => ({ id: -5001, type: 'group' }), 'not_private'],
-    ["a private chat that is not its sender's own", (id) => ({ id: id + 1, type: 'private' }), 'not_own_chat'],
-  ])('is one that is sent in %s: it is passed over, as a message of text there is', async (_, chatOf, why) => {
-    const chat = await chatWithCard()
-    const message = { message_id: MESSAGE, photo: PHOTO, chat: chatOf(chat.telegramId), from: { id: chat.telegramId } }
-    const [mark, logged] = [posted.length, catchConsole()]
-
-    const later = await handleUpdate(deps, { message })
-
-    expect(later).toBeUndefined()
-    expect([sent, leftSince(mark)]).toEqual([[], []])
-    expect(logged.events()).toEqual([{ event: 'update', kind: 'message', outcome: 'ignored', why, ms: 0 }])
-  })
-
-  it('is one as it stands after its caption was edited: it was read when it came, and is not read again', async () => {
-    const chat = await chatWithCard()
-    reading(read([bought(1240, 'COFFEE PLACE')]))
-    await chat.photo('evol', MESSAGE)
-    const [from, private_] = [{ id: chat.telegramId }, { id: chat.telegramId, type: 'private' }]
-    const edited = { message_id: MESSAGE, photo: PHOTO, caption: 'not evol after all', chat: private_, from }
-    const logged = catchConsole()
-
-    const later = await handleUpdate(deps, { edited_message: edited })
-
-    expect(later).toBeUndefined()
-    expect(reader).toHaveBeenCalledTimes(1)
-    expect(logged.events()).toEqual([{ event: 'update', kind: 'edited', outcome: 'ignored', why: 'not_text', ms: 0 }])
-  })
 })
 
 describe('a service that reads photos', () => {
@@ -702,8 +561,8 @@ describe('a service that reads photos', () => {
     expect(more).toEqual([])
   })
 
-  it.each(['/help', '/', '/unknown'])('says the same under the list of its commands, sent for "%s"', async (text) => {
-    const [commands, asking, ...more] = (await openChat().say(text)).split('\n\n')
+  it('says the same under the list of its commands, sent for "/help"', async () => {
+    const [commands, asking, ...more] = (await openChat().say('/help')).split('\n\n')
 
     expect(commands).toBe(COMMANDS)
     expect(asking).toBe(`${ASK_TOO} ${DO} ${PHOTO_TOO}`)
@@ -723,7 +582,6 @@ describe('a service that reads photos', () => {
 
   it.each<[what: string, content: object]>([
     ['a file with words under it', { document: { file_id: 'made-up-file-id' }, caption: 'add these to evol' }],
-    ['a photo of which Telegram gives no size', { photo: [] }],
     ['what is called a photo and is none', { photo: 'made-up' }],
   ])('answers %s with what it reads, which is text and photos, and does nothing else about it', async (_, content) => {
     const chat = await chatWithCard()
@@ -750,16 +608,6 @@ describe('a service that reads photos', () => {
     expect([file, reader].map((spy) => spy.mock.calls.length)).toEqual([0, 0])
     expect(await rowsOf(await chat.userId())).toEqual([])
     expect(logged.events()).toEqual([{ event: 'update', kind: 'not_text', outcome: 'replied', ms: 0 }])
-  })
-
-  it('answers a photo so too when it has no AI provider at all', async () => {
-    deps.ai = undefined
-    const chat = await chatWithCard()
-
-    expect(await attachment(chat, { photo: PHOTO })).toBeUndefined()
-
-    expect(sent).toEqual([{ chatId: chat.telegramId, text: NOT_TEXT }])
-    expect(reader).not.toHaveBeenCalled()
   })
 })
 

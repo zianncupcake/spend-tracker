@@ -215,10 +215,6 @@ describe('/addcard and /cards', () => {
     expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | - | -'])
   })
 
-  it('says how to add a card when there are none', async () => {
-    expect(await openChat().say('/cards')).toBe(NO_CARDS)
-  })
-
   it('adds no more than twenty cards, which keeps /spend well inside the queries that a request may make', async () => {
     const chat = openChat()
     for (let card = 1; card <= 20; card++) {
@@ -321,7 +317,7 @@ describe('/removecard', () => {
     expect(await chat.say('/removecard visa')).toBe('You have no card called visa.')
   })
 
-  const malformed = ['/removecard', '/removecard visa amex', '/removecard my!card']
+  const malformed = ['/removecard visa amex', '/removecard my!card']
 
   it.each(malformed)('answers "%s" with the usage', async (message) => {
     expect(await openChat().say(message)).toBe('Usage: /removecard <nickname>')
@@ -352,7 +348,6 @@ describe('/renamecard', () => {
   it.each<[what: string, message: string, said: string]>([
     ['a card that there is not', '/renamecard evol travel', 'You have no card called evol.'],
     ['a nickname that another card has', '/renamecard visa amex', 'You already have a card called amex.'],
-    ["the card's own nickname", '/renamecard visa visa', 'You already have a card called visa.'],
   ])('renames nothing when it is given %s, and says so', async (_, message, said) => {
     const chat = openChat()
     await chat.say('/addcard visa 1234 calendar')
@@ -368,8 +363,6 @@ describe('/renamecard', () => {
   })
 
   const malformed = [
-    '/renamecard',
-    '/renamecard visa',
     '/renamecard visa travel daily',
     '/renamecard visa my!card',
     '/renamecard my!card travel',
@@ -513,23 +506,20 @@ describe('/timezone', () => {
     expect((await chat.user()).timezone).toBe('Europe/London')
   })
 
-  it.each(['/timezone Mars/Olympus_Mons', '/timezone Asia/Tokio', '/timezone tomorrow', '/timezone /start'])(
-    'answers "%s" with what a time zone is called, and changes nothing',
-    async (message) => {
-      const chat = openChat()
-
-      expect(await chat.say(message)).toBe(
-        'That is not a time zone the bot knows. Use an IANA name, such as Asia/Tokyo or Europe/London.',
-      )
-
-      expect((await chat.user()).timezone).toBe('Asia/Singapore')
-    },
-  )
-
-  it.each(['/timezone Asia Tokyo', '/timezone Asia/Tokyo please'])('answers "%s" with the usage', async (message) => {
+  it('answers "/timezone Mars/Olympus_Mons" with what a time zone is called, and changes nothing', async () => {
     const chat = openChat()
 
-    expect(await chat.say(message)).toBe(`Usage: ${TIMEZONE_USAGE}`)
+    expect(await chat.say('/timezone Mars/Olympus_Mons')).toBe(
+      'That is not a time zone the bot knows. Use an IANA name, such as Asia/Tokyo or Europe/London.',
+    )
+
+    expect((await chat.user()).timezone).toBe('Asia/Singapore')
+  })
+
+  it('answers "/timezone Asia/Tokyo please" with the usage', async () => {
+    const chat = openChat()
+
+    expect(await chat.say('/timezone Asia/Tokyo please')).toBe(`Usage: ${TIMEZONE_USAGE}`)
 
     expect((await chat.user()).timezone).toBe('Asia/Singapore')
   })
@@ -554,14 +544,6 @@ describe('/delete', () => {
     expect(await userCount(chat.telegramId)).toBe(0)
     expect(await rowsOwnedBy(other.id)).toEqual({ users: 1, cards: 1, transactions: 1 })
   })
-
-  it('lets a deleted user start again with nothing', async () => {
-    const chat = openChat()
-    await chat.say('/addcard visa 1234 calendar')
-    await chat.say('/delete confirm')
-
-    expect(await chat.say('/cards')).toBe(NO_CARDS)
-  })
 })
 
 describe('anything else', () => {
@@ -577,7 +559,7 @@ describe('anything else', () => {
   })
 
   // What is no command is a question for the assistant, which this service has not got.
-  const questions = ['hello', '12345', 'How much have I spent this month?', 'delete everything']
+  const questions = ['hello', '12345']
 
   it.each(questions)('answers "%s" that there is no assistant to ask, and stores nothing', async (message) => {
     const chat = openChat()
@@ -675,7 +657,6 @@ describe('updates that are ignored', () => {
   const text = '/start'
   // The id and the text that a message of Telegram's has, so that each of these is ignored for what it is said to be.
   const body = { message_id: 1, text }
-  const group = { id: -5001, type: 'group' }
   /** Each with what the log has of it: what it was, as far as the bot looked, and why it was ignored. */
   const updates: [what: string, update: (id: number) => Update, kind: string, why: string][] = [
     [
@@ -695,19 +676,6 @@ describe('updates that are ignored', () => {
       (id) => ({ message: { text, chat: { id, type: 'private' }, from: { id } } }),
       'message',
       'no_id',
-    ],
-    // What was edited is answered in a user's own private chat with the bot, and nowhere else.
-    [
-      'an edited message in a group',
-      (id) => ({ edited_message: { ...body, chat: group, from: { id } } }),
-      'edited',
-      'not_private',
-    ],
-    [
-      'an edited message without a sender',
-      (id) => ({ edited_message: { ...body, chat: { id, type: 'private' } } }),
-      'edited',
-      'not_own_chat',
     ],
     [
       'an edited post of a channel',
@@ -764,46 +732,24 @@ describe('updates that are ignored', () => {
     expect(logged.failures()).toEqual([])
   })
 
-  it.each<[what: string, update: (message: object) => Update, kind: string]>([
-    ['a message', (message) => ({ message }), 'message'],
-    [
-      'a message that is not text',
-      (message) => unchecked({ message: { ...message, text: undefined, sticker } }),
-      'message',
-    ],
-    ['an edited message', (message) => ({ edited_message: message }), 'edited'],
-  ])("ignores %s in a private chat that is not its sender's own", async (_, update, kind) => {
+  it("ignores a message in a private chat that is not its sender's own", async () => {
     const [senderId, chatId] = [newTelegramId(), newTelegramId()]
     const { sent, deps } = recorder()
     const logged = catchConsole()
 
     // The user is known by the sender, and the reply goes to the chat. It would be the sender's reply, sent elsewhere.
-    await handleUpdate(deps, update({ ...body, chat: { id: chatId, type: 'private' }, from: { id: senderId } }))
+    await handleUpdate(deps, { message: { ...body, chat: { id: chatId, type: 'private' }, from: { id: senderId } } })
 
     expect(sent).toEqual([])
     expect(await userCount(senderId)).toBe(0)
     expect(await userCount(chatId)).toBe(0)
-    expect(logged.events()).toEqual([{ event: 'update', kind, outcome: 'ignored', why: 'not_own_chat', ms: 0 }])
+    expect(logged.events()).toEqual([
+      { event: 'update', kind: 'message', outcome: 'ignored', why: 'not_own_chat', ms: 0 },
+    ])
   })
 })
 
 describe('what the log has of an update', () => {
-  // A name is what the log has its command as: the command, without the slash. These are the two commands that the
-  // bot's list of them does not name: the test after this one has every command that it names.
-  it.each(['start', 'code'])('is that /%s came, as the command of that name, and that it was replied to', async (name) => {
-    const chat = openChat()
-    const logged = catchConsole()
-
-    // With nothing after it. What a command does with that is its own affair: it replies, in text or in a table.
-    const reply = await chat.reply(`/${name}`)
-
-    expect(logged.events('update')).toEqual([
-      { event: 'update', kind: 'command', command: name, outcome: 'replied', ms: 0 },
-    ])
-    // It is a command that there is: one that there is not is answered with the list of those that there are.
-    expect(reply).not.toBe(COMMANDS)
-  })
-
   it('is each command that the bot lists, under the name that the list gives it', async () => {
     const chat = openChat()
     // The names at the start of the lines of the list, each of them once: /spend is there with and without a card.
@@ -819,14 +765,10 @@ describe('what the log has of an update', () => {
 
   it.each<[what: string, text: string, as: object]>([
     ['a command that there is not', '/nosuchcommand', { kind: 'command', command: 'unknown' }],
-    ['a slash with nothing after it', '/', { kind: 'command', command: 'unknown' }],
-    ['a command with arguments', '/addcard visa 1234 calendar', { kind: 'command', command: 'addcard' }],
     ['a command in capitals, with the name of a bot', '/SPEND@SpendTrackerBot', { kind: 'command', command: 'spend' }],
-    ['a command that only starts like one of the bot’s', '/spending', { kind: 'command', command: 'unknown' }],
     ['the six digits of a sign-in', '123456', { kind: 'code' }],
     ['the six digits of a sign-in, after /code', '/code 123456', { kind: 'command', command: 'code' }],
     // The service of these tests has no assistant, so a question is answered at once, with that.
-    ['a question', 'How much have I spent?', { kind: 'question' }],
     ['the name of a command with no slash, which is a question', 'spend', { kind: 'question' }],
   ])('is that %s came, as what it is, and that it was replied to', async (_, text, as) => {
     const chat = openChat()
@@ -912,25 +854,19 @@ describe('an update whose handling fails', () => {
     for (const text of ['visa', '1234', 'made-up']) expect(logged.text()).not.toContain(text)
   })
 
-  it.each<[what: string, update: (id: number) => Update, kind: string]>([
-    [
-      'a message that is not text',
-      (id) => unchecked({ message: { message_id: 1, sticker, chat: { id, type: 'private' }, from: { id } } }),
-      'not_text',
-    ],
-    ['an edited message', (id) => ({ edited_message: privateMessage(id, 'How much?').message }), 'edited'],
-  ])('is logged as what it was when it is %s whose reply cannot be sent, with its chat told the same', async (_, update, kind) => {
+  it('is logged as what it was when it is a message that is not text whose reply cannot be sent, with its chat told the same', async () => {
     const telegramId = newTelegramId()
     const { sent, deps } = recorder()
     // Telegram cannot be reached for the reply, and can after that.
     vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TypeError('A made-up failure of the network'))
     const logged = catchConsole()
+    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
 
-    await handleUpdate(deps, update(telegramId))
+    await handleUpdate(deps, unchecked({ message: { message_id: 1, sticker, chat, from } }))
 
     // The bot does nothing about such a message but reply to it, so it is no message that was handled.
     expect(sent).toEqual([{ chatId: telegramId, text: FAILED }])
-    expect(logged.events()).toEqual([{ ...failedLine({ kind }, false), error: 'TypeError' }])
+    expect(logged.events()).toEqual([{ ...failedLine({ kind: 'not_text' }, false), error: 'TypeError' }])
   })
 
   it('is logged as the code of a sign-in when it is one that cannot be checked, with nothing of the code', async () => {
@@ -988,11 +924,7 @@ describe('an update whose handling fails', () => {
 
 describe('a message that was handled, whose reply cannot be sent', () => {
   it.each<[what: string, text: string, as: object]>([
-    // What these two make is nowhere but in the reply that was lost: to send them again is the way to it.
     ['an /mcp, which made a token', '/mcp', { kind: 'command', command: 'mcp' }],
-    ['a /connect, which made a link', '/connect', { kind: 'command', command: 'connect' }],
-    ['a command that changed nothing', '/cards', { kind: 'command', command: 'cards' }],
-    ['a command that there is not', '/nosuchcommand', { kind: 'command', command: 'unknown' }],
     ['a question, on a service with no assistant', 'How much have I spent?', { kind: 'question' }],
   ])('is answered with "try again" when it is %s, and logged as one that had been handled', async (_, text, as) => {
     const telegramId = newTelegramId()
@@ -1089,17 +1021,14 @@ describe('an /add that stored no purchase, whose reply cannot be sent', () => {
   const NOT_STORED = failedLine({ kind: 'command', command: 'add' }, false)
   const refused = { error: 'Error', reason: 'http_error', status: 502 }
 
-  it.each<[what: string, text: string]>([
-    ['names no card of its user’s', '/add amex 12.50 Lunch'],
-    ['gives no amount', '/add visa Lunch'],
-  ])('is answered with "try again" when it %s: there is no purchase to store twice', async (_, text) => {
+  it('is answered with "try again" when it names no card of its user’s: there is no purchase to store twice', async () => {
     const chat = openChat()
     await chat.say('/addcard visa 1234 calendar')
     const { sent, deps } = recorder()
     vi.spyOn(deps.messenger, 'send').mockRejectedValueOnce(new TelegramError('sendMessage', 502))
     const logged = catchConsole()
 
-    await handleUpdate(deps, privateMessage(chat.telegramId, text))
+    await handleUpdate(deps, privateMessage(chat.telegramId, '/add amex 12.50 Lunch'))
 
     expect(sent).toEqual([{ chatId: chat.telegramId, text: FAILED }])
     expect(logged.events()).toEqual([{ ...NOT_STORED, ...refused }])

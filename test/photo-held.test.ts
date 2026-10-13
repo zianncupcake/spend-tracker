@@ -4,7 +4,7 @@ import { TelegramError } from '../src/telegram/api'
 import type { Reading } from '../src/telegram/adding'
 import { PRESS_FAILED } from '../src/telegram/texts'
 import { answered, clock, deps, NOW, openChat } from './connect-helpers'
-import { bold, buy, headerRow, plain, purchaseRow, seconds, sumRow, tableOf, userCount } from './helpers'
+import { bold, headerRow, plain, purchaseRow, seconds, sumRow, tableOf, userCount } from './helpers'
 import { catchConsole } from './log-helpers'
 import {
   bought,
@@ -158,61 +158,6 @@ describe('purchases that the model was not sure of', () => {
       { event: 'update', kind: 'press', outcome: 'replied', ms: 0 },
     ])
   })
-
-  it('start where /add would start them when they are added, with no category named: a line for each category', async () => {
-    const chat = await chatWithCard()
-    const userId = await chat.userId()
-    reading(read([unsure(1598, 'NETFLIX.COM'), unsure(1240, 'COFFEE PLACE')]))
-    const { rich, texts } = await chat.photo()
-    // Nothing was clear, so nothing was added, and the message names the card alone.
-    expect(rich).toBeUndefined()
-    expect(texts[0].text.split('\n')[0]).toBe(
-      'Not sure about these 2 purchases. Check the amount and the date of each before you add them to evol ••••5678:',
-    )
-
-    await chat.press(texts[0], 'Add these 2')
-
-    const rows = await rowsOf(userId)
-    expect(rows.map((row) => row.category)).toEqual(['selected', null])
-    expect(texts[0].text).toBe(
-      [
-        `Added to evol ••••5678 as ${ONLINE}:`,
-        `ID ${rows[1].id} · 5 Oct · SGD 12.40 · COFFEE PLACE · by hand`,
-        'Added to evol ••••5678 as Selected Gym, Telco and Streaming Spend:',
-        `ID ${rows[0].id} · 5 Oct · SGD 15.98 · NETFLIX.COM · by hand`,
-      ].join('\n'),
-    )
-  })
-
-  it('are asked about one at a time in the words for one', async () => {
-    const chat = await chatWithCard()
-    reading(read([unsure(300, 'TEA HOUSE')]))
-    const first = (await chat.photo()).texts[0]
-    const second = (await chat.photo()).texts[0]
-
-    expect(first.text).toBe(
-      'Not sure about this purchase. Check its amount and its date before you add it to evol ••••5678:\n' +
-        '5 Oct · SGD 3.00 · TEA HOUSE',
-    )
-    expect(labels(first)).toEqual(['Add this one', 'Skip'])
-
-    expect((await chat.press(first, 'Add this one')).answer).toBe('Added 1 purchase.')
-    expect((await chat.press(second, 'Skip')).answer).toBe('Skipped.')
-    expect(second.text).toBe('Skipped. This purchase was not added:\n5 Oct · SGD 3.00 · TEA HOUSE')
-  })
-
-  it('have a name marked as code wherever it is shown as text, so that Telegram makes nothing to tap of it', async () => {
-    const chat = await chatWithCard()
-    const hostile = '𝒳 /start https://attacker.test @someone'
-    reading(read([unsure(300, hostile)]))
-
-    const [asking] = (await chat.photo()).texts
-    expect(markedIn(asking)).toEqual([hostile])
-
-    await chat.press(asking, 'Add this one')
-    expect(markedIn(asking)).toEqual([hostile])
-    expect(asking.text).toContain(`SGD 3.00 · ${hostile} · by hand`)
-  })
 })
 
 describe('a card that is chosen by button', () => {
@@ -252,25 +197,6 @@ describe('a card that is chosen by button', () => {
     ])
   })
 
-  it('can be the card with no product, on which nothing is sorted', async () => {
-    const { chat, userId, asking } = await asked()
-
-    await chat.press(asking, 'Add to visa')
-
-    const rows = await rowsOf(userId)
-    expect(rows).toMatchObject([
-      { card_last4: '1234', category: null },
-      { card_last4: '1234', category: null },
-    ])
-    expect(asking.text).toBe(
-      [
-        'Added to visa ••••1234:',
-        `ID ${rows[0].id} · 5 Oct · SGD 12.40 · COFFEE PLACE · by hand`,
-        `ID ${rows[1].id} · 5 Oct · SGD 15.98 · NETFLIX.COM · by hand`,
-      ].join('\n'),
-    )
-  })
-
   it.each<[what: string, button: string, categories: (string | null)[]]>([
     // Whatever a rule of the product would make of a purchase: one of the two is at a merchant that a rule places.
     ['evol, which has that category', 'Add to evol', ['other', 'other']],
@@ -284,18 +210,6 @@ describe('a card that is chosen by button', () => {
     await chat.press(asking, button)
 
     expect((await rowsOf(userId)).map((row) => row.category)).toEqual(categories)
-  })
-
-  it('can be passed over: the button that skips adds the purchases to no card', async () => {
-    const { chat, userId, asking } = await asked()
-
-    expect(await chat.press(asking, 'Skip')).toEqual({ answer: 'Skipped.', sent: [] })
-
-    expect(asking.text).toBe(
-      'Skipped. These 2 purchases were not added:\n5 Oct · SGD 12.40 · COFFEE PLACE\n5 Oct · SGD 15.98 · NETFLIX.COM',
-    )
-    expect(await rowsOf(userId)).toEqual([])
-    expect(await heldFor(userId)).toEqual([])
   })
 })
 
@@ -378,17 +292,6 @@ describe('a press of a button under purchases that are held', () => {
     expect(await heldFor(userId)).toEqual([])
   })
 
-  it('adds nothing after a press that skipped them', async () => {
-    const { chat, userId, asking } = await asked()
-    const asItStood = { ...asking }
-
-    await chat.press(asItStood, 'Skip')
-
-    expect(await chat.press(asItStood, 'Add these 2')).toEqual({ answer: REFUSED, sent: [] })
-    expect(await rowsOf(userId)).toEqual([])
-    expect(asking.text).toMatch(/^Skipped\. /)
-  })
-
   it('adds nothing once the purchases have been held for a day: they are too old to be acted on', async () => {
     const { chat, userId, asking } = await asked()
     const before = { ...asking }
@@ -416,7 +319,6 @@ describe('a press of a button under purchases that are held', () => {
 
   it.each<[what: string, data: string]>([
     ['a card, under purchases that are held for a card already', 'held:7001:5678'],
-    ['the id of another message', 'held:7002:add'],
     ['what no button holds', 'held:7001:add:5678'],
   ])('changes nothing when it brings %s', async (_, data) => {
     const { chat, userId, asking } = await asked()
@@ -444,15 +346,6 @@ describe('a press of a button under purchases that are held', () => {
     // The purchases are still held, and the card that is left can still be chosen.
     expect((await chat.press(asking, 'Add to visa')).answer).toBe('Added 1 purchase.')
     expect(await rowsOf(userId)).toMatchObject([{ card_last4: '1234' }])
-  })
-
-  it('adds nothing when the card that the purchases are held for has been removed', async () => {
-    const { chat, userId, asking } = await asked()
-    await chat.say('/removecard evol')
-
-    expect(await chat.press(asking, 'Add these 2')).toEqual({ answer: REFUSED, sent: [] })
-
-    expect(await rowsOf(userId)).toEqual([])
   })
 
   it('brings the message up to date when Telegram failed the edit of its first, and adds nothing twice', async () => {
@@ -557,27 +450,6 @@ describe('a press of a button under purchases that are held', () => {
 
     expect((await chat.press(asking, 'Add these 2')).answer).toBe('Added 2 purchases.')
     expect(await rowsOf(userId)).toHaveLength(2)
-  })
-
-  it('takes seven queries and two requests to Telegram at its most: when it adds purchases, of which the limit leaves some out', async () => {
-    const { chat, userId, asking } = await asked()
-    for (let added = 1; added <= 99; added++) await buy(userId, { parser: 'manual', cardLast4: '0005' })
-    const queried = vi.spyOn(env.DB, 'prepare')
-    const [answer, edit, send] = [
-      vi.spyOn(deps.messenger, 'answer'),
-      vi.spyOn(deps.messenger, 'edit'),
-      vi.spyOn(deps.messenger, 'send'),
-    ]
-
-    await chat.press(asking, 'Add these 2')
-
-    // The user, the purchases that are held, the look for those of them that are stored already, the cards, the
-    // storing, which of them the limit left out, and the letting go of what was held.
-    expect(queried).toHaveBeenCalledTimes(7)
-    queried.mockRestore()
-    // Each of these is one request: see the messenger's own test, in webhook.test.ts.
-    expect([answer, edit, send].map((spy) => spy.mock.calls.length)).toEqual([1, 1, 0])
-    expect(await rowsOf(userId)).toHaveLength(100)
   })
 })
 

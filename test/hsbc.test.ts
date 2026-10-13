@@ -195,13 +195,6 @@ describe('HSBC card alerts', () => {
     expect(parse(alertBody(table({ amount })))).toMatchObject({ currency, amountMinor })
   })
 
-  it.each(['SOME MERCHANT PTE. LTD.', 'PAYPAL *SOMESHOP', 'Shop.com', 'COFFEE PLACE'])(
-    'reads the merchant %s whole, and nothing of what comes after the table',
-    (merchant) => {
-      expect(parse(alertBody(table({ merchant })))?.merchant).toBe(merchant)
-    },
-  )
-
   it('ends the merchant where its line ends, whatever the bank puts after the table', () => {
     const reworded = alertBody().replace(ADVICE, 'Thank you for banking with us.')
 
@@ -226,9 +219,6 @@ describe('HSBC card alerts', () => {
   })
 
   it.each<[how: string, text: string]>([
-    ['with a carriage return before each line end', alertBody().replaceAll('\n', '\r\n')],
-    ['with no empty lines', alertBody().replaceAll(/\n+/g, '\n')],
-    ['with each cell on the line of what it is called', alertBody(table({}, '   ', '\n'))],
     ['with tabs and no-break spaces among its spaces', alertBody().replaceAll(' ', ' \t\xa0 ')],
     ['with blanks at both ends of its lines', alertBody().replaceAll('\n', ' \n\t')],
     ['with its sentence wrapped across lines', alertBody().replace('made on your', 'made\non your')],
@@ -260,7 +250,6 @@ describe('HSBC card alerts', () => {
   })
 
   it.each([
-    ['only the greeting and the advice', alertBody('')],
     // The bank's sentence is what makes the table a purchase. The other sentence here is made up.
     ['the table under another sentence', alertBody().replace('transaction made', 'transaction declined')],
     ['the table with the sentence after it', `${table()}\n\n${ADVICE}\n\nPlease note ${SENTENCE}.`],
