@@ -5,6 +5,7 @@ import { productOf } from '../catalogue'
 import type { Product } from '../catalogue/types'
 import { confirmCode, disconnect, startConnect } from '../connect'
 import type { Deps } from '../deps'
+import { nextReminder, reminderIn } from '../domain/reminder'
 import { sortByRules } from '../domain/sorting'
 import { cardTotals } from '../domain/totals'
 import { COMMAND_NAMES } from '../log'
@@ -13,6 +14,7 @@ import { deleteUser, findOrCreateUser, MAX_CARDS, setTimezone, storeFor, type Tr
 import { connectStoreFor } from '../store-connect'
 import { mailStoreFor } from '../store-mail'
 import { mcpStoreFor } from '../store-mcp'
+import { reminderStoreFor } from '../store-reminders'
 import { addPurchase } from './adding'
 import type { Outgoing } from './api'
 import {
@@ -22,11 +24,12 @@ import {
   parseCard,
   parseEntry,
   parsePattern,
+  parseReminder,
   PRODUCT_KEY,
   PURCHASE_ID,
   timeZoneNamed,
 } from './arguments'
-import { formatShortDate, maskLast4 } from './format'
+import { formatShortDate, formatShortDateTime, maskLast4 } from './format'
 import { inMessages, purchaseLine, sortEnd, whereSorted } from './purchases'
 import {
   cardsReply,
@@ -58,6 +61,9 @@ import {
   PATTERN_USAGE,
   PHOTO,
   PRODUCT_USAGE,
+  REMIND_USAGE,
+  reminderRemoved,
+  reminderSet,
   RENAME_CARD_USAGE,
   SORT_USAGE,
   STATUS_DAYS,
@@ -140,10 +146,16 @@ export async function reply(
     case '/removecard': {
       const [nickname = ''] = args
       if (args.length !== 1 || !NICKNAME.test(nickname)) return 'Usage: /removecard <nickname>'
-      const patterns = await storeFor(db, (await user()).id).removeCard(nickname)
+      const store = storeFor(db, (await user()).id)
+      // A card's reminder is in its row, and goes with it: so whether it has one is read before it is removed.
+      const card = (await store.listCards()).find((each) => each.nickname === nickname)
+      const patterns = await store.removeCard(nickname)
       if (patterns === null) return `You have no card called ${nickname}.`
-      if (patterns === 0) return `Removed ${nickname}.`
-      return `Removed ${nickname}, and the ${patterns} ${patterns === 1 ? 'pattern' : 'patterns'} that it had.`
+      const went = [
+        ...(patterns > 0 ? [`the ${patterns} ${patterns === 1 ? 'pattern' : 'patterns'}`] : []),
+        ...(card?.remindDay === undefined ? [] : ['the reminder']),
+      ]
+      return went.length > 0 ? `Removed ${nickname}, and ${went.join(' and ')} that it had.` : `Removed ${nickname}.`
     }
 
     case '/renamecard': {
@@ -255,6 +267,24 @@ export async function reply(
       return inMessages([{ text: PATTERN_REMOVED }, patternLine(card, merchant)])
     }
 
+    case '/remind': {
+      const asked = parseReminder(args)
+      if (!asked) return REMIND_USAGE
+      const { nickname, day } = asked
+      const { id, timezone } = await user()
+      const card = (await storeFor(db, id).listCards()).find((each) => each.nickname === nickname)
+      if (!card) return `You have no card called ${nickname}.`
+      const reminders = reminderStoreFor(db, id)
+      if (day === null) {
+        await reminders.remove(nickname)
+        return reminderRemoved(label(card))
+      }
+      const at = await reminders.set(nickname, day, nextReminder(day, timezone, now()))
+      // The store sets nothing for a card that was removed in the meantime.
+      if (at === null) return `You have no card called ${nickname}.`
+      return reminderSet(label(card), day, formatShortDateTime(new Date(at * 1000), timezone), timezone)
+    }
+
     case '/timezone': {
       const { id, timezone } = await user()
       if (args.length === 0) return `Your time zone is ${timezone}. To change it, send ${TIMEZONE_USAGE}.`
@@ -262,6 +292,10 @@ export async function reply(
       const zone = timeZoneNamed(args[0])
       if (!zone) return 'That is not a time zone the bot knows. Use an IANA name, such as Asia/Tokyo or Europe/London.'
       await setTimezone(db, id, zone)
+      // A reminder is due by its user's clock, so each is moved to that hour of its day by the new one.
+      const reminders = reminderStoreFor(db, id)
+      const moved = (await reminders.list()).map(({ day, at }) => ({ day, from: at, to: reminderIn(day, zone, at) }))
+      if (moved.length > 0) await reminders.moveAll(moved)
       return `Your time zone is now ${zone}. Your cards' cycles and months begin and end by it.`
     }
 

@@ -169,7 +169,7 @@ export function linesOf({ blocks }: RichMessage): string[] {
 // The rows that name the columns of two of the bot's tables, as `linesOf` has a row: the first line of the reply to
 // /cards, and of the reply to /spend with no card named. A test says what such a reply holds with these.
 
-export const CARDS_HEADER = 'Nickname | Card | Window | Product'
+export const CARDS_HEADER = 'Nickname | Card | Window | Product | Reminder'
 export const SPEND_HEADER = 'Nickname | Spent | Purchases | Counted | Resets'
 
 /** What /spend with no card named says last under its table: that totals are estimates. */

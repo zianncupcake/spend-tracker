@@ -1,4 +1,4 @@
-// SQL is run only here and in store-connect.ts, store-held.ts, store-mail.ts and store-mcp.ts.
+// SQL is run only here and in store-connect.ts, store-held.ts, store-mail.ts, store-mcp.ts and store-reminders.ts.
 
 import { lettersOf } from './catalogue/merchants'
 import type { WindowRule } from './domain/window'
@@ -10,8 +10,11 @@ export interface User {
   timezone: string
 }
 
-/** `product` is the key of the catalogue product that the card is linked to. A card linked to none has no `product`. */
-export type Card = { nickname: string; last4: string; product?: string } & WindowRule
+/**
+ * `product` is the key of the catalogue product that the card is linked to. A card linked to none has no `product`.
+ * `remindDay` is the day of the month on which its user is reminded of its bill, and a card with no reminder has none.
+ */
+export type Card = { nickname: string; last4: string; product?: string; remindDay?: number } & WindowRule
 
 export type NewTransaction = ParsedTransaction & { sourceId: string; parser: string; category?: string | null }
 
@@ -143,7 +146,8 @@ export function storeFor(db: D1Database, ownerId: number) {
     async listCards(): Promise<Card[]> {
       const { results } = await db
         .prepare(
-          'SELECT nickname, last4, window_type, statement_day, product FROM cards WHERE owner_id = ? ORDER BY id',
+          `SELECT nickname, last4, window_type, statement_day, product, remind_day FROM cards
+           WHERE owner_id = ? ORDER BY id`,
         )
         .bind(ownerId)
         .all<CardRow>()
@@ -442,10 +446,16 @@ interface CardRow {
   window_type: 'statement' | 'calendar'
   statement_day: number | null
   product: string | null
+  remind_day: number | null
 }
 
-function toCard({ nickname, last4, window_type, statement_day, product }: CardRow): Card {
-  const card = { nickname, last4, ...(product !== null && { product }) }
+function toCard({ nickname, last4, window_type, statement_day, product, remind_day }: CardRow): Card {
+  const card = {
+    nickname,
+    last4,
+    ...(product !== null && { product }),
+    ...(remind_day !== null && { remindDay: remind_day }),
+  }
   // The schema guarantees a statement card has a day. The null check is for the type checker.
   return window_type === 'statement' && statement_day !== null
     ? { ...card, windowType: 'statement', statementDay: statement_day }

@@ -117,7 +117,7 @@ cards, and nothing unless you ask a question.</li>`
   return page(
     'Privacy policy - Spend Tracker',
     `<h1>Privacy policy</h1>
-<p>Last updated: 12 October 2026</p>
+<p>Last updated: 13 October 2026</p>
 <p>Spend Tracker is a Telegram bot that keeps a running total of what you spend on each credit card. It is run
 by ${name}. For any question about this policy or about your data, contact: ${contact}</p>
 
@@ -133,6 +133,7 @@ digits of the card and the time.</p>
 <li>Your time zone, which is Singapore's unless you set another.</li>
 <li>The card nicknames, last four digits and window settings that you enter.</li>
 <li>The card product that you link a card to.</li>
+<li>The day of the month on which you ask to be reminded of a card's bill.</li>
 <li>The details taken from each alert: amount, currency, merchant, last four card digits and time, with the bank
 that sent the alert and an id of the alert, so that it is not counted twice.</li>
 <li>The purchases that you add by hand: the amount, currency, merchant and date that you give each one, with the
@@ -161,8 +162,8 @@ ${assistant ? questions : ''}${reads ? reading : ''}
 <h2>Who else handles your data</h2>
 <ul>
 <li>Cloudflare hosts the service and its database.</li>
-<li>Telegram carries the bot's messages. Those messages contain details of your purchases, and Telegram keeps
-them.</li>
+<li>Telegram carries the bot's messages. Those messages contain details of your purchases, and a reminder names
+the card that it is of. Telegram keeps them.</li>
 <li>Google provides the sign-in.</li>
 <li>An AI assistant that you connect with your assistant access token can read your card totals and purchases,
 until you remove the token with <code>/mcp revoke</code>.</li>${assistant ? provider : ''}

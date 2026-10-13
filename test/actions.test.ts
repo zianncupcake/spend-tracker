@@ -375,8 +375,8 @@ describe('a command that the assistant gives to be run', () => {
     // Each card is as it was but for its nickname, and its purchases are still its own: they go by its digits.
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'travel | ••••1234 | calendar month | -',
-      'daily | ••••5678 | calendar month | UOB EVOL Card',
+      'travel | ••••1234 | calendar month | - | -',
+      'daily | ••••5678 | calendar month | UOB EVOL Card | -',
     ])
     const shown = await chat.rich('/spend travel')
     expect(shown.blocks[0]).toEqual(bold('travel ••••1234: 1 Oct to 31 Oct'))
@@ -403,8 +403,8 @@ describe('a command that the assistant gives to be run', () => {
     ])
     expect(linesOf(rich[0])).toEqual([
       CARDS_HEADER,
-      'visa | ••••1234 | calendar month | -',
-      'evol | ••••5678 | calendar month | UOB EVOL Card',
+      'visa | ••••1234 | calendar month | - | -',
+      'evol | ••••5678 | calendar month | UOB EVOL Card | -',
     ])
     const done = (name: string) => ({ kind: 'command', command: name, outcome: 'done' })
     expect(logged.events()).toEqual([
@@ -468,7 +468,7 @@ describe('a command that the assistant gives to be run', () => {
     ])
     // Nothing was removed and nothing was revoked: the purchase, the card, the Gmail and the token are as they were.
     expect(await rowsOf(userId)).toMatchObject([{ id: purchase, removed_at: null }])
-    expect(await chat.lines('/cards')).toContain('evol | ••••5678 | calendar month | UOB EVOL Card')
+    expect(await chat.lines('/cards')).toContain('evol | ••••5678 | calendar month | UOB EVOL Card | -')
     expect(await connectionOf(userId)).toMatchObject({ email: 'jane@example.test', status: 'active' })
     expect(await tokenOf()).toBe(token)
   })
@@ -830,7 +830,7 @@ describe('what the model asks for after a tool has read for it', () => {
     ])
     // Nothing of the three was done: the time zone, the cards and the product are as they were.
     expect(await chat.say('/timezone')).toContain('Your time zone is Asia/Singapore.')
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••5678 | calendar month | UOB EVOL Card'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••5678 | calendar month | UOB EVOL Card | -'])
 
     // A press of "Do it" then runs the one that its button holds, and the one that adds the purchases adds them.
     expect((await chat.press(texts[1], 'Do it')).sent.map((message) => message.text)).toEqual([TOKYO])
@@ -864,7 +864,7 @@ describe('what the model asks for after a tool has read for it', () => {
     ])
     const action = { event: 'action', user: userId, kind: 'command', command: 'renamecard' }
     expect(logged.events('action')).toEqual([{ ...action, outcome: 'asked' }])
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••5678 | calendar month | UOB EVOL Card'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••5678 | calendar month | UOB EVOL Card | -'])
 
     const pressed = await chat.press(texts[0], 'Do it')
 
@@ -872,7 +872,7 @@ describe('what the model asks for after a tool has read for it', () => {
     expect(pressed.sent.map((message) => message.text)).toEqual(['Renamed evol ••••5678 to daily.'])
     expect(texts[0].text).toBe(`Rename evol ••••5678 to daily?\n${SEE_REPLY}`)
     expect(texts[0].buttons).toBeUndefined()
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'daily | ••••5678 | calendar month | UOB EVOL Card'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'daily | ••••5678 | calendar month | UOB EVOL Card | -'])
     const press = { event: 'confirm_press', user: userId, command: 'renamecard', outcome: 'done' }
     expect(logged.events('confirm_press')).toEqual([press])
   })
