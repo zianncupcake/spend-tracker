@@ -4,7 +4,7 @@ import { spendingSummary } from '../src/mcp/tools'
 import { storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
 import { BY_HAND_NOTE } from '../src/telegram/purchases'
-import { NO_CARDS, PRODUCT_USAGE } from '../src/telegram/texts'
+import { NO_CARDS, PRODUCT_USAGE, SORTED_AGAIN } from '../src/telegram/texts'
 import { clock, deps, NOW, openChat } from './connect-helpers'
 import {
   BY_PURCHASE_DAY,
@@ -160,17 +160,6 @@ describe('/product', () => {
       ['2026-10-05T10:00:00+08:00', 4500, 'SGD', '1234', 'SINGTEL MOBILE'],
       ['2026-10-06T10:00:00+08:00', 1598, 'SGD', '0005', 'SPOTIFY ON ANOTHER CARD'],
     ])
-    // One that its user has sorted already stays where it was put, whatever a rule would make of it.
-    await storeFor(env.DB, userId).insertTransaction({
-      sourceId: 'sorted-by-hand',
-      cardLast4: '1234',
-      amountMinor: 900,
-      currency: 'USD',
-      merchant: 'SORTED BY HAND',
-      occurredAt: Date.parse('2026-10-07T10:00:00+08:00') / 1000,
-      parser: 'example-bank',
-      category: 'other',
-    })
     await record(await bystander.userId(), [['2026-10-02T10:00:00+08:00', 1598, 'SGD', '1234', 'NETFLIX.COM']])
 
     expect(await chat.say('/product evol uob-evol')).toBe(LINKED)
@@ -184,9 +173,48 @@ describe('/product', () => {
       'COFFEE PLACE': null,
       'SINGTEL MOBILE': 'selected',
       'SPOTIFY ON ANOTHER CARD': null,
-      'SORTED BY HAND': 'other',
     })
     expect(await categoriesOf(await bystander.userId())).toEqual({ 'NETFLIX.COM': null })
+  })
+
+  it('forgets what is stored for the purchases of a card that had another product, of whatever month, and says so', async () => {
+    const chat = openChat()
+    await chat.say('/addcard ride 1234 calendar ocbc-rewards')
+    const userId = await chat.userId()
+    // Each is stored as Other Spend, where a rule of the first product puts a ride and a mark puts any purchase. The
+    // second product has a category of that key too, and its own rule makes a ride an Eligible Transaction.
+    await buy(userId, { merchant: 'GRAB*A-123', category: 'other' })
+    await buy(userId, { merchant: 'MARKED BY HAND LAST MONTH', at: '2026-09-05T09:30:00+08:00', category: 'other' })
+
+    expect(await chat.say('/product ride hsbc-revolution')).toContain(SORTED_AGAIN)
+
+    // Only the window that the card is in is sorted again.
+    expect(await categoriesOf(userId)).toEqual({ 'GRAB*A-123': 'eligible', 'MARKED BY HAND LAST MONTH': null })
+  })
+
+  it('forgets nothing, and says nothing of it, when the card is linked to the product that it has, in any case', async () => {
+    const chat = openChat()
+    await chat.say('/addcard ride 1234 calendar hsbc-revolution')
+    const userId = await chat.userId()
+    // One that its user has sorted already stays where it was put, whatever a rule would make of it.
+    await buy(userId, { merchant: 'GRAB*A-123', category: 'other' })
+
+    expect(await chat.say('/product ride HSBC-Revolution')).not.toContain(SORTED_AGAIN)
+
+    expect(await categoriesOf(userId)).toEqual({ 'GRAB*A-123': 'other' })
+  })
+
+  it('forgets it when the card is linked to none, so that the next product finds nothing of the one before', async () => {
+    const chat = openChat()
+    await chat.say('/addcard ride 1234 calendar ocbc-rewards')
+    const userId = await chat.userId()
+    await buy(userId, { category: 'other' })
+
+    await chat.say('/product ride none')
+    await chat.say('/product ride hsbc-revolution')
+
+    // No rule of the second product places the purchase, so nothing is stored for it.
+    expect(await categoriesOf(userId)).toEqual({ 'COFFEE PLACE': null })
   })
 })
 
@@ -229,6 +257,24 @@ describe('/addcard with the key of a product', () => {
     await chat.say('/addcard evol 1234 calendar uob-evol')
 
     expect(await categoriesOf(userId)).toEqual({ SPOTIFY: 'selected', RAMEN: 'fx', 'COFFEE PLACE': null })
+  })
+
+  it('sorts by its own rules the purchases of a card that was removed, and is added again with another product', async () => {
+    const [chat, bystander] = [openChat(), openChat()]
+    for (const each of [chat, bystander]) await each.say('/addcard ride 1234 calendar ocbc-rewards')
+    await chat.say('/addcard spare 0005 calendar ocbc-rewards')
+    const [userId, theirs] = [await chat.userId(), await bystander.userId()]
+    // Stored as Other Spend, where a rule of the first product puts a ride. The second product has a category of that
+    // key too, and its own rule makes a ride an Eligible Transaction.
+    for (const each of [userId, theirs]) await buy(each, { merchant: 'GRAB*A-123', category: 'other' })
+    await buy(userId, { merchant: 'ON ANOTHER CARD', cardLast4: '0005', category: 'other' })
+
+    await chat.say('/removecard ride')
+    await chat.say('/addcard ride 1234 calendar hsbc-revolution')
+
+    // What is forgotten is of the card that was removed: no other card's, and no other user's.
+    expect(await categoriesOf(userId)).toEqual({ 'GRAB*A-123': 'eligible', 'ON ANOTHER CARD': 'other' })
+    expect(await categoriesOf(theirs)).toEqual({ 'GRAB*A-123': 'other' })
   })
 })
 

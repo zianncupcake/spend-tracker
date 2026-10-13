@@ -66,6 +66,7 @@ import {
   reminderSet,
   RENAME_CARD_USAGE,
   SORT_USAGE,
+  SORTED_AGAIN,
   STATUS_DAYS,
   TIMEZONE_USAGE,
   TOO_MANY_CARDS,
@@ -136,11 +137,14 @@ export async function reply(
       const store = storeFor(db, id)
       const card = (await store.listCards()).find((each) => each.nickname === nickname)
       if (!card) return `You have no card called ${nickname}.`
-      await store.setProduct(nickname, product?.key ?? null)
+      const relinked = card.product !== undefined && card.product !== product?.key
+      await store.setProduct(nickname, product?.key ?? null, relinked)
       if (!product) return `${label(card)} is linked to no product now.`
-      // The purchases on the card until now were stored with no product to sort them by.
       await sortByRules(store, card, product, now(), timezone)
-      return `Linked ${label(card)} to ${product.name}. For how its purchases are sorted, send /sort ${nickname}.`
+      return (
+        `Linked ${label(card)} to ${product.name}.${relinked ? ` ${SORTED_AGAIN}` : ''} ` +
+        `For how its purchases are sorted, send /sort ${nickname}.`
+      )
     }
 
     case '/removecard': {

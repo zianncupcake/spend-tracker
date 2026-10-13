@@ -122,6 +122,21 @@ export async function deleteUser(db: D1Database, userId: number): Promise<void> 
  * nothing built on a store can read or change another user's rows.
  */
 export function storeFor(db: D1Database, ownerId: number) {
+  /**
+   * The statement that forgets the category of every purchase on the card with the nickname that its user has not
+   * taken out, of whatever month. A category is a key of the card's product, and another product can have one of the
+   * same key: so it goes when the card is given another product, and when the card is removed, as one that is added
+   * for those digits later may have another product.
+   */
+  const forgetting = (nickname: string) =>
+    db
+      .prepare(
+        `UPDATE transactions SET category = NULL
+         WHERE owner_id = ?1 AND category IS NOT NULL AND removed_at IS NULL
+           AND card_last4 = (SELECT last4 FROM cards WHERE owner_id = ?1 AND nickname = ?2)`,
+      )
+      .bind(ownerId, nickname)
+
   return {
     /**
      * False when the user already has a card with that nickname or those last four digits, and when they have as
@@ -154,12 +169,15 @@ export function storeFor(db: D1Database, ownerId: number) {
       return results.map(toCard)
     },
 
-    /** Links the card to a product of the catalogue, by the product's key, or to none. */
-    async setProduct(nickname: string, product: string | null): Promise<void> {
-      await db
+    /**
+     * Links the card to a product of the catalogue, by the product's key, or to none. With `forget`, which is for a
+     * card that had another product, the categories of its purchases are forgotten in the same batch.
+     */
+    async setProduct(nickname: string, product: string | null, forget = false): Promise<void> {
+      const linking = db
         .prepare('UPDATE cards SET product = ? WHERE owner_id = ? AND nickname = ?')
         .bind(product, ownerId, nickname)
-        .run()
+      await db.batch(forget ? [forgetting(nickname), linking] : [linking])
     },
 
     /**
@@ -178,18 +196,19 @@ export function storeFor(db: D1Database, ownerId: number) {
     },
 
     /**
-     * Removes the card, and its patterns with it. Returns how many patterns those were, or null when the user has
-     * no card with that nickname.
+     * Removes the card, and its patterns with it. Its purchases stay, with their categories forgotten. Returns how
+     * many patterns there were, or null when the user has no card with that nickname.
      */
     async removeCard(nickname: string): Promise<number | null> {
-      // The patterns go first, while the card is there to tell which they are.
-      const [patterns, card] = await db.batch([
+      // The card goes last, while it is there to tell which patterns and purchases are its own.
+      const [patterns, , card] = await db.batch([
         db
           .prepare(
             `DELETE FROM patterns
              WHERE owner_id = ?1 AND card_last4 = (SELECT last4 FROM cards WHERE owner_id = ?1 AND nickname = ?2)`,
           )
           .bind(ownerId, nickname),
+        forgetting(nickname),
         db.prepare('DELETE FROM cards WHERE owner_id = ? AND nickname = ?').bind(ownerId, nickname),
       ])
       return card.meta.changes > 0 ? patterns.meta.changes : null
