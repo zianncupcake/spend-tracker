@@ -134,15 +134,23 @@ describe('the sign-in pages', () => {
 })
 
 describe('every page', () => {
-  it('the homepage is HTML that browsers must not sniff', () => {
-    const { headers } = homePage(operator)
+  // Every page is sent with the same headers, and a sign-in page with two more. So a page of each kind is looked at.
+  it.each<[name: string, page: () => Response]>([
+    ['the homepage', () => homePage(operator)],
+    ['the code page', () => codePage('123456')],
+  ])('%s is HTML that browsers must not sniff', (_, page) => {
+    const { headers } = page()
 
     expect(headers.get('content-type')).toBe('text/html; charset=utf-8')
     expect(headers.get('x-content-type-options')).toBe('nosniff')
   })
 
-  it('the code page allows no scripts, and no styles but its own', async () => {
-    const response = codePage('123456')
+  // What a page holds is its own. The two here are those that no other test looks through for a script.
+  it.each<[name: string, page: () => Response]>([
+    ['the code page', () => codePage('123456')],
+    ['the expired-link page', () => problemPage('expired')],
+  ])('%s allows no scripts, and no styles but its own', async (_, page) => {
+    const response = page()
     const html = await response.text()
 
     const [, nonce] = /<style nonce="([^"]+)">/.exec(html) ?? []

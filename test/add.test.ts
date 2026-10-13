@@ -76,6 +76,7 @@ describe('/add', () => {
 
   it.each([
     ['3/10', '3 Oct', '2026-10-03T12:00:00+08:00'],
+    ['03/10', '3 Oct', '2026-10-03T12:00:00+08:00'],
     ['3/10/26', '3 Oct', '2026-10-03T12:00:00+08:00'],
     ['3/10/2026', '3 Oct', '2026-10-03T12:00:00+08:00'],
     // The first day that the card's current window counts, which is October: two days before it begins.

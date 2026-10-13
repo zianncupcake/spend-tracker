@@ -508,6 +508,8 @@ describe('the amount of a purchase', () => {
 
   it.each<[what: string, amount: unknown]>([
     ['negative', '-12.40'],
+    ['negative, as a number', -12.4],
+    ['signed', '+12.40'],
     ['zero', '0'],
     ['of three decimals, as a number', 12.405],
     ['of thirteen digits', '1234567890123'],
@@ -533,6 +535,7 @@ describe('the currency of a purchase', () => {
     ['digits', '702'],
     ['letters of another script', 'ＳＧＤ'],
     ['a list', ['SGD']],
+    ['left out', undefined],
   ])('fails the purchase when it is %s', async (_, currency) => {
     expect(await readOne({ ...GIVEN, currency })).toBeNull()
   })
@@ -556,6 +559,7 @@ describe('the date of a purchase', () => {
     ['written without its zeros', '2026-10-8'],
     ['a date with a time', '2026-10-08T09:30:00+08:00'],
     ['a list', ['2026-10-08']],
+    ['left out', undefined],
   ])('fails the purchase when it is %s', async (_, date) => {
     expect(await readOne({ ...GIVEN, date })).toBeNull()
   })
@@ -599,6 +603,7 @@ describe('the doubt of a purchase', () => {
   it.each<[unsure: unknown, doubted: boolean]>([
     // Anything but a plain no is a doubt: a purchase that is doubted for nothing costs its user only a look.
     [undefined, true],
+    ['false', true],
     [0, true],
   ])('is taken from %j as %j', async (unsure, doubted) => {
     expect(await readOne({ ...GIVEN, unsure })).toEqual({ ...READ, unsure: doubted })

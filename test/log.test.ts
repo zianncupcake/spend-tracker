@@ -115,6 +115,7 @@ describe('the line of a failure', () => {
     ['a number below 100', 99],
     ['a number above 599', 600],
     ['a status and a half', 503.5],
+    ['a status as text', '503'],
     ['a status inside an object', { valueOf: () => 503, merchant: PRIVATE[0] }],
   ])('has no status of an error that holds %s for one: only a whole number from 100 to 599 is one', (_, status) => {
     const logged = catchConsole()
