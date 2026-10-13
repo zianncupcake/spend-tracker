@@ -33,7 +33,7 @@ const MERCHANTS: [name: string, mcc: number][] = [
 ]
 
 /** The words of the text: its runs of letters and digits, in lower case. */
-function wordsOf(text: string): string[] {
+export function wordsOf(text: string): string[] {
   return text.toLowerCase().match(/[a-z0-9]+/g) ?? []
 }
 

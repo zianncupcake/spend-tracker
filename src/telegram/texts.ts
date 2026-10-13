@@ -267,6 +267,12 @@ export const SAVE_PATTERN = 'Save this pattern? It replaces the one that the car
 
 export const REMOVE_PATTERN = 'Remove this pattern?'
 
+/** What a monthly review says first. A message that asks as SAVE_PATTERN does comes after it for each offer. */
+export const REVIEW =
+  'Monthly review: each message below names a card and a merchant that you paid with it in both of the last two ' +
+  'months, with what you spent there last month. Saved as a pattern, that amount is held back every month from ' +
+  'what is left of a cap of the card, until it is spent. Nothing is saved unless you press "Do it".'
+
 // What the bot says of the reminder of a card's bill. `card` is the card as the bot names one: see `label` in
 // ./replies.
 

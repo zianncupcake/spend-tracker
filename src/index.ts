@@ -6,6 +6,7 @@ import { serveMcp } from './mcp/server'
 import { userOfToken } from './mcp/tokens'
 import { homePage, privacyPage } from './pages'
 import { sendDueReminder } from './reminders'
+import { reviewDueUser } from './review'
 import { handleUpdate, type Update } from './telegram/handler'
 
 export default {
@@ -42,12 +43,17 @@ export default {
   },
 
   /**
-   * The cron trigger: every run sends one reminder that is due, and then checks one connected mailbox for new bank
-   * alerts. Neither throws, so nothing about a reminder keeps the mail from being checked.
+   * The cron trigger: every run sends one reminder that is due, makes one user's monthly review that is due, and
+   * then checks one connected mailbox for new bank alerts. None of the three throws, so nothing about the first two
+   * keeps the mail from being checked.
    */
   scheduled(_controller, env, ctx): void {
     const deps = depsFor(env)
-    ctx.waitUntil(sendDueReminder(deps).then(() => runCheck(deps)))
+    ctx.waitUntil(
+      sendDueReminder(deps)
+        .then(() => reviewDueUser(deps))
+        .then(() => runCheck(deps)),
+    )
   },
 } satisfies ExportedHandler<Env>
 
