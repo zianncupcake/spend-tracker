@@ -22,6 +22,7 @@ const MERCHANTS: [name: string, mcc: number][] = [
   ['scarlett supermarket', 5411],
   ['7-eleven', 5499],
   ['grab', 4121],
+  ['bus/mrt', 4111],
   ['ticketmaster', 7922],
   ['shaw theatres', 7832],
   ['fs8', 7997],

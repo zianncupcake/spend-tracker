@@ -238,6 +238,7 @@ describe('the category code of a merchant', () => {
     expect(codeOf('SALAD STOP @ MALL')).toBe(5814)
     // Punctuation counts as the end of a word.
     expect(codeOf('GRAB*A-123')).toBe(4121)
+    expect(codeOf('BUS/MRT 4471 SINGAPORE SG')).toBe(4111)
     // A name may end in the middle of a word.
     expect(codeOf('FAIRPRICEXTRA')).toBe(5411)
     // A name does not begin in the middle of a word.
@@ -272,6 +273,7 @@ describe('the category code of a merchant', () => {
     { product: ocbcRewards, merchant: 'TIKTOK*SHOP', category: 'shopping' },
     { product: hsbcRevolution, merchant: 'KOI THE SG', category: 'other' },
     { product: hsbcRevolution, merchant: 'GRAB RIDE', category: 'eligible' },
+    { product: hsbcRevolution, merchant: 'BUS/MRT 4471 SINGAPORE SG', category: 'other' },
     { product: dbsWomansWorld, merchant: 'YOUTRIP', category: 'other' },
     { product: dbsWomansWorld, merchant: 'SHOPEE PAY', category: 'other' },
     { product: dbsWomansWorld, merchant: 'EZ LINK', category: 'other' },
