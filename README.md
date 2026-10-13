@@ -126,7 +126,9 @@ says otherwise:
   Other Spend.
 
 A purchase is marked with the "Mark as ..." buttons under the bot's message about it, which `/sort <purchase id>`
-shows again. `/sort <nickname>` says what belongs where. Linking a card to another product forgets the groups that
+shows again. After several purchases are added at once, from a photo or by the assistant, the bot sends that
+message for those that neither a rule nor a code placed, on a card whose product sorts by merchant codes: for five
+at the most. `/sort <nickname>` says what belongs where. Linking a card to another product forgets the groups that
 its purchases were marked as by hand, as linking it to none does, and the purchases of its current window are
 sorted again by the rules of the new product. The rules are data in `src/catalogue/`, a file to each product, with
 the date that the bank's terms are as of and, in a comment, where the bank publishes them.

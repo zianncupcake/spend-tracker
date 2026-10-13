@@ -2,7 +2,6 @@
 // question for the assistant is not answered here: see handle in ./handler.
 
 import { productOf } from '../catalogue'
-import type { Product } from '../catalogue/types'
 import { confirmCode, disconnect, startConnect } from '../connect'
 import type { Deps } from '../deps'
 import { nextReminder, reminderIn } from '../domain/reminder'
@@ -10,13 +9,12 @@ import { sortByRules } from '../domain/sorting'
 import { cardTotals } from '../domain/totals'
 import { COMMAND_NAMES } from '../log'
 import { issueToken } from '../mcp/tokens'
-import { deleteUser, findOrCreateUser, MAX_CARDS, setTimezone, storeFor, type Transaction } from '../store'
+import { deleteUser, findOrCreateUser, MAX_CARDS, setTimezone, storeFor } from '../store'
 import { connectStoreFor } from '../store-connect'
 import { mailStoreFor } from '../store-mail'
 import { mcpStoreFor } from '../store-mcp'
 import { reminderStoreFor } from '../store-reminders'
 import { addPurchase } from './adding'
-import type { Outgoing } from './api'
 import {
   CODE,
   NICKNAME,
@@ -30,7 +28,7 @@ import {
   timeZoneNamed,
 } from './arguments'
 import { formatShortDate, formatShortDateTime, maskLast4 } from './format'
-import { inMessages, purchaseLine, sortEnd, whereSorted } from './purchases'
+import { inMessages, purchaseLine, sortPrompt, whereSorted } from './purchases'
 import {
   cardsReply,
   describeCard,
@@ -434,12 +432,4 @@ function tokenReply(endpoint: string, token: string): string {
     `For another assistant, the MCP endpoint is ${endpoint} and the token goes in the header ` +
       '"Authorization: Bearer <token>".',
   ].join('\n')
-}
-
-/** A purchase, with where it is sorted and the buttons that move it. */
-function sortPrompt(product: Product, purchase: Transaction, timeZone: string): Outgoing {
-  const { line, buttons } = sortEnd(product, purchase)
-  const date = formatShortDate(new Date(purchase.occurredAt * 1000), timeZone)
-  const [message] = inMessages([purchaseLine(purchase, date), { text: line }])
-  return { ...message, buttons }
 }
