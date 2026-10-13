@@ -117,7 +117,7 @@ cards, and nothing unless you ask a question.</li>`
   return page(
     'Privacy policy - Spend Tracker',
     `<h1>Privacy policy</h1>
-<p>Last updated: 13 October 2026</p>
+<p>Last updated: 14 October 2026</p>
 <p>Spend Tracker is a Telegram bot that keeps a running total of what you spend on each credit card. It is run
 by ${name}. For any question about this policy or about your data, contact: ${contact}</p>
 
@@ -168,6 +168,9 @@ ${assistant ? questions : ''}${reads ? reading : ''}
 card that it is of, and the messages that offer you monthly patterns at the start of a month name merchants that you
 paid in the two months before, each with its card and what you spent there in a month. Telegram keeps them.</li>
 <li>Google provides the sign-in.</li>
+<li>check-mcc.sg, a public list of the category codes of merchants, is sent the first word of a merchant's name to
+look up its code, when a purchase is added at a merchant whose code the bot does not know. Nothing that is sent
+with the word says whose purchase it is.</li>
 <li>An AI assistant that you connect with your assistant access token can read your card totals and purchases,
 until you remove the token with <code>/mcp revoke</code>.</li>${assistant ? provider : ''}
 </ul>

@@ -109,10 +109,12 @@ the cap. A limit below is the spend in a month that earns the bank's cap on the 
 | `ocbc-rewards` | OCBC Rewards Card | Shopping Spend: SGD 1,110. Other Spend: no limit. | calendar month | none |
 | `dbs-womans-world` | DBS Woman's World Card | Online Spend: SGD 1,000. Other Spend: no limit. | calendar month | none |
 
-An alert says neither how a purchase was made nor the category code of its merchant. Only for the merchants listed
-in `src/catalogue/merchants.ts` is the code known, and a purchase there starts where the code puts it on the HSBC,
-OCBC and DBS products. Any other purchase is taken by its product for one group, which has a cap, until something
-says otherwise:
+An alert says neither how a purchase was made nor the category code of its merchant. For the merchants listed in
+`src/catalogue/merchants.ts` the code is known, and a purchase there starts where the code puts it on the HSBC,
+OCBC and DBS products. For any other merchant on those products, the bot asks check-mcc.sg, a public list of the
+codes of stores, with the first word of the merchant's name as the purchase is added: the purchase starts where
+the code puts it when the merchant's name holds the name of a store that is listed, and the stores of that name
+agree. Any other purchase is taken by its product for one group, which has a cap, until something says otherwise:
 
 - UOB EVOL Card: a purchase is Online and Mobile Contactless Spend. One in another currency is Overseas Foreign
   Currency Spend, and one at a gym, telco or streaming service that the bank names is Selected Gym, Telco and
@@ -332,6 +334,7 @@ There are two places to read the log:
 | `reminder` | A reminder of a card's bill that a scheduled run had to send, before the `check` line of the same run: `sent`, `blocked` by its chat, which is passed over until the next month, or `failed`. One that could not be sent is tried again ten minutes later while it is still that day for its user. One whose next day could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. |
 | `review` | A user's monthly review, which a scheduled run made after its reminder and before its `check` line: `offered`, `nothing` when there was nothing to offer, `blocked` by its chat or `failed`. `offered` is how many patterns it offered. One that was `blocked` or `failed` is not made again that month, and what it had to offer is offered by the next, though some of its messages may have been sent. One whose next 1st could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. A run that only sets when a user is next due, the first time it sees them or after `/timezone`, writes no line. |
 | `alert` | An alert that was given to the parser of its bank: `stored`, `duplicate` or `unparsed`. An `unparsed` is what a bank that has changed the wording of its alerts looks like. |
+| `mcc_lookup` | A search of check-mcc.sg for the category code of a merchant, as a purchase is added: `found` when it listed stores, `none` when it listed none, or `failed`. One that `failed` was not answered in 2 seconds, or was answered with an error, which is a 429 when the service has had its 100 requests in 15 minutes: the purchase is added all the same, with no category from a code. |
 | `connect_link` | `/connect` gave a user a sign-in link. |
 | `connect_callback` | Google sent a browser back to `/oauth/callback`, with what came of it. |
 | `connect_code` | Six digits were sent in a chat, with whether they connected the mailbox. |

@@ -5,7 +5,7 @@ import { MAX_PURCHASES_PER_PHOTO, type PhotoReading } from '../ai/photo'
 import { categoriesOf, categoryName, categoryOf, choicesOf, productOf, unplaced } from '../catalogue'
 import type { Deps } from '../deps'
 import { perCurrency } from '../domain/breakdown'
-import { startingCategoryOn } from '../domain/sorting'
+import { startingCategoriesOn } from '../domain/sorting'
 import { cardTotals, type CardTotals } from '../domain/totals'
 import { dayOf } from '../domain/window'
 import { log } from '../log'
@@ -194,8 +194,9 @@ export async function pressHeld(
     const last4 = pressed.choice === 'add' ? batch.cardLast4 : batch.cardLast4 === null ? pressed.choice : null
     const card = last4 === null ? undefined : cards.find((each) => each.last4 === last4)
     if (!card) return refused()
+    const categories = await categoriesFor(card, choiceOn(card, batch.category), batch.purchases)
     // What the press asked for is done once the purchases are stored, whatever fails after that.
-    kept = await keep(store, card, choiceOn(card, batch.category), batch.messageId, batch.purchases, () => {
+    kept = await keep(store, card, categories, batch.messageId, batch.purchases, () => {
       handling.handled = true
     })
   }
@@ -227,7 +228,7 @@ export async function addPurchase(
   stored: () => void,
 ): Promise<string | Outgoing[]> {
   const described = { ...entry, cardLast4: card.last4, parser: MANUAL }
-  const category = startingCategoryOn(card, described)
+  const [category] = await startingCategoriesOn(card, [described])
   // No alert gives this purchase an id to be known by, so it is known by the message that described it. Telegram
   // delivers a message again when it has not heard that the message was taken, and that is then no second purchase.
   const sourceId = `${MANUAL}:${messageId}`
@@ -302,11 +303,14 @@ export async function addRead(
   const clear = card ? read.filter((purchase) => !purchase.unsure) : []
   const unclear = card ? read.filter((purchase) => purchase.unsure) : read
 
+  // Worked out before the look at `adding.late`, as it can wait for an answer from outside: nothing is waited for
+  // between that look and the storing.
+  const categories = await categoriesFor(card, named, clear)
   if (adding.late) return undefined
   // While the storing is under way, a purchase for the message may be in the store, and counts as one that is. A
   // storing that fails before anything is stored leaves none there. Once it is done, it is known whether one is.
   adding.kept = clear.length > 0
-  const kept = await keep(store, card, named, messageId, clear, (stored) => {
+  const kept = await keep(store, card, categories, messageId, clear, (stored) => {
     adding.stored = stored
   }).catch((error: unknown) => {
     adding.kept = adding.stored > 0
@@ -359,9 +363,21 @@ export async function addRead(
 const NOTHING_KEPT: Kept = { added: [], stored: 0, takenOut: 0, leftOut: 0 }
 
 /**
+ * The category that each of the purchases of a reading is stored with on the card, in their order: the one that the
+ * reading named for them or, when `named` is null, where /add would start each.
+ */
+async function categoriesFor(
+  card: Card | undefined,
+  named: string | null,
+  purchases: HeldPurchase[],
+): Promise<(string | null)[]> {
+  return named === null ? startingCategoriesOn(card, purchases) : purchases.map(() => named)
+}
+
+/**
  * Stores purchases of a reading on a card, as /add stores one: they are purchases that their user added by hand,
- * and count as such. `named` is the category that the reading named for them, or null: a purchase then starts
- * where /add would start it. Nothing is stored when there is no card to store it on, or nothing to store.
+ * and count as such. `categories` has the category of each: see categoriesFor. Nothing is stored when there is no
+ * card to store it on, or nothing to store.
  *
  * No alert gives these purchases ids to be known by, so each is known by the message that it was read from and by
  * its place in the reading. Telegram delivers a message again when it has not heard that the message was taken,
@@ -373,16 +389,15 @@ const NOTHING_KEPT: Kept = { added: [], stored: 0, takenOut: 0, leftOut: 0 }
 async function keep(
   store: Store,
   card: Card | undefined,
-  named: string | null,
+  categories: (string | null)[],
   messageId: number,
   purchases: HeldPurchase[],
   stored: (count: number) => void,
 ): Promise<Kept> {
   if (!card || purchases.length === 0) return NOTHING_KEPT
-  const given = purchases.map(({ place, occurredAt, amountMinor, currency, merchant }) => {
+  const given = purchases.map(({ place, occurredAt, amountMinor, currency, merchant }, at) => {
     const described = { cardLast4: card.last4, amountMinor, currency, merchant, occurredAt }
-    const category = named ?? startingCategoryOn(card, described)
-    return { ...described, sourceId: sourceIdOf(messageId, place), category }
+    return { ...described, sourceId: sourceIdOf(messageId, place), category: categories[at] }
   })
   // One statement for all of them, and their ids come back with what each is stored under.
   const ids = new Map((await store.insertByHand(given)).map(({ sourceId, id }) => [sourceId, id]))
