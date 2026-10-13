@@ -140,6 +140,16 @@ ones, as bus and train fares. Until it is spent, `/spend <nickname>` holds what 
 what is left of a cap, in a row called `To come`. It counts against the group that a purchase at its merchant
 would start in, which the reply to `/pattern` names, and it goes when its card is removed.
 
+At 09:00 on the 1st of a month, by a user's time zone, the bot offers them the spending that looks monthly as
+patterns to add. It looks at the two calendar months before, on each card that is linked to a product: a merchant
+that the card has a purchase at in both months, in the card's own currency and in a group with a cap, is offered
+with what was spent there in the later month, unless one of the card's patterns counts it already, or a pattern for
+it would be held against another group than its purchases are in, or than the product's rules put them in. A
+merchant is known there by the first word of its name, and by the second too unless that has a digit in it, so
+`SAMPLE TRANSIT 4471` and `SAMPLE TRANSIT 9903` are one. Each offer is a message with "Do it" and "Cancel" under it,
+five at the most in a month, the largest amounts first. Nothing is saved without a press, and a merchant is offered
+for a card once.
+
 ## Setting it up
 
 An operator needs a Cloudflare account, a Telegram bot, a Google OAuth client and, for the assistant, a key of an
@@ -320,6 +330,7 @@ There are two places to read the log:
 | `check_failed` | A run that failed, with the `stage` that it failed at. It is written before the `check` line of the same run. |
 | `access_lost` | A run found that Google no longer honours the token of a mailbox. `told` is whether its user was told. |
 | `reminder` | A reminder of a card's bill that a scheduled run had to send, before the `check` line of the same run: `sent`, `blocked` by its chat, which is passed over until the next month, or `failed`. One that could not be sent is tried again ten minutes later while it is still that day for its user. One whose next day could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. |
+| `review` | A user's monthly review, which a scheduled run made after its reminder and before its `check` line: `offered`, `nothing` when there was nothing to offer, `blocked` by its chat or `failed`. `offered` is how many patterns it offered. One that was `blocked` or `failed` is not made again that month, and what it had to offer is offered by the next, though some of its messages may have been sent. One whose next 1st could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. A run that only sets when a user is next due, the first time it sees them or after `/timezone`, writes no line. |
 | `alert` | An alert that was given to the parser of its bank: `stored`, `duplicate` or `unparsed`. An `unparsed` is what a bank that has changed the wording of its alerts looks like. |
 | `connect_link` | `/connect` gave a user a sign-in link. |
 | `connect_callback` | Google sent a browser back to `/oauth/callback`, with what came of it. |
@@ -399,8 +410,9 @@ a minute with no `check` line, or an `update` that was `deferred` with nothing a
   outbound requests and 50 database queries. So the mail check, which runs once a minute, checks one mailbox in a
   run and reads one alert at the most. With N mailboxes connected, each has its turn every N minutes: a purchase
   can be told of some minutes after it was made, and a new connection takes a while to get through its 35 days.
-  Before it checks the mail, a run sends one reminder that is due, the one that has been due longest. So reminders
-  that are due at the same time go out a minute apart.
+  Before it checks the mail, a run sends one reminder that is due, the one that has been due longest, and then
+  makes the monthly review of one user, the one whose review has been due longest. So reminders that are due at the
+  same time go out a minute apart, and so do reviews.
 - A user can have 20 cards and 50 patterns, and can add 100 purchases by hand in 24 hours, those that are read
   from a photo or added by the assistant among them. `/spend <nickname>` lists the latest 200 purchases of a
   window, and still totals them all. What was spent at a pattern's merchant is counted from those 200.

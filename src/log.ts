@@ -107,6 +107,7 @@ export interface Events {
   }
   access_lost: { user: number; told: boolean }
   reminder: { user: number | null; outcome: 'sent' | 'blocked' | 'failed' }
+  review: { user: number | null; outcome: 'offered' | 'nothing' | 'blocked' | 'failed'; offered: number }
   alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | null }
   connect_link: { user: number }
   connect_callback: {

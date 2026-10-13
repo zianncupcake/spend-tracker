@@ -141,6 +141,8 @@ id of the Telegram message that added it, so that it is not counted twice.</li>$
 <li>The reward category that each purchase is sorted into.</li>
 <li>The monthly patterns that you save: the card, the merchant, the amount for a month and the days that you say
 it skips.</li>
+<li>The names of the merchants that the bot has offered you as monthly patterns, each with the last four digits of
+its card, so that none is offered twice.</li>
 <li>A purchase that you take out, which stays stored and marked as taken out, so that its alert is not counted
 again. It is left out of every total and list, and is deleted with everything else.</li>
 <li>The id of any alert that was fetched but not recorded, and why it was not, kept so that it is not fetched
@@ -162,8 +164,9 @@ ${assistant ? questions : ''}${reads ? reading : ''}
 <h2>Who else handles your data</h2>
 <ul>
 <li>Cloudflare hosts the service and its database.</li>
-<li>Telegram carries the bot's messages. Those messages contain details of your purchases, and a reminder names
-the card that it is of. Telegram keeps them.</li>
+<li>Telegram carries the bot's messages. Those messages contain details of your purchases, a reminder names the
+card that it is of, and the messages that offer you monthly patterns at the start of a month name merchants that you
+paid in the two months before, each with its card and what you spent there in a month. Telegram keeps them.</li>
 <li>Google provides the sign-in.</li>
 <li>An AI assistant that you connect with your assistant access token can read your card totals and purchases,
 until you remove the token with <code>/mcp revoke</code>.</li>${assistant ? provider : ''}

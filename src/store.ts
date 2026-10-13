@@ -1,4 +1,5 @@
-// SQL is run only here and in store-connect.ts, store-held.ts, store-mail.ts, store-mcp.ts and store-reminders.ts.
+// SQL is run only here and in store-connect.ts, store-held.ts, store-mail.ts, store-mcp.ts, store-reminders.ts and
+// store-review.ts.
 
 import { lettersOf } from './catalogue/merchants'
 import type { WindowRule } from './domain/window'
@@ -107,9 +108,12 @@ export async function telegramIdOf(db: D1Database, userId: number): Promise<numb
   return db.prepare('SELECT telegram_id FROM users WHERE id = ?').bind(userId).first<number>('telegram_id')
 }
 
-/** Sets the time zone in which the user's days, and so their cards' windows, begin and end. */
+/**
+ * Sets the time zone in which the user's days, and so their cards' windows, begin and end. Their next review was
+ * due by the clock of the zone before, so none is set from here on: see reviewDueUser in ./review.
+ */
 export async function setTimezone(db: D1Database, userId: number, timezone: string): Promise<void> {
-  await db.prepare('UPDATE users SET timezone = ? WHERE id = ?').bind(timezone, userId).run()
+  await db.prepare('UPDATE users SET timezone = ?, review_at = 0 WHERE id = ?').bind(timezone, userId).run()
 }
 
 /** Deletes the user. Every row they own goes too, through ON DELETE CASCADE. */
