@@ -115,10 +115,28 @@ export function rulesFor(asked: { mcc?: number; merchant?: string }) {
       return {
         product: product.name,
         group: group?.name ?? null,
-        // Hundredths as a decimal number in a string, which is how find_purchases gives the model an amount.
-        monthlyCap: limit === undefined ? null : { amount: (limit / 100).toFixed(2), currency: product.homeCurrency },
+        monthlyCap: money(limit, product.homeCurrency),
         bonus: ruled === undefined ? 'depends' : limit === undefined ? 'no' : 'yes',
       }
     }),
   }
+}
+
+/**
+ * What each product's terms set for a month, in the order of the catalogue: its minimum spend, and the limit of each
+ * of its groups. Null is for one that the terms do not set. It is what the assistant's card_rules answers when it is
+ * asked about no purchase.
+ */
+export function productTerms() {
+  return products.map(({ name, termsAsOf, minimumSpendMinor, homeCurrency, groups }) => ({
+    product: name,
+    termsAsOf,
+    monthlyMinimumSpend: money(minimumSpendMinor, homeCurrency),
+    groups: groups.map((group) => ({ group: group.name, monthlyCap: money(group.limitMinor, homeCurrency) })),
+  }))
+}
+
+/** Hundredths as a decimal number in a string, which is how find_purchases gives the model an amount. Null for none. */
+function money(minor: number | undefined, currency: string) {
+  return minor === undefined ? null : { amount: (minor / 100).toFixed(2), currency }
 }

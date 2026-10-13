@@ -6,6 +6,7 @@ import {
   choicesOf,
   productOf,
   products,
+  productTerms,
   ruledByCode,
   ruledByName,
   rulesFor,
@@ -303,6 +304,25 @@ describe('where the products count a purchase, by the code or the name of its me
     expect(rules).toEqual({ mcc, products: expect.any(Array) })
     const monthlyCap = cap && { amount: cap, currency: 'SGD' }
     expect(rules.products[at]).toEqual({ product: products[at].name, group, monthlyCap, bonus })
+  })
+})
+
+describe("what the products' terms set for a month", () => {
+  it('has the products in their order, each with its minimum spend and the limit of each of its groups', () => {
+    const terms = productTerms()
+
+    expect(terms.map(({ product }) => product)).toEqual(products.map(({ name }) => name))
+    const [uob, , , dbs] = terms
+    expect(uob.monthlyMinimumSpend).toEqual({ amount: '800.00', currency: 'SGD' })
+    expect(dbs).toEqual({
+      product: dbsWomansWorld.name,
+      termsAsOf: dbsWomansWorld.termsAsOf,
+      monthlyMinimumSpend: null,
+      groups: [
+        { group: 'Online Spend', monthlyCap: { amount: '1000.00', currency: 'SGD' } },
+        { group: 'Other Spend', monthlyCap: null },
+      ],
+    })
   })
 })
 
