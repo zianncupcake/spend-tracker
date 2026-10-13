@@ -389,10 +389,10 @@ describe('what the assistant is asked to do with patterns', () => {
     expect(await patternCount(await chat.userId())).toBe(0)
   })
 
-  it('asks about one for a single query of the room, which showing 20 cards and unlinking one leaves', async () => {
+  it('asks about one for a single query of the room, which showing 20 cards and renaming one leaves', async () => {
     const chat = openChat()
     for (let card = 1; card <= MAX_CARDS; card++) await chat.say(`/addcard card-${card} ${1000 + card} calendar`)
-    acting({ kind: 'show' }, command('/product card-4 none'), command('/pattern card-1 60 sample gym'))
+    acting({ kind: 'show' }, command('/renamecard card-4 spare'), command('/pattern card-1 60 sample gym'))
 
     const { texts } = await told(chat)
 

@@ -5,7 +5,16 @@ import type { Deps } from '../deps'
 import { CONFIRMABLE, log } from '../log'
 import { findUser, storeFor, type User } from '../store'
 import { connectStoreFor } from '../store-connect'
-import { NICKNAME, parseCard, parsePattern, parseReminder, PURCHASE_ID, timeZoneNamed } from './arguments'
+import {
+  NICKNAME,
+  noSuchProduct,
+  parseCard,
+  parsePattern,
+  parseReminder,
+  PRODUCT_KEY,
+  PURCHASE_ID,
+  timeZoneNamed,
+} from './arguments'
 import { commandIn, ran } from './commands'
 import { formatAmount, formatShortDate, maskLast4 } from './format'
 import { confirmButtons, inMessages, purchaseLine, type Line } from './purchases'
@@ -21,6 +30,7 @@ import {
   SAVE_PATTERN,
   SEE_REPLY,
   SEND_YOURSELF,
+  WILL_SORT_AGAIN,
 } from './texts'
 
 /**
@@ -30,9 +40,9 @@ import {
  * read to mean, and is none of the model's text.
  *
  * Where there is nothing that the command could do, it is answered with what the command itself would say of that,
- * and with no buttons: a purchase or a card that the user has not got, a nickname that a card of theirs has
- * already, a Gmail that is not connected, and one that is connected already. A line that the command would not take
- * is answered with that it could not be done.
+ * and with no buttons: a purchase or a card that the user has not got, a product that there is not, a nickname that
+ * a card of theirs has already, a Gmail that is not connected, and one that is connected already. A line that the
+ * command would not take is answered with that it could not be done.
  */
 export async function confirmFor(
   deps: Deps,
@@ -114,13 +124,15 @@ export async function confirmFor(
     }
     case 'product': {
       const [nickname = '', key = ''] = args
+      if (args.length !== 2 || !NICKNAME.test(nickname) || !PRODUCT_KEY.test(key)) return declined(NOT_DONE)
       const product = productOf(key.toLowerCase())
-      const known = product || key.toLowerCase() === 'none'
-      if (args.length !== 2 || !NICKNAME.test(nickname) || !known) return declined(NOT_DONE)
+      if (!product && key.toLowerCase() !== 'none') return declined(noSuchProduct(key))
       const card = (await storeFor(db, user.id).listCards()).find((each) => each.nickname === nickname)
       if (!card) return declined(`You have no card called ${nickname}.`)
+      // What /product forgets of a card that has another product: see `reply` in ./commands.
+      const relinked = card.product !== undefined && card.product !== product?.key
       const text = product
-        ? `Link ${label(card)} to ${product.name}?`
+        ? `Link ${label(card)} to ${product.name}?${relinked ? ` ${WILL_SORT_AGAIN}` : ''}`
         : `Link ${label(card)} to no product? Its purchases will no longer be sorted.`
       return confirmation(`/product ${nickname} ${product?.key ?? 'none'}`, [{ text }])
     }

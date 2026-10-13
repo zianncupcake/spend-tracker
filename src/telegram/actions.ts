@@ -91,15 +91,13 @@ const MAX_PARAGRAPHS = 500
 
 /**
  * The commands that the assistant has run at once, as if their user had sent them: the adding of a card, the
- * renaming of one, the linking of one to a product and the changing of the time zone, each of which is undone in
- * one step, and those that only show things. It is a list of what is run, and not of what is not: a command that the
- * bot is given later is run for no model until somebody puts it here. See runAsked for what becomes of every other
- * line.
+ * renaming of one and the changing of the time zone, each of which is undone in one step, and those that only show
+ * things. It is a list of what is run, and not of what is not: a command that the bot is given later is run for no
+ * model until somebody puts it here. See runAsked for what becomes of every other line.
  */
 const RUN_AT_ONCE = [
   'addcard',
   'renamecard',
-  'product',
   'timezone',
   'cards',
   'spend',
@@ -114,15 +112,16 @@ const RUN_AT_ONCE = [
  * below are, when the model had read with a tool before it asked for them: see Asking. And after one of them is
  * run, the user and their cards are read again for what the model asks for next: see actInRounds.
  */
-const CHANGING = ['addcard', 'renamecard', 'product', 'timezone'] as const
+const CHANGING = ['addcard', 'renamecard', 'timezone'] as const
 
 /**
  * The commands that are asked about first, whatever the model had read: those that remove or revoke. They are the
  * taking out of a purchase or of a card, the giving up of the access to a Gmail, the removing of an assistant's
  * token, the making of a new one, which ends the one that there is, the starting of a sign-in, which cancels one
- * that is waiting for its code, and the removing of a pattern or of a reminder, or the saving of one, which takes
- * the place of the one that there is. The assistant runs none of them: each waits for its user to press a button.
- * So they are what a press may run, but for the commands above: see CONFIRMABLE in ../log.
+ * that is waiting for its code, the removing of a pattern or of a reminder, or the saving of one, which takes the
+ * place of the one that there is, and the linking of a card to a product, which forgets what was marked by hand
+ * under another. The assistant runs none of them: each waits for its user to press a button. So they are what a
+ * press may run, but for the commands above: see CONFIRMABLE in ../log.
  */
 const ASKED_FIRST = CONFIRMABLE.filter((name) => !CHANGING.some((changing) => changing === name))
 
@@ -149,9 +148,10 @@ const ACTION_QUERIES = 30
 const ADD_QUERIES = 8
 
 /**
- * The most queries that a command runs, but for /spend with no card named, which runs one for each card and two
- * more. The most is that of /product: the user, the cards, the linking, the purchases of the card's window, and a
- * statement for each category that a rule of the product gives, of which the one product that there is has two.
+ * What a command that is run at once is counted at, but for /spend with no card named, which runs one for each card
+ * and two more. None runs more: the most is five, as /addcard with a product runs, which are the user, the adding,
+ * the purchases of the card's window, and a statement for each category that a rule of the product gives, of which
+ * a product has two at the most.
  */
 const COMMAND_QUERIES = 6
 

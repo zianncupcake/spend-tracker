@@ -4,8 +4,18 @@ import * as assistant from '../src/ai/assistant'
 import type { Action, Answer } from '../src/ai/assistant'
 import { userOfToken } from '../src/mcp/tokens'
 import { TelegramError, type RichMessage } from '../src/telegram/api'
+import { noSuchProduct } from '../src/telegram/arguments'
 import { handleUpdate } from '../src/telegram/handler'
-import { CANCELLED, DOING, NO_CARDS, NO_PURCHASES_SAID, NOT_DONE, SEE_REPLY } from '../src/telegram/texts'
+import {
+  CANCELLED,
+  DOING,
+  NO_CARDS,
+  NO_PURCHASES_SAID,
+  NOT_DONE,
+  SEE_REPLY,
+  SORTED_AGAIN,
+  WILL_SORT_AGAIN,
+} from '../src/telegram/texts'
 import { connectedChat, connectionOf, deps, openChat, sentRich, signIn, type Posted } from './connect-helpers'
 import {
   bold,
@@ -551,6 +561,21 @@ describe('a command that the assistant gives to be run', () => {
     // Nothing was started for the model's asking: the six digits still find their sign-in.
     expect(await chat.say(code)).toContain('Connected jane@example.test.')
   })
+
+  it('is asked about first when it links a card to another product: the card is linked on "Do it", and not before', async () => {
+    const chat = await chatWithCard()
+
+    const asking = await askedAbout(chat, '/product evol hsbc-revolution')
+
+    // The card has no purchases: what the question and the reply say goes by its products, whatever is stored.
+    expect(asking.text).toContain(WILL_SORT_AGAIN)
+    expect(await chat.lines('/cards')).toContain('evol | ••••5678 | calendar month | UOB EVOL Card | -')
+
+    const { sent } = await chat.press(asking, 'Do it')
+
+    expect(sent.map((message) => message.text)).toEqual([expect.stringContaining(SORTED_AGAIN)])
+    expect(await chat.lines('/cards')).toContain('evol | ••••5678 | calendar month | HSBC Revolution Credit Card | -')
+  })
 })
 
 describe('a press of a button under a message that asks before a command is run', () => {
@@ -880,7 +905,8 @@ describe('what the model asks for after a tool has read for it', () => {
   it.each<[what: string, line: string, said: string]>([
     ['a card that its user has not got', '/renamecard visa daily', 'You have no card called visa.'],
     ['a card to the nickname that it has', '/renamecard evol evol', 'You already have a card called evol.'],
-  ])('has nothing asked where there is nothing to rename: for %s, what the command would say, and no buttons', async (_, line, said) => {
+    ['a product that there is not', '/product evol visa-infinite', noSuchProduct('visa-infinite')],
+  ])('has nothing asked where there is nothing to do: for %s, what the command would say, and no buttons', async (_, line, said) => {
     const chat = await chatWithCard()
     actingWith({ afterReading: true }, command(line))
     const logged = catchConsole()
@@ -888,7 +914,7 @@ describe('what the model asks for after a tool has read for it', () => {
     const { texts } = await told(chat)
 
     expect(texts.map((message) => [message.text, message.buttons])).toEqual([[said, undefined]])
-    expect(logged.events('action')).toMatchObject([{ command: 'renamecard', outcome: 'refused' }])
+    expect(logged.events('action')).toMatchObject([{ outcome: 'refused' }])
   })
 })
 

@@ -73,10 +73,11 @@ time zone to Tokyo", and for several things at once. The model only works out wh
 code does it, and the reply is the bot's.
 
 What removes or revokes something waits for a tap on "Do it" under the bot's message: taking out a purchase or a
-card, disconnecting the Gmail, making or removing the token of `/mcp`, starting a new sign-in, and saving or
-removing a pattern or a reminder, as one that is saved takes the place of the one that there is. So does a change
-that the model asks for after it has looked purchases up, as a merchant's name is text that somebody else wrote.
-`/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
+card, disconnecting the Gmail, making or removing the token of `/mcp`, starting a new sign-in, saving or removing
+a pattern or a reminder, as one that is saved takes the place of the one that there is, and linking a card to a
+product, as that forgets what was marked by hand under another. So does a change that the model asks for after it
+has looked purchases up, as a merchant's name is text that somebody else wrote. `/delete` is never done for the
+assistant: its user sends `/delete confirm` themselves.
 
 ### Photos
 
@@ -125,8 +126,10 @@ says otherwise:
   Other Spend.
 
 A purchase is marked with the "Mark as ..." buttons under the bot's message about it, which `/sort <purchase id>`
-shows again. `/sort <nickname>` says what belongs where. The rules are data in `src/catalogue/`, a file to each
-product, with the date that the bank's terms are as of and, in a comment, where the bank publishes them.
+shows again. `/sort <nickname>` says what belongs where. Linking a card to another product forgets the groups that
+its purchases were marked as by hand, as linking it to none does, and the purchases of its current window are
+sorted again by the rules of the new product. The rules are data in `src/catalogue/`, a file to each product, with
+the date that the bank's terms are as of and, in a comment, where the bank publishes them.
 
 ### Monthly patterns
 

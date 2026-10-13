@@ -232,6 +232,17 @@ export const TOO_MANY_CARDS =
   `You have ${MAX_CARDS} cards, which is as many as can be tracked. To add another, first remove one with ` +
   '/removecard <nickname>.'
 
+// What /product says besides of a card that had another product: in its reply, and in what is asked before it is
+// run for the assistant.
+
+export const SORTED_AGAIN =
+  'The purchases of its current window are sorted again by the rules of that product, and what you marked by hand ' +
+  'is forgotten.'
+
+export const WILL_SORT_AGAIN =
+  'The purchases of its current window will be sorted again by the rules of that product, and what you marked by ' +
+  'hand will be forgotten.'
+
 export const NO_PATTERNS =
   'You have no monthly patterns. To have what you spend at a merchant every month held back from what is left of ' +
   "a card's cap, send /pattern <nickname> <amount> <merchant>."
