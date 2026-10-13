@@ -133,6 +133,7 @@ it('connects nothing when Google gives no refresh token', async () => {
 })
 
 it.each([
+  ['no scope', undefined],
   ['only another scope', 'openid'],
   ['a scope that only starts like the Gmail one', `${GMAIL_READONLY}.metadata`],
 ])('connects nothing when Google grants %s', async (_, scope) => {

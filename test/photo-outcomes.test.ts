@@ -537,6 +537,21 @@ describe('a photo that the bot does not read', () => {
     expect([sent, leftSince(mark)]).toEqual([[], []])
     expect(logged.events()).toEqual([{ event: 'update', kind: 'photo', outcome: 'ignored', why: 'no_id', ms: 0 }])
   })
+
+  it('is one as it stands after its caption was edited: it was read when it came, and is not read again', async () => {
+    const chat = await chatWithCard()
+    reading(read([bought(1240, 'COFFEE PLACE')]))
+    await chat.photo('evol', MESSAGE)
+    const [from, private_] = [{ id: chat.telegramId }, { id: chat.telegramId, type: 'private' }]
+    const edited = { message_id: MESSAGE, photo: PHOTO, caption: 'not evol after all', chat: private_, from }
+    const logged = catchConsole()
+
+    const later = await handleUpdate(deps, { edited_message: edited })
+
+    expect(later).toBeUndefined()
+    expect(reader).toHaveBeenCalledTimes(1)
+    expect(logged.events()).toEqual([{ event: 'update', kind: 'edited', outcome: 'ignored', why: 'not_text', ms: 0 }])
+  })
 })
 
 describe('a service that reads photos', () => {

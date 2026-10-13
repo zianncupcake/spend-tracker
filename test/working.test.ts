@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { depsFor } from '../src/deps'
 import { findUser } from '../src/store'
 import { handleUpdate } from '../src/telegram/handler'
-import { NOT_ANSWERED, TOOK_TOO_LONG, WORKING } from '../src/telegram/texts'
+import { FAILED, NOT_ANSWERED, TOOK_TOO_LONG, WORKING } from '../src/telegram/texts'
 import { AI_URL, refusing, saying } from './ai-helpers'
 import { newTelegramId, plain, userCount } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -799,5 +799,36 @@ describe('a request that Telegram does not answer', () => {
     // The request is given up on when its 5 seconds are over, and is logged then.
     await vi.advanceTimersByTimeAsync(5_000)
     expect(logged.events('telegram_failed')).toEqual([givenUp('sendChatAction')])
+  })
+
+  it('is given up on when it is the reply to a command, and the chat is told that something went wrong', async () => {
+    timeoutsByFakeClock()
+    const logged = catchConsole()
+    // Telegram does not answer the reply, which is the table of /products, and takes what comes after it.
+    const made = Promise.withResolvers<void>()
+    telegram.mockImplementationOnce(() => {
+      made.resolve()
+      return unanswered()
+    })
+    const telegramId = newTelegramId()
+    const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
+
+    const done = handleUpdate(deps, { message: { message_id: ++lastMessage, text: '/products', chat, from } })
+    // The 5 seconds of the reply start when the request for it is made, so that is waited for first.
+    await made.promise
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    // Telegram is told that the update was taken once the reply has been given up on, and not before.
+    expect(await done).toBeUndefined()
+    // A rich message that Telegram did not answer is not sent again as text, as one that it refuses is: whether it
+    // took the first is not known.
+    const reply = expect.objectContaining({ chat_id: telegramId, rich_message: expect.anything() })
+    expect(telegram.mock.calls).toEqual([['sendRichMessage', reply], said(telegramId, FAILED)])
+    // The reply had been made, so the command had been handled: it is the sending that was given up on.
+    const line = { event: 'update', kind: 'command', command: 'products', outcome: 'failed', handled: true }
+    expect(logged.events()).toEqual([
+      givenUp('sendRichMessage'),
+      { ...line, told: true, ms: 5_000, error: 'TimeoutError' },
+    ])
   })
 })
