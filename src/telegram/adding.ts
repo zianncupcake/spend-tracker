@@ -194,7 +194,7 @@ export async function pressHeld(
     const last4 = pressed.choice === 'add' ? batch.cardLast4 : batch.cardLast4 === null ? pressed.choice : null
     const card = last4 === null ? undefined : cards.find((each) => each.last4 === last4)
     if (!card) return refused()
-    const categories = await categoriesFor(card, choiceOn(card, batch.category), batch.purchases)
+    const categories = await categoriesFor(store, card, choiceOn(card, batch.category), batch.purchases)
     // What the press asked for is done once the purchases are stored, whatever fails after that.
     kept = await keep(store, card, categories, batch.messageId, batch.purchases, () => {
       handling.handled = true
@@ -228,7 +228,7 @@ export async function addPurchase(
   stored: () => void,
 ): Promise<string | Outgoing[]> {
   const described = { ...entry, cardLast4: card.last4, parser: MANUAL }
-  const [category] = await startingCategoriesOn(card, [described])
+  const [{ category, remembered }] = await startingCategoriesOn(store, card, [described])
   // No alert gives this purchase an id to be known by, so it is known by the message that described it. Telegram
   // delivers a message again when it has not heard that the message was taken, and that is then no second purchase.
   const sourceId = `${MANUAL}:${messageId}`
@@ -254,7 +254,8 @@ export async function addPurchase(
   const lines = [purchaseLine(purchase, date), ...told]
   const product = productOf(card.product)
   if (!product) return inMessages(lines)
-  const { line, buttons } = sortEnd(product, purchase)
+  // A message that comes again is told of where its purchase is now.
+  const { line, buttons } = sortEnd(product, { ...purchase, remembered: id !== null && remembered })
   const [message] = inMessages([...lines, { text: line }])
   return [{ ...message, buttons }]
 }
@@ -305,7 +306,7 @@ export async function addRead(
 
   // Worked out before the look at `adding.late`, as it can wait for an answer from outside: nothing is waited for
   // between that look and the storing.
-  const categories = await categoriesFor(card, named, clear)
+  const categories = await categoriesFor(store, card, named, clear)
   if (adding.late) return undefined
   // While the storing is under way, a purchase for the message may be in the store, and counts as one that is. A
   // storing that fails before anything is stored leaves none there. Once it is done, it is known whether one is.
@@ -367,11 +368,13 @@ const NOTHING_KEPT: Kept = { added: [], stored: 0, takenOut: 0, leftOut: 0 }
  * reading named for them or, when `named` is null, where /add would start each.
  */
 async function categoriesFor(
+  store: Store,
   card: Card | undefined,
   named: string | null,
   purchases: HeldPurchase[],
 ): Promise<(string | null)[]> {
-  return named === null ? startingCategoriesOn(card, purchases) : purchases.map(() => named)
+  if (named !== null) return purchases.map(() => named)
+  return (await startingCategoriesOn(store, card, purchases)).map(({ category }) => category)
 }
 
 /**

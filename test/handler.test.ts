@@ -535,12 +535,14 @@ describe('/delete', () => {
     }
     const user = await chat.user()
     const other = await bystander.user()
+    await storeFor(env.DB, user.id).remember('hsbc-revolution', 'SAMPLE EATERY', 'other')
 
     expect(await chat.say('/delete')).toContain('Send /delete confirm')
     expect(await rowsOwnedBy(user.id)).toEqual({ users: 1, cards: 1, transactions: 1 })
 
     expect(await chat.say('/delete confirm')).toContain('has been deleted')
     expect(await rowsOwnedBy(user.id)).toEqual({ users: 0, cards: 0, transactions: 0 })
+    expect(await storeFor(env.DB, user.id).listMarks()).toEqual([])
     expect(await userCount(chat.telegramId)).toBe(0)
     expect(await rowsOwnedBy(other.id)).toEqual({ users: 1, cards: 1, transactions: 1 })
   })

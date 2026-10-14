@@ -50,6 +50,13 @@ export interface Pattern {
   skips: string[]
 }
 
+/** What a user marked a purchase at a merchant as: see the migration that added the table. */
+export interface Mark {
+  product: string
+  letters: string
+  category: string
+}
+
 export type Store = ReturnType<typeof storeFor>
 
 /**
@@ -425,6 +432,27 @@ export function storeFor(db: D1Database, ownerId: number) {
       await db
         .prepare('UPDATE transactions SET category = ? WHERE owner_id = ? AND id = ? AND removed_at IS NULL')
         .bind(category, ownerId, id)
+        .run()
+    },
+
+    /** The user's marks of merchants, on every product. */
+    async listMarks(): Promise<Mark[]> {
+      const { results } = await db
+        .prepare('SELECT product, letters, category FROM merchant_marks WHERE owner_id = ?')
+        .bind(ownerId)
+        .all<Mark>()
+      return results
+    },
+
+    /** Remembers the category for the merchant's name on the product, in the place of what was remembered for it. */
+    async remember(product: string, merchant: string, category: string): Promise<void> {
+      await db
+        .prepare(
+          `INSERT INTO merchant_marks (owner_id, product, letters, merchant, category) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (owner_id, product, letters) DO UPDATE SET
+             merchant = excluded.merchant, category = excluded.category`,
+        )
+        .bind(ownerId, product, lettersOf(merchant), merchant, category)
         .run()
     },
 

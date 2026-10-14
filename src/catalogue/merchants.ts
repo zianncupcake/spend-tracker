@@ -43,6 +43,17 @@ export function lettersOf(name: string): string {
   return wordsOf(name).join('')
 }
 
+/**
+ * The name of a merchant, as the monthly review offers it and as a user's mark of it is remembered by: the first
+ * word of its text, and the second unless that has a digit in it, as a number has that differs from one purchase to
+ * the next. The text begins with the name, so a pattern of the name counts every purchase that it was made from:
+ * see `namedIn`.
+ */
+export function nameOf(merchant: string): string {
+  const words = wordsOf(merchant)
+  return words.slice(0, /\d/.test(words[1] ?? '') ? 1 : 2).join(' ')
+}
+
 // Made ready once, and not for every purchase: a card that is linked to a product can have 200 of them to sort.
 const NAMES = MERCHANTS.map(([name, mcc]) => ({ name: lettersOf(name), mcc }))
 

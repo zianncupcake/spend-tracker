@@ -2,8 +2,9 @@
 // done, each of which the bot's own code does, and the queries that they may run between them.
 
 import { answerQuestion, type Action, type Answer } from '../ai/assistant'
-import { categoryOf, choicesOf, productOf } from '../catalogue'
+import { choicesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
+import { markAs } from '../domain/sorting'
 import { CONFIRMABLE, Failure, log, logFailure, type Events } from '../log'
 import { findOrCreateUser, MAX_CARDS, storeFor, type User } from '../store'
 import { addRead, readBefore, type Adding } from './adding'
@@ -143,14 +144,15 @@ const ACTION_QUERIES = 30
 
 /**
  * The most queries that the adding of a reading's purchases runs: the cards, the two that look whether the message
- * was read before, the storing, the look for what the limit left out, the holding, and the total of each card that
- * the purchases are on. That is one card, and two only for a message of which two deliveries were read at once.
+ * was read before, the user's marks of merchants, the storing, the look for what the limit left out, the holding,
+ * and the total of each card that the purchases are on. That is one card, and two only for a message of which two
+ * deliveries were read at once.
  */
-const ADD_QUERIES = 8
+const ADD_QUERIES = 9
 
 /**
  * What a command that is run at once is counted at, but for /spend with no card named, which runs one for each card
- * and two more, and for /best, which runs one for each card and three more: see bestFor in ../domain/best. None runs
+ * and two more, and for /best, which runs one for each card and four more: see bestFor in ../domain/best. None runs
  * more: the most is five, as /addcard with a product runs, which are the user, the adding, the purchases of the
  * card's window, and a statement for each category that a rule of the product gives, of which a product has two at
  * the most.
@@ -493,19 +495,19 @@ async function addAsked(
  * else's, and is moved only when its card has a product and the category is one that can be chosen for that product.
  *
  * The reply has a line for each purchase: where it now is, in the words that the press says it in, or why it was
- * not moved. A purchase takes two queries, so those that there is no room left for are not moved, and are counted
+ * not moved. A purchase takes three queries, so those that there is no room left for are not moved, and are counted
  * in one line.
  */
 async function sortAsked(deps: Deps, { user, room }: Asking, ids: number[], key: string): Promise<Came> {
-  // The cards, and then the finding of each purchase and the moving of it.
-  if (room.left < 3) return 'full'
+  // The cards, and then the finding of each purchase, the moving of it and what is remembered of it: see markAs.
+  if (room.left < 4) return 'full'
   take(room, 1)
   const store = storeFor(deps.db, user.id)
   const cards = await store.listCards()
   const lines: string[] = []
   let [moved, left] = [0, 0]
   for (const id of new Set(ids)) {
-    if (!take(room, 2)) {
+    if (!take(room, 3)) {
       left++
       continue
     }
@@ -528,8 +530,7 @@ async function sortAsked(deps: Deps, { user, room }: Asking, ids: number[], key:
       )
       continue
     }
-    // Nothing moves a purchase to where it is already: see press.
-    if (categoryOf(product, purchase.category) !== category.key) await store.setCategory(purchase.id, category.key)
+    await markAs(store, product, purchase, category.key)
     lines.push(sortEnd(product, { id: purchase.id, category: category.key }).line)
     moved++
   }
@@ -581,7 +582,7 @@ async function runAsked(deps: Deps, how: Asking, line: string): Promise<Came> {
   if (!RUN_AT_ONCE.some((each) => each === name)) return declined(NOT_DONE)
 
   const queries =
-    name === 'spend' && args.length === 0 ? MAX_CARDS + 2 : name === 'best' ? MAX_CARDS + 3 : COMMAND_QUERIES
+    name === 'spend' && args.length === 0 ? MAX_CARDS + 2 : name === 'best' ? MAX_CARDS + 4 : COMMAND_QUERIES
   if (!take(room, queries)) return 'full'
   const said = await ran(deps, telegramId, messageId, line)
   return said ? { replies: [said], outcome: 'done' } : declined(NOT_DONE)

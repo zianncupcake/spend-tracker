@@ -1,6 +1,6 @@
 // What of a card's spending looks monthly, for the monthly review: see ../review.
 
-import { lettersOf, wordsOf } from '../catalogue/merchants'
+import { lettersOf, nameOf } from '../catalogue/merchants'
 import type { Transaction } from '../store'
 import { dayOf, startOfDay } from './window'
 
@@ -22,16 +22,6 @@ export function monthsBefore(now: Date, timeZone: string): { start: number; late
   // `month` is 1 to 12 here, and a month before January carries over into the year before.
   const startOf = (monthOf: number) => startOfDay(year, monthOf, 1, timeZone).getTime() / 1000
   return { start: startOf(month - 2), later: startOf(month - 1), end: startOf(month) }
-}
-
-/**
- * The name that a merchant is offered by: the first word of its text, and the second unless that has a digit in
- * it, as a number has that differs from one purchase to the next. The text begins with the name, so a pattern of
- * the name counts every purchase that it was made from: see `namedIn`.
- */
-function nameOf(merchant: string): string {
-  const words = wordsOf(merchant)
-  return words.slice(0, /\d/.test(words[1] ?? '') ? 1 : 2).join(' ')
 }
 
 /**

@@ -73,6 +73,15 @@ describe('the cards to pay with at a merchant', () => {
     expect(outside.searches).toEqual(['sample', 'sample'])
   })
 
+  it('places the merchant where its user marked it before, over its code', async () => {
+    const chat = await chatWith(HSBC)
+    await storeFor(env.DB, await chat.userId()).remember('hsbc-revolution', 'Sample Eatery', 'other')
+
+    const [hsbc] = await bestAt(chat)
+
+    expect(hsbc.bonus).toBe('no')
+  })
+
   it('leaves out a card that is linked to no product', async () => {
     const chat = await chatWith('visa 9999 calendar', HSBC)
 

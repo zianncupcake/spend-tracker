@@ -1,5 +1,6 @@
-import { categoryOf, choicesOf, productOf } from '../catalogue'
+import { choicesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
+import { markAs } from '../domain/sorting'
 import { log, logFailure } from '../log'
 import { findUser, storeFor } from '../store'
 import { ask } from './actions'
@@ -212,10 +213,8 @@ async function press(deps: Deps, { id, from, data, message }: Press, handling: H
   const category = product && choicesOf(product).find((choice) => choice.key === pressed.category)
   if (!product || !category) return refuse()
 
-  // Nothing moves a purchase to where it is already. With no category stored for it, that is the default of its
-  // product, which the store would take for a move. This one purchase is all that a press moves, and nothing is
-  // kept of it for any other: a later purchase at the same merchant starts where the product puts it.
-  if (categoryOf(product, purchase.category) !== category.key) await store.setCategory(purchase.id, category.key)
+  // This one purchase is all that a press moves. What is remembered of it for later purchases: see markAs.
+  await markAs(store, product, purchase, category.key)
   // A press for the category that the purchase is in already moves nothing, and is answered and carried through
   // like any other. It is what comes after Telegram failed to take the answer or the edit of an earlier press: the
   // purchase was moved then, and its message still says where it was. So this press brings the message up to date.

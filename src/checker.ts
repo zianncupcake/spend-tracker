@@ -287,7 +287,7 @@ async function readAlert(
     run.stored++
     if (now - receivedAt < NEWS_HOURS * HOUR) {
       run.stage = 'notify'
-      await tellOfPurchase(deps, mailbox, result.transaction, result.card)
+      await tellOfPurchase(deps, mailbox, result.transaction, result.card, result.remembered)
       run.notified++
     }
   }
@@ -311,13 +311,14 @@ function isFromBank({ from, authenticatedDomain }: MessageHeaders): boolean {
 
 /**
  * Tells the user of a purchase that has just been stored, and of where it leaves the card it was made with. `card`
- * is that card, when the user has added it.
+ * is that card, when the user has added it. `remembered` is whether the user's mark of the merchant placed it.
  */
 async function tellOfPurchase(
   deps: Deps,
   mailbox: Mailbox,
   purchase: Transaction,
   card: Card | undefined,
+  remembered: boolean,
 ): Promise<void> {
   const { cardLast4, amountMinor, currency, merchant } = purchase
   const store = storeFor(deps.db, mailbox.ownerId)
@@ -345,6 +346,6 @@ async function tellOfPurchase(
   const product = productOf(card.product)
   if (!product) return deps.messenger.send(mailbox.chatId, text, marked)
   // On a card with a product, the message ends with where the purchase is sorted, and has the buttons that move it.
-  const { line, buttons } = sortEnd(product, purchase)
+  const { line, buttons } = sortEnd(product, { ...purchase, remembered })
   return deps.messenger.send(mailbox.chatId, `${text}\n${line}`, marked, buttons)
 }
