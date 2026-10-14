@@ -1,13 +1,13 @@
 // Which of a user's cards to pay with at a merchant: where a purchase there would start on each card's product,
 // whether that earns the bonus, and what is left of the cap that it would count against.
 
-import { placing, productOf, startingCategory, unplaced, type Bonus } from '../catalogue'
+import { placing, productOf, unplaced, type Bonus } from '../catalogue'
 import type { Group, Product } from '../catalogue/types'
 import { codesFoundFor } from '../mcc-lookup'
 import type { Card, Pattern, Store } from '../store'
 import { breakDown, leftOf } from './breakdown'
 import { toComeByGroup } from './patterns'
-import { categoryByCodes, WINDOW_LIMIT } from './sorting'
+import { categoryByCodes, startOf, WINDOW_LIMIT } from './sorting'
 import { countedIn, currentWindow } from './window'
 
 /** What a purchase at the merchant would do on one card, in its product's own currency. */
@@ -28,8 +28,9 @@ export interface Option {
  * A pick for each of the cards that is linked to a product, best first: a bonus with some of its cap left, the most
  * left first, then those that are not sure, then a bonus whose cap is used up, then no bonus.
  *
- * One query for each such card: its window's latest purchases, which give both what each group has spent and what
- * the patterns hold back. And the merchant's codes are looked up once, as they are the merchant's and not a card's.
+ * A purchase there is placed as a new one would be: see `startOf`. One query for the user's marks, and one for each
+ * such card: its window's latest purchases, which give both what each group has spent and what the patterns hold
+ * back. And the merchant's codes are looked up once, as they are the merchant's and not a card's.
  */
 export async function bestFor(
   store: Store,
@@ -43,15 +44,16 @@ export async function bestFor(
     const product = productOf(card.product)
     return product ? [{ card, product }] : []
   })
-  const byRules = linked.map(({ product }) => startingCategory(product, { currency: product.homeCurrency, merchant }))
+  const marks = await store.listMarks()
+  const starts = linked.map(({ product }) => startOf(product, marks, { currency: product.homeCurrency, merchant }))
   const asks = linked.some(({ product }, at) =>
-    unplaced(product, { currency: product.homeCurrency, category: byRules[at] }),
+    unplaced(product, { currency: product.homeCurrency, category: starts[at].category }),
   )
   const [codes = []] = asks ? await codesFoundFor([merchant]) : []
 
   const options = await Promise.all(
     linked.map(async ({ card, product }, at): Promise<Option> => {
-      const { group, bonus } = placing(product, byRules[at] ?? categoryByCodes(product, codes) ?? undefined)
+      const { group, bonus } = placing(product, starts[at].category ?? categoryByCodes(product, codes) ?? undefined)
       const window = currentWindow(card, now, timeZone)
       const { start, end } = countedIn(window)
       const purchases = await store.listTransactions(card.last4, start, end, WINDOW_LIMIT)

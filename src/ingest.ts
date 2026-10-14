@@ -5,7 +5,7 @@ import type { AlertEmail } from './parsers/types'
 import type { Card, Store, Transaction } from './store'
 
 export type IngestResult =
-  | { status: 'stored'; transaction: Transaction; card: Card | undefined }
+  | { status: 'stored'; transaction: Transaction; card: Card | undefined; remembered: boolean }
   | { status: 'duplicate' }
   | { status: 'unparsed' }
 
@@ -28,8 +28,8 @@ async function ingest(store: Store, email: AlertEmail): Promise<IngestResult> {
   const transaction = parseAlert(email)
   if (!transaction) return { status: 'unparsed' }
   const card = (await store.listCards()).find((each) => each.last4 === transaction.cardLast4)
-  const [category] = await startingCategoriesOn(card, [transaction])
+  const [{ category, remembered }] = await startingCategoriesOn(store, card, [transaction])
   const id = await store.insertTransaction({ ...transaction, sourceId: email.sourceId, category })
   if (id === null) return { status: 'duplicate' }
-  return { status: 'stored', transaction: { ...transaction, id, category }, card }
+  return { status: 'stored', transaction: { ...transaction, id, category }, card, remembered }
 }

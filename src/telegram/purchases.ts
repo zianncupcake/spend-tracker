@@ -70,6 +70,9 @@ const UNSURE = 'not sure'
 /** What a message says of that note, under its purchases, when a line of them has it. */
 export const UNSURE_NOTE = `Check the amount and the date of each one that is marked "${UNSURE}".`
 
+/** What follows the category of a purchase that its user's mark of the merchant placed: see sortEnd. */
+export const MARKED_BEFORE = 'as you marked this merchant before'
+
 /** A line of a message, with the stretch of it that is to be marked as code. */
 export interface Line {
   text: string
@@ -217,18 +220,20 @@ export function whereSorted(product: Product, category: string | null): string {
 /**
  * The end of a message about one purchase on a card with a product: the line that says where the purchase is, such
  * as "ID 57: Other Spend", and the buttons that move it. There is a button for each category that a purchase can be
- * put in by hand, but for the one that this purchase is in.
+ * put in by hand, but for the one that this purchase is in. `remembered` is for a purchase that has just been added
+ * where its user's mark of the merchant put it: see `startOf` in ../domain/sorting.
  */
 export function sortEnd(
   product: Product,
-  purchase: { id: number; category: string | null },
+  purchase: { id: number; category: string | null; remembered?: boolean },
 ): { line: string; buttons: Button[][] } {
   const current = categoryOf(product, purchase.category)
   // A row to each button, so that no label is cut short on a phone.
   const buttons = choicesOf(product)
     .filter((choice) => choice.key !== current)
     .map(({ key, label }) => [{ text: `Mark as ${label}`, data: `${purchase.id}:${key}` }])
-  return { line: `ID ${purchase.id}: ${whereSorted(product, purchase.category)}`, buttons }
+  const where = whereSorted(product, purchase.category)
+  return { line: `ID ${purchase.id}: ${where}${purchase.remembered ? `, ${MARKED_BEFORE}` : ''}`, buttons }
 }
 
 /** A purchase, with where it is sorted and the buttons that move it. */

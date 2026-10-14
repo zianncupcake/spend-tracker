@@ -30,6 +30,7 @@ it('stores the purchase read from an alert, even before its card is registered',
       parser: 'example-bank',
       category: null,
     },
+    remembered: false,
   })
   expect(await store.listCards()).toEqual([])
   expect(await store.sumByCurrency('1234', ...ANY_TIME)).toEqual([{ currency: 'SGD', amountMinor: 1240, count: 1 }])

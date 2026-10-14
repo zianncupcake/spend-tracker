@@ -139,6 +139,8 @@ that sent the alert and an id of the alert, so that it is not counted twice.</li
 <li>The purchases that you add by hand: the amount, currency, merchant and date that you give each one, with the
 id of the Telegram message that added it, so that it is not counted twice.</li>${reads ? fromPhotos : ''}
 <li>The reward category that each purchase is sorted into.</li>
+<li>The names of the merchants of the purchases that you mark, each with the card product and the category that you
+marked, so that your later purchases there start in it.</li>
 <li>The monthly patterns that you save: the card, the merchant, the amount for a month and the days that you say
 it skips.</li>
 <li>The names of the merchants that the bot has offered you as monthly patterns, each with the last four digits of

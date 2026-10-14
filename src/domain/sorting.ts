@@ -1,7 +1,8 @@
-import { productOf, ruledByCode, startingCategory, unplaced } from '../catalogue'
+import { byCodes, categoryOf, productOf, ruledByCode, startingCategory, unplaced } from '../catalogue'
+import { lettersOf, nameOf } from '../catalogue/merchants'
 import type { Product } from '../catalogue/types'
 import { codesFoundFor } from '../mcc-lookup'
-import type { Card, Store } from '../store'
+import type { Card, Mark, Store, Transaction } from '../store'
 import { countedIn, currentWindow } from './window'
 
 /**
@@ -11,25 +12,67 @@ import { countedIn, currentWindow } from './window'
  */
 export const WINDOW_LIMIT = 200
 
+/** Where a new purchase starts: its category, or null, and whether its user's mark of the merchant put it there. */
+export interface Start {
+  category: string | null
+  remembered: boolean
+}
+
 /**
- * The category that each new purchase on the card starts in, in their order: what is stored for a purchase from an
- * alert and for one that is added by hand alike. Null when the card is linked to no product, and when nothing places
- * the purchase. A rule of the product comes first: see `startingCategory`. A purchase that no rule placed on a
- * product that goes by the codes of merchants, which is when `unplaced` holds, goes by what ../mcc-lookup finds.
+ * Where each new purchase on the card starts, in their order: what is stored for a purchase from an alert and for
+ * one that is added by hand alike. Null when the card is linked to no product, and when nothing places the purchase.
+ * See `startOf` for what comes first. A purchase that is still one that `unplaced` holds for after that goes by what
+ * ../mcc-lookup finds. One query, for the user's marks, however many purchases there are. None on a product that
+ * goes by no codes, which has no marks: see markAs.
  */
 export async function startingCategoriesOn(
+  store: Store,
   card: Card | undefined,
   purchases: { currency: string; merchant: string | null }[],
-): Promise<(string | null)[]> {
+): Promise<Start[]> {
   const product = productOf(card?.product)
-  if (!product) return purchases.map(() => null)
-  const categories = purchases.map((purchase) => startingCategory(product, purchase))
+  if (!product) return purchases.map(() => ({ category: null, remembered: false }))
+  const marks = byCodes(product) ? await store.listMarks() : []
+  const starts = purchases.map((purchase) => startOf(product, marks, purchase))
   const open = purchases.flatMap(({ currency, merchant }, at) =>
-    merchant !== null && unplaced(product, { currency, category: categories[at] }) ? [{ at, merchant }] : [],
+    merchant !== null && unplaced(product, { currency, category: starts[at].category }) ? [{ at, merchant }] : [],
   )
   const codes = await codesFoundFor(open.map(({ merchant }) => merchant))
-  for (const [nth, { at }] of open.entries()) categories[at] = categoryByCodes(product, codes[nth])
-  return categories
+  for (const [nth, { at }] of open.entries()) starts[at].category = categoryByCodes(product, codes[nth])
+  return starts
+}
+
+/**
+ * Where a new purchase starts before anything is looked up for it: where a rule of the product puts it and, for one
+ * that `unplaced` then holds for, where its user marked a purchase at the merchant on the product: see `markAs`.
+ * `marks` are the user's.
+ */
+export function startOf(
+  product: Product,
+  marks: Mark[],
+  purchase: { currency: string; merchant: string | null },
+): Start {
+  const { currency, merchant } = purchase
+  const category = startingCategory(product, purchase)
+  const open = merchant !== null && unplaced(product, { currency, category })
+  const letters = open ? lettersOf(nameOf(merchant)) : undefined
+  const mark = marks.find((each) => each.product === product.key && each.letters === letters)
+  return mark ? { category: mark.category, remembered: true } : { category, remembered: false }
+}
+
+/**
+ * Puts the purchase in the category that its user marked it as, and moves no other that is stored. On a product that
+ * goes by the codes of merchants, the mark is remembered by the merchant's name for the user's later purchases there,
+ * in the place of the one before. It never overrides a rule of the product, as the rules come first: see `startOf`.
+ * On a product that goes by no codes, a mark says how the one purchase was made, and is not remembered.
+ */
+export async function markAs(store: Store, product: Product, purchase: Transaction, category: string): Promise<void> {
+  // Nothing moves a purchase to where it is already. With no category stored for it, that is the default of its
+  // product, which the store would take for a move.
+  if (categoryOf(product, purchase.category) === category) return
+  await store.setCategory(purchase.id, category)
+  const name = purchase.merchant === null ? '' : nameOf(purchase.merchant)
+  if (byCodes(product) && name !== '') await store.remember(product.key, name, category)
 }
 
 /**

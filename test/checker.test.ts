@@ -1094,10 +1094,10 @@ describe('the cost of a run', () => {
     expect(requests).toBe(5 + 1 + 5 + HEADER_CHECKS_PER_RUN + 4 * MESSAGES_PER_RUN)
     expect(requests).toBe(25)
     // The sweep and a look for each of its 5 mailboxes, the sweep of the held purchases, the turn, 5 pages, the page
-    // token, a note of each message turned away, 3 for each purchase (find its card, store it, total the card), and
-    // the mark.
-    expect(queries).toBe(1 + 5 + 1 + 1 + 5 + 1 + turnedAway + 3 * MESSAGES_PER_RUN + 1)
-    expect(queries).toBe(27)
+    // token, a note of each message turned away, 4 for each purchase (find its card, read the user's marks of
+    // merchants, store it, total the card), and the mark.
+    expect(queries).toBe(1 + 5 + 1 + 1 + 5 + 1 + turnedAway + 4 * MESSAGES_PER_RUN + 1)
+    expect(queries).toBe(28)
     expect(Math.max(requests, queries)).toBeLessThan(50)
   })
 })

@@ -75,8 +75,8 @@ export function ruledByCode(product: Product, mcc: number): string | undefined {
  * default category or, on a product that has none, is left for its user to sort.
  *
  * Only a rule of the product gives one. A purchase in another currency is known by that alone. After that come the
- * names that the product lists, and then the code of the merchant, when ./merchants knows it. Nothing that the user
- * chose for another purchase counts: a purchase is where its user put it only when its own button was pressed.
+ * names that the product lists, and then the code of the merchant, when ./merchants knows it. What its user marked
+ * another purchase as comes after this: see `startOf` in ../domain/sorting.
  */
 export function startingCategory(
   product: Product,
@@ -99,8 +99,12 @@ export function startingCategory(
  * in ../telegram/purchases.
  */
 export function unplaced(product: Product, purchase: { currency: string; category: string | null }): boolean {
-  const byCodes = categoriesOf(product).some(({ mccs }) => mccs !== undefined)
-  return byCodes && purchase.category === null && purchase.currency === product.homeCurrency
+  return byCodes(product) && purchase.category === null && purchase.currency === product.homeCurrency
+}
+
+/** Whether the rules of the product go by the codes of merchants. */
+export function byCodes(product: Product): boolean {
+  return categoriesOf(product).some(({ mccs }) => mccs !== undefined)
 }
 
 /**
