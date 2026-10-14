@@ -36,6 +36,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/renamecard <nickname> <new nickname>` | Gives a card another nickname. Nothing else of the card changes. |
 | `/spend` | Shows what you have spent on each card in its current window. |
 | `/spend <nickname>` | Lists every purchase on one card in its current window, with what they come to. |
+| `/best <merchant>` | Says which of your cards to pay with at a merchant: by whether it earns the card's bonus there and what is left of the cap, not by earn rates, which the bot does not know. |
 | `/add <nickname> <amount> <merchant>` | Adds a purchase by hand. Its date can go before the merchant. |
 | `/remove <purchase id>` | Takes a purchase out. |
 | `/products` | Lists the card products whose reward rules are known. |

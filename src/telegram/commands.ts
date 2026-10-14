@@ -4,6 +4,7 @@
 import { productOf } from '../catalogue'
 import { confirmCode, disconnect, startConnect } from '../connect'
 import type { Deps } from '../deps'
+import { bestFor } from '../domain/best'
 import { nextReminder, reminderIn } from '../domain/reminder'
 import { sortByRules } from '../domain/sorting'
 import { cardTotals } from '../domain/totals'
@@ -30,6 +31,7 @@ import {
 import { formatShortDate, formatShortDateTime, maskLast4 } from './format'
 import { inMessages, purchaseLine, sortPrompt, whereSorted } from './purchases'
 import {
+  bestReply,
   cardsReply,
   describeCard,
   heldAgainst,
@@ -47,11 +49,13 @@ import {
   ADD_USAGE,
   ASK,
   ASK_TOO,
+  BEST_USAGE,
   COMMANDS,
   CONNECT_HEADS_UP,
   DO,
   NO_CARDS,
   NO_PATTERNS,
+  NONE_LINKED,
   NO_SIGN_IN,
   NO_SUCH_PATTERN,
   PATTERN_REMOVED,
@@ -185,6 +189,17 @@ export async function reply(
         return spendDetail(store, card, await store.listPatterns(), now(), timezone)
       }
       return spendReply(await cardTotals(store, cards, now(), timezone), timezone)
+    }
+
+    case '/best': {
+      const merchant = args.join(' ')
+      if (merchant === '') return BEST_USAGE
+      const { id, timezone } = await user()
+      const store = storeFor(db, id)
+      const [cards, patterns] = await Promise.all([store.listCards(), store.listPatterns()])
+      if (cards.length === 0) return NO_CARDS
+      const options = await bestFor(store, cards, patterns, merchant, now(), timezone)
+      return options.length > 0 ? bestReply(options) : NONE_LINKED
     }
 
     case '/add': {

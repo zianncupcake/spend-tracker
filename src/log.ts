@@ -37,6 +37,7 @@ export const COMMAND_NAMES = [
   'removecard',
   'renamecard',
   'spend',
+  'best',
   'add',
   'remove',
   'sort',

@@ -1,0 +1,72 @@
+// Which of a user's cards to pay with at a merchant: where a purchase there would start on each card's product,
+// whether that earns the bonus, and what is left of the cap that it would count against.
+
+import { placing, productOf, startingCategory, unplaced, type Bonus } from '../catalogue'
+import type { Group, Product } from '../catalogue/types'
+import { codesFoundFor } from '../mcc-lookup'
+import type { Card, Pattern, Store } from '../store'
+import { breakDown, leftOf } from './breakdown'
+import { toComeByGroup } from './patterns'
+import { categoryByCodes, WINDOW_LIMIT } from './sorting'
+import { countedIn, currentWindow } from './window'
+
+/** What a purchase at the merchant would do on one card, in its product's own currency. */
+export interface Option {
+  card: Card
+  product: Product
+  /** 'depends' when no rule and no code placed the purchase: it counts in `group` until its user marks it. */
+  bonus: Bonus
+  /** The group that it would count in. None on a product that leaves such a purchase not sorted. */
+  group?: Group
+  /** What is left of the group's cap in the card's current window, for a group with one: see `leftOf`. */
+  leftMinor?: number
+  /** What the window has still to spend to reach the product's minimum, when it has one and has not reached it. */
+  neededMinor?: number
+}
+
+/**
+ * A pick for each of the cards that is linked to a product, best first: a bonus with some of its cap left, the most
+ * left first, then those that are not sure, then a bonus whose cap is used up, then no bonus.
+ *
+ * One query for each such card: its window's latest purchases, which give both what each group has spent and what
+ * the patterns hold back. And the merchant's codes are looked up once, as they are the merchant's and not a card's.
+ */
+export async function bestFor(
+  store: Store,
+  cards: Card[],
+  patterns: Pattern[],
+  merchant: string,
+  now: Date,
+  timeZone: string,
+): Promise<Option[]> {
+  const linked = cards.flatMap((card) => {
+    const product = productOf(card.product)
+    return product ? [{ card, product }] : []
+  })
+  const byRules = linked.map(({ product }) => startingCategory(product, { currency: product.homeCurrency, merchant }))
+  const asks = linked.some(({ product }, at) =>
+    unplaced(product, { currency: product.homeCurrency, category: byRules[at] }),
+  )
+  const [codes = []] = asks ? await codesFoundFor([merchant]) : []
+
+  const options = await Promise.all(
+    linked.map(async ({ card, product }, at): Promise<Option> => {
+      const { group, bonus } = placing(product, byRules[at] ?? categoryByCodes(product, codes) ?? undefined)
+      const window = currentWindow(card, now, timeZone)
+      const { start, end } = countedIn(window)
+      const purchases = await store.listTransactions(card.last4, start, end, WINDOW_LIMIT)
+      const breakdown = breakDown(product, purchases)
+      const { homeCurrency, minimumSpendMinor } = product
+      const limit = group?.limitMinor
+      const index = group ? product.groups.indexOf(group) : -1
+      const onCard = patterns.filter(({ cardLast4 }) => cardLast4 === card.last4)
+      const toCome = toComeByGroup(product, onCard, purchases, window, timeZone)
+      const leftMinor =
+        limit === undefined ? undefined : leftOf(limit, breakdown.groups[index].spent, homeCurrency, toCome[index])
+      const needed = (minimumSpendMinor ?? 0) - breakdown.countedMinor
+      return { card, product, bonus, group, leftMinor, neededMinor: needed > 0 ? needed : undefined }
+    }),
+  )
+  const tier = ({ bonus, leftMinor = 0 }: Option) => ({ yes: leftMinor > 0 ? 0 : 2, depends: 1, no: 3 })[bonus]
+  return options.sort((one, other) => tier(one) - tier(other) || (other.leftMinor ?? 0) - (one.leftMinor ?? 0))
+}

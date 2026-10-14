@@ -101,6 +101,7 @@ const RUN_AT_ONCE = [
   'timezone',
   'cards',
   'spend',
+  'best',
   'sort',
   'products',
   'patterns',
@@ -149,9 +150,10 @@ const ADD_QUERIES = 8
 
 /**
  * What a command that is run at once is counted at, but for /spend with no card named, which runs one for each card
- * and two more. None runs more: the most is five, as /addcard with a product runs, which are the user, the adding,
- * the purchases of the card's window, and a statement for each category that a rule of the product gives, of which
- * a product has two at the most.
+ * and two more, and for /best, which runs one for each card and three more: see bestFor in ../domain/best. None runs
+ * more: the most is five, as /addcard with a product runs, which are the user, the adding, the purchases of the
+ * card's window, and a statement for each category that a rule of the product gives, of which a product has two at
+ * the most.
  */
 const COMMAND_QUERIES = 6
 
@@ -578,7 +580,8 @@ async function runAsked(deps: Deps, how: Asking, line: string): Promise<Came> {
   }
   if (!RUN_AT_ONCE.some((each) => each === name)) return declined(NOT_DONE)
 
-  const queries = name === 'spend' && args.length === 0 ? MAX_CARDS + 2 : COMMAND_QUERIES
+  const queries =
+    name === 'spend' && args.length === 0 ? MAX_CARDS + 2 : name === 'best' ? MAX_CARDS + 3 : COMMAND_QUERIES
   if (!take(room, queries)) return 'full'
   const said = await ran(deps, telegramId, messageId, line)
   return said ? { replies: [said], outcome: 'done' } : declined(NOT_DONE)
