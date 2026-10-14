@@ -26,6 +26,7 @@ export const MESSAGES_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/mess
 export const REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
 export const TELEGRAM_URL = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`
 const STORES_URL = 'https://www.check-mcc.sg/api/store/search'
+const HEYMAX_URL = 'https://heymax.ai/api/merchants'
 
 /** What the stand-in for Google and Telegram has been sent, and how it is to answer. */
 interface Outside {
@@ -73,13 +74,15 @@ interface Outside {
    * question is asked. With none left, a request to the provider is one that a test should not have made.
    */
   model: (object | (() => Response | Promise<Response>))[]
-  /** The words that check-mcc.sg was asked for the stores of, oldest first. */
+  /** The words that check-mcc.sg and heymax.ai were asked for the stores of, oldest first. */
   searches: string[]
   /**
    * How check-mcc.sg answers a search, whatever the word: with these stores, each with its `Store` and its `MCC`, or
    * with whatever a function returns.
    */
   stores: object[] | (() => Response | Promise<Response>)
+  /** How heymax.ai answers a search, as `stores` is for check-mcc.sg: each store with its `name` and its `mcc_code`. */
+  heymax: object[] | (() => Response | Promise<Response>)
 }
 
 function newOutside(): Outside {
@@ -102,6 +105,7 @@ function newOutside(): Outside {
     model: [],
     searches: [],
     stores: [],
+    heymax: [],
   }
 }
 
@@ -192,9 +196,9 @@ afterEach(() => {
 })
 
 /**
- * Google, Telegram, the AI provider and check-mcc.sg are reached with the global
- * fetch. This takes its place, so no test signs in to anything real, or asks a
- * real model or the real list of stores anything. Its Google has an account for
+ * Google, Telegram, the AI provider, check-mcc.sg and heymax.ai are reached with the
+ * global fetch. This takes its place, so no test signs in to anything real, or asks a
+ * real model or a real list of stores anything. Its Google has an account for
  * every authorisation code:
  * "code-for-jane@example.test" is exchanged for tokens of the mailbox
  * jane@example.test, and each token names the mailbox it is for. As at Google,
@@ -292,6 +296,11 @@ async function fakeFetch(url: string, init: RequestInit = {}): Promise<Response>
       outside.searches.push(searchParams.get('q') ?? '')
       const { stores } = outside
       return unlessEnded(init.signal, typeof stores === 'function' ? stores() : Response.json({ merchants: stores }))
+    }
+    case HEYMAX_URL: {
+      outside.searches.push(searchParams.get('query') ?? '')
+      const { heymax } = outside
+      return unlessEnded(init.signal, typeof heymax === 'function' ? heymax() : Response.json(heymax))
     }
     default:
       throw new Error('A test made a request it should not have')

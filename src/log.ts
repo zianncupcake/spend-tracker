@@ -109,7 +109,7 @@ export interface Events {
   reminder: { user: number | null; outcome: 'sent' | 'blocked' | 'failed' }
   review: { user: number | null; outcome: 'offered' | 'nothing' | 'blocked' | 'failed'; offered: number }
   alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | null }
-  mcc_lookup: { outcome: 'found' | 'none' | 'failed' }
+  mcc_lookup: { source: 'check-mcc.sg' | 'heymax.ai'; outcome: 'found' | 'none' | 'failed' }
   connect_link: { user: number }
   connect_callback: {
     outcome:

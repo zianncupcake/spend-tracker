@@ -1088,11 +1088,11 @@ describe('the cost of a run', () => {
     expect(outside.fetched).toHaveLength(MESSAGES_PER_RUN)
     expect(outside.telegrams).toHaveLength(MESSAGES_PER_RUN)
     expect(await connectionOf(userId)).toMatchObject({ last_checked_at: now() })
-    // 5 revocations, 1 token, 5 pages, the headers of 10 messages, and a message, a search for the code of its
-    // merchant and a Telegram post for each purchase.
-    expect(outside.searches).toHaveLength(MESSAGES_PER_RUN)
-    expect(requests).toBe(5 + 1 + 5 + HEADER_CHECKS_PER_RUN + 3 * MESSAGES_PER_RUN)
-    expect(requests).toBe(24)
+    // 5 revocations, 1 token, 5 pages, the headers of 10 messages, and a message, a search of each of the two
+    // services for the code of its merchant and a Telegram post for each purchase.
+    expect(outside.searches).toHaveLength(2 * MESSAGES_PER_RUN)
+    expect(requests).toBe(5 + 1 + 5 + HEADER_CHECKS_PER_RUN + 4 * MESSAGES_PER_RUN)
+    expect(requests).toBe(25)
     // The sweep and a look for each of its 5 mailboxes, the sweep of the held purchases, the turn, 5 pages, the page
     // token, a note of each message turned away, 3 for each purchase (find its card, store it, total the card), and
     // the mark.
