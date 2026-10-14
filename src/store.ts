@@ -1,5 +1,5 @@
-// SQL is run only here and in store-connect.ts, store-held.ts, store-mail.ts, store-mcp.ts, store-reminders.ts and
-// store-review.ts.
+// SQL is run only here and in store-connect.ts, store-exchanges.ts, store-held.ts, store-mail.ts, store-mcp.ts,
+// store-reminders.ts and store-review.ts.
 
 import { lettersOf } from './catalogue/merchants'
 import type { WindowRule } from './domain/window'

@@ -1,12 +1,13 @@
 import { runCheck } from './checker'
 import { oauthCallback, oauthStart } from './connect'
-import { depsFor } from './deps'
+import { depsFor, type Deps } from './deps'
 import { log, logFailure } from './log'
 import { serveMcp } from './mcp/server'
 import { userOfToken } from './mcp/tokens'
 import { homePage, privacyPage } from './pages'
 import { sendDueReminder } from './reminders'
 import { reviewDueUser } from './review'
+import { removeOldExchanges } from './store-exchanges'
 import { handleUpdate, type Update } from './telegram/handler'
 
 export default {
@@ -43,15 +44,16 @@ export default {
   },
 
   /**
-   * The cron trigger: every run sends one reminder that is due, makes one user's monthly review that is due, and
-   * then checks one connected mailbox for new bank alerts. None of the three throws, so nothing about the first two
-   * keeps the mail from being checked.
+   * The cron trigger: every run sends one reminder that is due, makes one user's monthly review that is due, deletes
+   * the assistant's exchanges that are past their time, and then checks one connected mailbox for new bank alerts.
+   * None of the four throws, so nothing about the first three keeps the mail from being checked.
    */
   scheduled(_controller, env, ctx): void {
     const deps = depsFor(env)
     ctx.waitUntil(
       sendDueReminder(deps)
         .then(() => reviewDueUser(deps))
+        .then(() => forgetOldExchanges(deps))
         .then(() => runCheck(deps)),
     )
   },
@@ -104,6 +106,15 @@ async function mcpEndpoint(request: Request, env: Env): Promise<Response> {
     return new Response('Unauthorized\n', { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } })
   }
   return serveMcp(deps, user, request)
+}
+
+/** Deletes the assistant's exchanges that are past their time. It does not throw: a failure is logged. */
+async function forgetOldExchanges({ db, now }: Deps): Promise<void> {
+  try {
+    await removeOldExchanges(db, Math.floor(now().getTime() / 1000))
+  } catch (error) {
+    logFailure('exchange_failed', error, { stage: 'forget', user: null })
+  }
 }
 
 /** Constant-time comparison. Hashing first gives both sides the same length. */

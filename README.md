@@ -71,14 +71,16 @@ in a model's words, from the user's purchases. So is one about what earns a card
 Rewards Card include MCC 5812?", or about a product's caps and minimum spend, from the rules of the card products
 below. A message can also ask for what the commands do, as in "add 5.20 lunch to evol as other spend" or "set my
 time zone to Tokyo", and for several things at once. The model only works out what was asked for: the bot's own
-code does it, and the reply is the bot's.
+code does it, and the reply is the bot's. A message is sent with the user's last three questions of the past 30
+minutes and the text of the bot's replies to them, so that a follow-up such as a merchant's name alone is
+understood: they are kept for 30 minutes, and then deleted.
 
 What removes or revokes something waits for a tap on "Do it" under the bot's message: taking out a purchase or a
 card, disconnecting the Gmail, making or removing the token of `/mcp`, starting a new sign-in, saving or removing
 a pattern or a reminder, as one that is saved takes the place of the one that there is, and linking a card to a
 product, as that forgets what was marked by hand under another. So does a change that the model asks for after it
-has looked purchases up, as a merchant's name is text that somebody else wrote. `/delete` is never done for the
-assistant: its user sends `/delete confirm` themselves.
+has looked purchases up, or after an earlier reply that it was sent showed purchases or anything else stored, as a
+merchant's name is text that somebody else wrote. `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
 
 ### Photos
 
@@ -292,9 +294,9 @@ accessed, what is stored and who else handles it. What it says of the AI provide
 
 - Nothing is sent to the AI provider unless a user asks a question or, where the bot reads photos, sends a photo.
 - With every question go the user's time zone, the day and the time there, the nicknames of their cards and the
-  names of the reward categories that their purchases can be sorted into. Details of their purchases are sent only
-  as the answering calls for them: the id, the time, the last four digits of the card, the amount, the currency,
-  the merchant and the reward category.
+  names of the reward categories that their purchases can be sorted into, and their last few questions of the past
+  30 minutes with the bot's answers. Details of their purchases are sent only as the answering calls for them: the
+  id, the time, the last four digits of the card, the amount, the currency, the merchant and the reward category.
 - A photo is sent with its caption, with the user's time zone and with the nicknames and category names of their
   cards. The photo is not stored.
 
@@ -353,6 +355,7 @@ There are two places to read the log:
 | `confirm_press` | A press of "Do it" or "Cancel" under a message that asked before a command was run. |
 | `photo` | A photo, as its reading ends: what came of it, and how many purchases were read, stored and held. |
 | `held_press` | A press of a button under purchases that the bot asked about before adding them. |
+| `exchange_failed` | A question and its reply that could not be kept for the assistant once the reply was sent (`keep`), or a scheduled run that could not delete those older than 30 minutes (`forget`), before its `check` line. |
 | `telegram_failed` | A request to Telegram that failed, with its `method` and the `status` of the answer. One that Telegram did not answer in 5 seconds has the `error` `TimeoutError`. |
 | `ai_call` | A request to the AI provider, however it ended: how long it took, the status of the answer and the provider's count of tokens. |
 | `mcp_tool` | A call of a tool through the MCP endpoint. |
@@ -426,7 +429,7 @@ a minute with no `check` line, or an `update` that was `deferred` with nothing a
   window, and still totals them all. What was spent at a pattern's merchant is counted from those 200.
 - A purchase that was taken out cannot be put back, and its alert is not read again. It can be added again by hand.
 - The assistant does four things for one message at the most, and three when it looked purchases up first. A
-  message for it can be 500 characters long, and nothing of an earlier message or answer is kept.
+  message for it can be 500 characters long, and of an earlier reply it is sent the first 1,000 characters.
 - An answer is a model's, and can be wrong. What the bot's tables show is added up by the service, and is of each
   card's current window only. Any other sum, such as what was spent at one merchant or in an earlier month, is the
   model's own, over the 50 purchases at the most that a listing gives it.

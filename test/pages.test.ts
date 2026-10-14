@@ -45,7 +45,9 @@ describe('the privacy policy', () => {
   it('says nothing of questions that are asked, or of an AI provider, where the bot has no assistant', async () => {
     const text = await policy(false)
 
-    for (const words of [QUESTIONS, 'AI provider']) expect(text).not.toContain(words)
+    for (const words of [QUESTIONS, 'AI provider', '30 minutes']) expect(text).not.toContain(words)
+    // Where it has one, the section on questions says how long the last few are kept.
+    expect(await policy(true)).toContain('are kept for 30 minutes')
   })
 
   it('has a section on photos too, and lists their purchases as stored, where the bot reads photos', async () => {

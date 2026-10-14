@@ -283,9 +283,9 @@ describe('a call of a tool that acts', () => {
 
     expect(answer).toEqual(acting([{ kind: 'show', card: 'evol' }]))
     expect(posted).toHaveBeenCalledTimes(1)
-    // Nothing was read for the other two calls: the one query is for the cards that the model is told of. Neither
-    // is counted, and neither is logged.
-    expect(queried).toHaveBeenCalledTimes(1)
+    // Nothing was read for the other two calls: the two queries are for the cards and the recent exchanges that the
+    // model is told of. Neither call is counted, and neither is logged.
+    expect(queried).toHaveBeenCalledTimes(2)
     expect(taken).toEqual({ requests: 1, tool_calls: 1 })
     expect(logged.events('assistant_tool')).toEqual([toolLine(user, 'show_spending', 'ok')])
   })

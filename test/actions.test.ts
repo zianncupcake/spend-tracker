@@ -739,7 +739,7 @@ describe('what a message asks for next, once the first thing that it asked for i
 
   it('is asked for with nothing read again, after a command that changes neither the cards nor the user', async () => {
     const chat = await chatWithCard()
-    const next = goingOn([command('/cards')], { status: 'answered', text: 'Made-up words.' })
+    const next = goingOn([command('/cards')], { status: 'answered', text: 'Made-up words.', afterReading: false })
 
     await told(chat)
 

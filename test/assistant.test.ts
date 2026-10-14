@@ -267,17 +267,6 @@ describe('a question', () => {
     expect(linesOf(answer)).toEqual(['I can only answer questions about your card spending.'])
   })
 
-  it('is asked on its own: nothing of the question before it, or of its answer, is sent again', async () => {
-    const chat = await chatWithCard()
-    outside.model = [saying('The first answer.'), saying('The second answer.')]
-
-    await chat.rich('The first question?')
-    await chat.rich('And the second?')
-
-    expect(messagesOf(2)).toEqual([SYSTEM, user('And the second?')])
-    expect(JSON.stringify(messagesOf(2))).not.toMatch(/The first (question|answer)/)
-  })
-
   it('is answered for somebody who has never sent the bot anything else, who then has a user row', async () => {
     const chat = openChat()
     outside.model = [calling(['call_1', 'find_purchases']), saying('You have no purchases yet.')]
@@ -558,9 +547,9 @@ describe('the model', () => {
     expect(await chat.say('How much have I spent?')).toBe(NOT_ANSWERED)
 
     expect(outside.completions).toHaveLength(4)
-    // The calls of the fourth message are not answered: the user, the cards that the model is told of, and three
-    // listings of two queries each.
-    expect(queried).toHaveBeenCalledTimes(1 + 1 + 3 * 2)
+    // The calls of the fourth message are not answered: the user, the cards and the recent exchanges that the model
+    // is told of, and three listings of two queries each.
+    expect(queried).toHaveBeenCalledTimes(1 + 1 + 1 + 3 * 2)
     // The log has why, with the four requests that the question took and the three calls that were answered.
     const failure = { error: 'Error', reason: 'still_calling_tools' }
     expect(logged.events('question')).toEqual([
@@ -581,7 +570,7 @@ describe('the model', () => {
     ])
   })
 
-  it('has six of its calls of tools answered at the most, which keeps a question to 14 queries', async () => {
+  it('has six of its calls of tools answered at the most, which keeps a question to 17 queries', async () => {
     const chat = await chatWithCard()
     const listing = (id: string): [string, string, object] => [id, 'find_purchases', { limit: 1 }]
     outside.model = [
@@ -601,10 +590,11 @@ describe('the model', () => {
     expect(listed).toEqual([true, true, true, false])
     expect(messagesOf(3).at(-1)).toEqual(toolResult('call_7', 'find_purchases', refused))
     expect(messagesOf(4).at(-1)).toEqual(toolResult('call_8', 'find_purchases', refused))
-    // The user, the cards that the model is told of, and the cards and the purchases for each of the 6 listings. A
-    // request may run 50. The logging of all this asks the database nothing.
-    expect(queried).toHaveBeenCalledTimes(1 + 1 + 6 * 2)
-    expect(queried).toHaveBeenCalledTimes(14)
+    // The user, the cards and the recent exchanges that the model is told of, the cards and the purchases for each
+    // of the 6 listings, and the two that keep the exchange. A request may run 50. The logging of all this asks the
+    // database nothing.
+    expect(queried).toHaveBeenCalledTimes(1 + 1 + 1 + 6 * 2 + 2)
+    expect(queried).toHaveBeenCalledTimes(17)
     expect(outside.completions).toHaveLength(4)
     // The log has all eight calls, the last two as calls that the model was told were wrong, and the question as
     // one that took them all.
@@ -1057,9 +1047,9 @@ describe('what the log has of a question', () => {
       { ...called, tool: 'find_purchases', outcome: 'ok', ms: 30 },
     ])
     // The question took three requests and the four calls, and as long as they did after the user's row was read,
-    // and the cards that the model is told of.
+    // and the cards and the recent exchanges that the model is told of, and then the keeping of the exchange.
     expect(logged.events('question')).toEqual([
-      { ...questionLine(userId), requests: 3, tool_calls: 4, ms: 15 + 15 + 30 + 15 + 30 },
+      { ...questionLine(userId), requests: 3, tool_calls: 4, ms: 15 + 15 + 15 + 30 + 15 + 30 + 30 },
     ])
     // A call that the model is told is wrong is no failure of the service's, and nothing here is.
     expect(logged.failures()).toEqual([])

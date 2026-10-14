@@ -84,9 +84,11 @@ export function privacyPage(operator: Operator, assistant: boolean, photos: bool
 code of a sign-in. To answer it, your question is sent to an AI provider chosen by ${name}, which produces the
 answer. With every question go your time zone, the day and the time that it is there, the nicknames of your cards
 and the names of the reward categories that their purchases can be sorted into, whether or not the question needs
-them. Other details are sent only as the answering calls for them, and they are of your purchases: the id, the
-time, the last four digits of the card, the amount, the currency, the merchant and the reward category. Nothing is
-sent to the AI provider ${unless}.</p>
+them. So that the assistant can follow a conversation, your last few questions and the bot's answers to them are
+kept for 30 minutes, and go with every question that you ask in that time. They are then deleted. Other details
+are sent only as the answering calls for them, and they are of your purchases: the id, the time, the last four
+digits of the card, the amount, the currency, the merchant and the reward category. Nothing is sent to the AI
+provider ${unless}.</p>
 <p>The AI provider also works out what you ask the bot to do in such a message, such as adding a purchase or
 changing your time zone, and the bot then does it. What removes or revokes something, such as taking a purchase
 out or disconnecting your Gmail, is done only after you confirm it.</p>
@@ -99,6 +101,9 @@ and with the nicknames and category names of your cards. The provider reads the 
 adds them. The photo is not stored. When the bot cannot tell which card the purchases were made with, or is not
 sure of an amount or a date, it asks you before it adds them.</p>
 `
+  const exchanges = `
+<li>Your last few questions to the bot and its answers to them, for 30 minutes, so that the assistant can follow a
+conversation. They are then deleted.</li>`
   const fromPhotos = `
 <li>The purchases read from a photo that you send the bot, which are stored as the purchases that you add by hand
 are. The photo itself is not stored.</li>
@@ -117,7 +122,7 @@ cards, and nothing unless you ask a question.</li>`
   return page(
     'Privacy policy - Spend Tracker',
     `<h1>Privacy policy</h1>
-<p>Last updated: 14 October 2026</p>
+<p>Last updated: 15 October 2026</p>
 <p>Spend Tracker is a Telegram bot that keeps a running total of what you spend on each credit card. It is run
 by ${name}. For any question about this policy or about your data, contact: ${contact}</p>
 
@@ -151,7 +156,7 @@ again. It is left out of every total and list, and is deleted with everything el
 again.</li>
 <li>Your Gmail address.</li>
 <li>An encrypted key that lets the service read your mail until you disconnect.</li>
-<li>A hash of your assistant access token, if you create one.</li>
+<li>A hash of your assistant access token, if you create one.</li>${assistant ? exchanges : ''}
 </ul>
 <p>The text of an email is never stored.</p>
 <p>The service also keeps a log of what it did, for finding faults. A line of the log holds the service's own

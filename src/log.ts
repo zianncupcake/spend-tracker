@@ -211,6 +211,7 @@ export interface Events {
     ms: number
   }
   held_press: { user: number; outcome: 'added' | 'skipped' | 'refused'; held: number; stored: number }
+  exchange_failed: { stage: 'keep' | 'forget'; user: number | null }
   telegram_failed: {
     method:
       | 'sendMessage'

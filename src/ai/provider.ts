@@ -55,12 +55,12 @@ export interface ToolCall {
 export type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
 
 /**
- * A message of a conversation, as the API has it. The model's own message is one that calls tools, as that is the
- * only kind that is ever sent back to it. What each tool answered follows it, under the id of its call. A user's
- * message that holds an image is made of parts.
+ * A message of a conversation, as the API has it. The model's own message is sent back to it as one that calls
+ * tools, or as the text of an earlier reply. What each tool answered follows its call, under the id of the call. A
+ * user's message that holds an image is made of parts.
  */
 export type ChatMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system' | 'user' | 'assistant'; content: string }
   | { role: 'user'; content: ContentPart[] }
   | { role: 'assistant'; content?: string; tool_calls: ToolCall[] }
   | { role: 'tool'; tool_call_id: string; name: string; content: string }
