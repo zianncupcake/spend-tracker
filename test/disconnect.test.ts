@@ -1,5 +1,7 @@
+import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { refreshAccessToken } from '../src/google/gmail'
+import { exchangeStoreFor } from '../src/store-exchanges'
 import { NO_SIGN_IN } from '../src/telegram/texts'
 import {
   attemptOf,
@@ -134,11 +136,14 @@ describe('/delete confirm', () => {
   it('revokes the connection at Google and deletes it with the user', async () => {
     const chat = await connectedChat('jane@example.test')
     const userId = await chat.userId()
+    const exchanges = exchangeStoreFor(env.DB, userId)
+    await exchanges.keep({ question: 'A question?', reply: 'An answer.', read: false }, 0)
 
     expect(await chat.say('/delete confirm')).toContain('has been deleted')
 
     expect(outside.revoked).toEqual([outside.issued[0]])
     expect(await rowsOwnedBy(userId)).toEqual({ users: 0, cards: 0, transactions: 0 })
+    expect(await exchanges.recent(0)).toEqual([])
     expect(await connectionOf(userId)).toBeNull()
   })
 

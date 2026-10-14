@@ -57,6 +57,8 @@ export interface Deferred<Outcome extends string> {
   late(): Made<Outcome>
   /** What its user is told when the reply could not be made, or could not be sent. */
   failed(): string
+  /** What is done once the reply is sent whole, with the replies that were sent. It does not throw. */
+  sent?(replies: Sent[]): Promise<void>
   /**
    * Writes the line that the log has of the reply, once it has ended: after `ms` milliseconds, and with what went
    * wrong, when anything did.
@@ -160,6 +162,7 @@ export async function sendLater<Outcome extends string>(
           if ('rich' in each && asText.length > 0) refused++
         }
         noted.sent = rich > 0 && refused === 0 ? 'rich' : 'text'
+        await reply.sent?.(replies)
       }
       noted.outcome = came.outcome
     } catch (error) {

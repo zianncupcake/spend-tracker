@@ -25,6 +25,7 @@ import { Failure, log, logFailure, TOOL_NAMES, type Events } from '../log'
 import { LIST_SCHEMA, TRANSACTIONS } from '../mcp/server'
 import { DEFAULT_LIMIT, listTransactions, ToolError, type ListArguments } from '../mcp/tools'
 import { storeFor, type Store, type User } from '../store'
+import { EXCHANGE_SECONDS, exchangeStoreFor } from '../store-exchanges'
 import { asPhotoCard, categoryKey, checkPurchases, describeCards, type PhotoCard, type PhotoReading } from './photo'
 import { complete, ProviderError, type AiProvider, type ChatMessage, type Tool, type ToolCall } from './provider'
 
@@ -50,8 +51,8 @@ const MAX_LISTED = 50
 /**
  * How many calls of the tools that read are answered for one question. The model can make several in one message. A
  * listing is two queries, and card_rules runs none, so six calls are twelve at the most. One more query reads the
- * cards that the model is told of before the question: so a question stays well inside the 50 queries that a request
- * may run. A call of a tool that acts reads nothing, and is none of these.
+ * cards that the model is told of before the question, and one the user's recent exchanges: so a question stays well
+ * inside the 50 queries that a request may run. A call of a tool that acts reads nothing, and is none of these.
  */
 const MAX_TOOL_CALLS = 6
 
@@ -266,15 +267,17 @@ export const MAX_ACTIONS = 5
 
 /** What came of a question. `error` is what went wrong with one that was not answered, for whoever logs that. */
 export type Answer =
-  | { status: 'answered'; text: string }
+  /** `afterReading` is as it is for the answer below, as of the end of the answering. */
+  | { status: 'answered'; text: string; afterReading: boolean }
   /**
    * The user asked for things to be done, and nothing of them is done yet. There is at least one action.
    *
    * `afterReading` is whether find_purchases had given the model anything in this conversation before the message
-   * that asks for the actions. Text inside what it returns can be somebody else's, as a merchant's name is, so
-   * what the model asks for after it has read is trusted less than what it makes of the user's words alone. What
-   * the model is told came of an action is no such text, and is no reading: see `next`. Nor is what card_rules
-   * returns: see `toolsFor`.
+   * that asks for the actions, or the conversation began with an earlier exchange whose reply can hold what a tool
+   * or a command read: see Exchange in ../store-exchanges. Text inside what it returns can be somebody else's, as a
+   * merchant's name is, so what the model asks for after it has read is trusted less than what it makes of the
+   * user's words alone. What the model is told came of an action is no such text, and is no reading: see `next`. Nor
+   * is what card_rules returns: see `toolsFor`.
    *
    * `dropped` is how many calls of that message asked for something to be done and are not among the actions:
    * those that did not fit, and those past MAX_ACTIONS.
@@ -404,14 +407,23 @@ async function converse(
 ): Promise<Answer> {
   // Everything that is read for the question comes through this store, so none of it is another user's.
   const store = storeFor(deps.db, user.id)
-  // The model is told of the user's cards before the question, which is one query for every question.
+  // The model is told of the user's cards before the question, and of their recent exchanges with it: one query
+  // each, for every question.
   const cards = (await store.listCards()).map(asPhotoCard)
+  const since = Math.floor(began.getTime() / 1000) - EXCHANGE_SECONDS
+  const earlier = await exchangeStoreFor(deps.db, user.id).recent(since)
   const messages: ChatMessage[] = [
     { role: 'system', content: systemMessage(began, user.timezone, cards) },
+    ...earlier.flatMap(({ question, reply }): ChatMessage[] => [
+      { role: 'user', content: question },
+      { role: 'assistant', content: reply },
+    ]),
     { role: 'user', content: question },
   ]
   const asked: Asked = { question, cards, timeZone: user.timezone, now: began }
   const tools = toolsFor(deps, user, store, asked, taken)
+  // Only an earlier reply that can hold a merchant's name makes what the model asks for now trusted less.
+  const afterReading = () => earlier.some((exchange) => exchange.read) || tools.hasRead()
   // How many times the model has been asked over the question.
   let calls = 0
   const timeLeft = () => began.getTime() + ANSWER_TIME - deps.now().getTime()
@@ -428,7 +440,8 @@ async function converse(
         if (content.trim() === '') throw new Failure('no_answer', 'The model gave no answer')
         // An answer that ran into the limit on its length ends wherever that fell, which can be halfway through an
         // amount. So it ends with an ellipsis, as one that is cut to what Telegram takes does.
-        return { status: 'answered', text: cutShort ? `${content.trimEnd()}…` : content }
+        const text = cutShort ? `${content.trimEnd()}…` : content
+        return { status: 'answered', text, afterReading: afterReading() }
       }
 
       // A message that asks for anything to be done is handed back, whichever of the model's messages it is, and
@@ -459,7 +472,7 @@ async function converse(
           status: 'acting',
           actions: [...wanted.values()].map((each) => each.action),
           // Whatever find_purchases read for the model, it read before this message: none of its calls was answered.
-          afterReading: tools.hasRead(),
+          afterReading: afterReading(),
           dropped: acting.length - wanted.size,
           more,
         }
@@ -519,6 +532,8 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[]): string 
     `It is now ${time} on ${weekday}, ${day}, in the user's time zone, which is ${timeZone}. The tools give ` +
       'instants in UTC: say dates and times as that time zone has them.',
     "Amounts come from the alert emails of the user's bank, or were entered by the user, so they are estimates.",
+    'Messages of the last 30 minutes come before the question, for what the user refers to. Figures in them may be ' +
+      'out of date: take figures from the tools.',
     describeCards(cards),
     'When the user asks for something to be done, call the tool for it and write nothing else. Only a tool does ' +
       'anything: never say that something was done.',

@@ -7,6 +7,7 @@ import type { Deps } from '../deps'
 import { markAs } from '../domain/sorting'
 import { CONFIRMABLE, Failure, log, logFailure, type Events } from '../log'
 import { findOrCreateUser, MAX_CARDS, storeFor, type User } from '../store'
+import { exchangeStoreFor } from '../store-exchanges'
 import { addRead, readBefore, type Adding } from './adding'
 import type { RichBlock } from './api'
 import { commandIn, ran } from './commands'
@@ -61,9 +62,10 @@ interface Asking {
   doing: Doing
   room: Room
   /**
-   * Whether find_purchases had given the model anything before it asked for these: see `Answer` in
-   * ../ai/assistant. What it returns holds text that somebody else wrote, as the name of a merchant is, and a
-   * model can take such text for its user's wish. So what it asks for after it has read is trusted less: see act.
+   * Whether find_purchases had given the model anything before it asked for these, or the model was sent earlier
+   * exchanges: see `Answer` in ../ai/assistant. Either holds text that somebody else wrote, as the name of a merchant
+   * is, and a model can take such text for its user's wish. So what it asks for after it has read is trusted less:
+   * see act.
    */
   afterReading: boolean
 }
@@ -133,12 +135,12 @@ const ASKED_FIRST = CONFIRMABLE.filter((name) => !CHANGING.some((changing) => ch
  * time, and what is read again between two of them: see actInRounds. An action that there is no room left for is
  * not begun, and neither is any after it: see act.
  *
- * A request may run 50 queries, and the answering runs its own. Two of them are run for every message: one for the
- * user, and one for their cards. The calls of the tools that read can run twelve besides, whether they give the
- * model a listing or are told what is wrong with them: six of them are answered for a question, however many
- * answers it has, and a listing is two queries. See MAX_TOOL_CALLS in ../ai/assistant. That is 14 at the most, so
- * the actions leave a request inside the 50, whether or not anything was read for the model before it asked for
- * them.
+ * A request may run 50 queries, and the answering runs its own. Five of them are run for every message that is
+ * answered: one for the user, one for their cards, one for their recent exchanges, and two that keep this one once
+ * its reply is sent. The calls of the tools that read can run twelve besides, whether they give the model a listing
+ * or are told what is wrong with them: six of them are answered for a question, however many answers it has, and a
+ * listing is two queries. See MAX_TOOL_CALLS in ../ai/assistant. That is 17 at the most, so the actions leave a
+ * request inside the 50, whether or not anything was read for the model before it asked for them.
  */
 const ACTION_QUERIES = 30
 
@@ -187,6 +189,8 @@ export function ask(
   // Until more is learnt of it, the question is one that failed, of a user who is not known, with nothing said.
   const asked: Asked = { user: null, outcome: 'failed', sent: 'none', placeholder: false, requests: 0, tool_calls: 0 }
   const doing: Doing = { stored: 0, held: 0, kept: false, late: false, begun: false }
+  // Whether the reply can hold text that somebody else wrote, which is kept with the exchange: see Exchange.
+  let read = false
   // What the answering comes to when its time is up. Once the doing of what was asked for has begun, its user is
   // not told to try again: see DONE_NO_REPLY.
   const outOfTime = (): Made<Asked['outcome']> => ({
@@ -204,6 +208,7 @@ export function ask(
       const result = await answerQuestion(deps, ai, user, question, asked)
       switch (result.status) {
         case 'answered':
+          read = result.afterReading
           return { outcome: 'answered', rich: answered(result.text) }
         case 'acting': {
           asked.actions = result.actions.length
@@ -214,6 +219,8 @@ export function ask(
           await instead(DOING)
           const room: Room = { left: ACTION_QUERIES }
           const replies = await actInRounds(deps, { user, telegramId, messageId, doing, room }, result, asked)
+          // The replies to actions are the bot's, and can show a merchant's name, as a table of purchases does.
+          read = true
           return replies ? { outcome: 'acted', replies } : outOfTime()
         }
         case 'busy':
@@ -229,6 +236,9 @@ export function ask(
       return outOfTime()
     },
     failed: () => (doing.begun ? DONE_NO_REPLY : NOT_ANSWERED),
+    async sent(replies) {
+      if (asked.user !== null) await keepExchange(deps, asked.user, question, replies, read)
+    },
     record(ms, wrong) {
       const line = { ...asked, ms }
       // Nothing of an error's message is logged: it could quote the question, or what is stored.
@@ -586,6 +596,28 @@ async function runAsked(deps: Deps, how: Asking, line: string): Promise<Came> {
   if (!take(room, queries)) return 'full'
   const said = await ran(deps, telegramId, messageId, line)
   return said ? { replies: [said], outcome: 'done' } : declined(NOT_DONE)
+}
+
+/**
+ * Keeps the question with the plain text of its replies, for the questions that the user asks after it: see
+ * ../store-exchanges. It does not throw: the replies are sent by then, and a failure is logged.
+ */
+async function keepExchange(
+  deps: Deps,
+  userId: number,
+  question: string,
+  replies: Sent[],
+  read: boolean,
+): Promise<void> {
+  const reply = replies
+    .flatMap((each) => ('rich' in each ? each.asText() : each))
+    .map((message) => message.text)
+    .join('\n')
+  try {
+    await exchangeStoreFor(deps.db, userId).keep({ question, reply, read }, Math.floor(deps.now().getTime() / 1000))
+  } catch (error) {
+    logFailure('exchange_failed', error, { stage: 'keep', user: userId })
+  }
 }
 
 /**
