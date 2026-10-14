@@ -19,6 +19,7 @@ const MERCHANTS: [name: string, mcc: number][] = [
   ['tiktok', 5399],
   ['uniqlo', 5651],
   ['fairprice', 5411],
+  ['ntuc', 5411],
   ['scarlett supermarket', 5411],
   ['7-eleven', 5499],
   ['grab', 4121],
