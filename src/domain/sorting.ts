@@ -28,13 +28,17 @@ export async function startingCategoriesOn(
     merchant !== null && unplaced(product, { currency, category: categories[at] }) ? [{ at, merchant }] : [],
   )
   const codes = await codesFoundFor(open.map(({ merchant }) => merchant))
-  open.forEach(({ at }, nth) => {
-    // The stores that were found can differ in their codes. The purchase is placed only when the product puts them
-    // all in one category.
-    const [category, ...others] = new Set(codes[nth].map((code) => ruledByCode(product, code)))
-    if (others.length === 0) categories[at] = category ?? null
-  })
+  for (const [nth, { at }] of open.entries()) categories[at] = categoryByCodes(product, codes[nth])
   return categories
+}
+
+/**
+ * The category that the product puts a merchant in by the codes that ../mcc-lookup found for it. The stores that
+ * were found can differ in their codes, so it is null unless the product puts them all in one category.
+ */
+export function categoryByCodes(product: Product, codes: number[]): string | null {
+  const [category, ...others] = new Set(codes.map((code) => ruledByCode(product, code)))
+  return others.length === 0 ? (category ?? null) : null
 }
 
 /**

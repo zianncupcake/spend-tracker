@@ -31,6 +31,8 @@ The amount can have a currency before it, as in USD 12.50. The date is written Y
 A day of the card's current window, up to today, can be written D/M or D/M/YY too.
 Any other D/M is read as part of the merchant.`
 
+export const BEST_USAGE = 'Usage: /best <merchant>'
+
 export const SORT_USAGE = 'Usage:\n/sort <nickname>\n/sort <purchase id>'
 
 export const PRODUCT_USAGE = 'Usage:\n/product <nickname> <product key>\n/product <nickname> none'
@@ -62,6 +64,7 @@ export const COMMANDS = `Commands:
 /renamecard <nickname> <new nickname> - give a card another nickname
 /spend - what you have spent on each card in its current window
 /spend <nickname> - every purchase on one card in its current window
+/best <merchant> - which of your cards to pay with there, by its bonus and what is left of its cap
 /add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant
 /remove <purchase id> - take a purchase out
 /products - list the card products whose reward rules are known
@@ -227,6 +230,15 @@ export const PHOTO_READ_NO_REPLY =
   'other messages before you send the photo again.'
 
 export const NO_CARDS = `You have no cards yet. Add one with:\n${ADD_CARD_USAGE}`
+
+export const NONE_LINKED =
+  'None of your cards is linked to a product, so the bot does not know where a purchase would earn a bonus. To ' +
+  'link one, send /product <nickname> <product key>.'
+
+/** What /best says first: the card to use, and what the order goes by. */
+export function useCard(card: string): string {
+  return `Use ${card}. Ranked by bonus and caps (the bot does not know earn rates):`
+}
 
 export const TOO_MANY_CARDS =
   `You have ${MAX_CARDS} cards, which is as many as can be tracked. To add another, first remove one with ` +

@@ -337,6 +337,15 @@ describe('a command that the assistant gives to be run', () => {
     )
   })
 
+  it('is run at once when it is /best, which only shows', async () => {
+    const chat = await chatWithCard()
+    acting(command('/best SAMPLE EATERY'))
+
+    const { texts } = await told(chat)
+
+    expect(texts.map((message) => message.text)).toEqual([await chat.say('/best SAMPLE EATERY')])
+  })
+
   it('is answered with the table that the command replies with, when it is one that shows things in a table', async () => {
     const chat = await chatWithCards()
     const userId = await chat.userId()

@@ -12,7 +12,7 @@
 
 import { categoryName, categoryOf, choicesOf } from '../catalogue'
 import type { Product } from '../catalogue/types'
-import { perCurrency, type Amount, type Breakdown } from '../domain/breakdown'
+import { leftOf, perCurrency, type Amount, type Breakdown } from '../domain/breakdown'
 import { MANUAL, type Card, type Transaction } from '../store'
 import type { HeldPurchase } from '../store-held'
 import type { Button, MessageEntity, Outgoing, RichBlock, TableCell } from './api'
@@ -430,9 +430,8 @@ function sumsOf({ spent, limitMinor, toComeMinor = 0 }: Section, homeCurrency: s
   const totals = spent.length > 0 ? spent : [{ currency: homeCurrency, amountMinor: 0 }]
   const sums = totals.map((total) => ({ ...total, label: 'Total' }))
   if (limitMinor === undefined) return sums
-  // A limit is in the product's own currency, so what is held against it is what was spent in that currency. What a
-  // purchase in another currency comes to in it is not known here.
-  const left = limitMinor - (spent.find(({ currency }) => currency === homeCurrency)?.amountMinor ?? 0) - toComeMinor
+  // What a purchase in another currency comes to in the product's own is not known here.
+  const left = leftOf(limitMinor, spent, homeCurrency, toComeMinor)
   return [
     ...sums,
     { currency: homeCurrency, amountMinor: limitMinor, label: 'Cap' },

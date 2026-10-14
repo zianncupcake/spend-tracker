@@ -2,6 +2,7 @@
 // a card's window in full, the lines that name a card or a pattern, and what is said when the AI provider is busy.
 
 import { productOf, products } from '../catalogue'
+import type { Option } from '../domain/best'
 import { breakDown, perCurrency } from '../domain/breakdown'
 import { groupFor, toComeByGroup } from '../domain/patterns'
 import { WINDOW_LIMIT } from '../domain/sorting'
@@ -38,7 +39,7 @@ import {
 } from './purchases'
 import type { Tabled } from './sending'
 import { DEFAULT_CURRENCY } from './shared'
-import { HOLDS_NOTHING, STATUS_DAYS } from './texts'
+import { HOLDS_NOTHING, STATUS_DAYS, useCard } from './texts'
 
 /**
  * What a question is answered with when the AI provider has had as many requests as it takes for now. It says when
@@ -59,6 +60,20 @@ function describeWait(seconds: number): string {
   if (seconds < 3600) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
   const hours = Math.ceil(seconds / 3600)
   return `${hours} ${hours === 1 ? 'hour' : 'hours'}`
+}
+
+/** What /best answers with: the card to use, and a line for each card, best first. `options` has one at the least. */
+export function bestReply(options: Option[]): string {
+  const lines = options.map(({ card, product, bonus, group, leftMinor, neededMinor }) => {
+    const money = (minor: number) => formatMoney(minor, product.homeCurrency)
+    const where = group?.name ?? 'not sorted'
+    const unsure = `not sure, counts in ${where} until marked`
+    const said = [{ yes: `bonus in ${where}`, no: `no bonus, ${where}`, depends: unsure }[bonus]]
+    if (leftMinor !== undefined) said.push(leftMinor > 0 ? `${money(leftMinor)} of the cap left` : 'cap used up')
+    if (neededMinor !== undefined) said.push(`${money(neededMinor)} more to reach the minimum spend`)
+    return `${label(card)}: ${said.join(', ')}`
+  })
+  return [useCard(label(options[0].card)), ...lines].join('\n')
 }
 
 export function label(card: Card): string {

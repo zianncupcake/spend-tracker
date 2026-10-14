@@ -119,19 +119,27 @@ export function rulesFor(asked: { mcc?: number; merchant?: string }) {
     products: products.map((product) => {
       const byName = merchant === undefined ? undefined : ruledByName(product, merchant)
       const byCode = mcc === undefined ? undefined : ruledByCode(product, mcc)
-      const ruled = byName ?? byCode
-      const key = categoryOf(product, ruled ?? null)
-      const group = groupOf(product, key)
-      const limit = group?.limitMinor
+      const { group, bonus } = placing(product, byName ?? byCode)
       return {
         product: product.name,
         group: group?.name ?? null,
-        monthlyCap: money(limit, product.homeCurrency),
-        bonus: ruled === undefined ? 'depends' : limit === undefined ? 'no' : 'yes',
+        monthlyCap: money(group?.limitMinor, product.homeCurrency),
+        bonus,
       }
     }),
   }
 }
+
+/**
+ * The group that a purchase in the product's own currency counts in, when a rule put it in the category `ruled` or
+ * no rule did, and whether that earns the bonus: see `rulesFor`.
+ */
+export function placing(product: Product, ruled: string | undefined): { group?: Group; bonus: Bonus } {
+  const group = groupOf(product, categoryOf(product, ruled ?? null))
+  return { group, bonus: ruled === undefined ? 'depends' : group?.limitMinor === undefined ? 'no' : 'yes' }
+}
+
+export type Bonus = 'yes' | 'no' | 'depends'
 
 /**
  * What each product's terms set for a month, in the order of the catalogue: its minimum spend, and the limit of each

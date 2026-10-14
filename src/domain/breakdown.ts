@@ -26,8 +26,11 @@ export function perCurrency(amounts: Amount[]): Amount[] {
   return [...totals].map(([currency, amountMinor]) => ({ currency, amountMinor }))
 }
 
-/** `sums` are those of the window, a currency and a category at a time, as a store's `sumByCategory` gives them. */
-export function breakDown(product: Product, sums: CategoryTotal[]): Breakdown {
+/**
+ * `sums` are those of the window, a currency and a category at a time, as a store's `sumByCategory` gives them, or
+ * its purchases one at a time.
+ */
+export function breakDown(product: Product, sums: Omit<CategoryTotal, 'count'>[]): Breakdown {
   const { groups, homeCurrency } = product
   // A sum is told apart by what is stored for its purchases. Where they are is what the product makes of that.
   const placed = sums.map((sum) => ({ ...sum, category: categoryOf(product, sum.category) }))
@@ -46,4 +49,12 @@ export function breakDown(product: Product, sums: CategoryTotal[]): Breakdown {
       .reduce((total, sum) => total + sum.amountMinor, 0),
     foreignLeftOut: sums.some((sum) => sum.currency !== homeCurrency),
   }
+}
+
+/**
+ * What is left of a group's limit, in the product's own currency: less what was spent in that currency, which is
+ * what the limit is held against, and less what the card's patterns hold back of it. Less than nothing past it.
+ */
+export function leftOf(limitMinor: number, spent: Amount[], homeCurrency: string, toComeMinor: number): number {
+  return limitMinor - (spent.find(({ currency }) => currency === homeCurrency)?.amountMinor ?? 0) - toComeMinor
 }
