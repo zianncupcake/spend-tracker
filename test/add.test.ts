@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { storeFor } from '../src/store'
 import { ADD_USAGE, TOO_MANY_BY_HAND } from '../src/telegram/texts'
 import { clock, NOW, openChat, type Posted } from './connect-helpers'
-import { buy, linesOf, seconds } from './helpers'
+import { buy, linesOf, marksOf, seconds } from './helpers'
 
 // Purchases that a user adds by hand, and purchases that a user takes out. The clock stands at 12:00 on 9 October
 // 2026 in Singapore, unless a test moves it.
@@ -275,7 +275,7 @@ describe('/add', () => {
     expect([...more, ...moreAgain]).toEqual([])
     const rows = await rowsOf(userId)
     expect(rows).toMatchObject([{ source_id: `manual:${TWICE}`, merchant: 'Lunch', amount_minor: 1250 }])
-    // The purchase, counted once in the total of its card, and the button that flags it.
+    // The purchase, counted once in the total of its card, and the buttons that move it.
     expect(again.text).toBe(
       [
         `ID ${rows[0].id} · 9 Oct · SGD 12.50 · Lunch · by hand`,
@@ -283,7 +283,7 @@ describe('/add', () => {
         `ID ${rows[0].id}: Online / Mobile Contactless Spend`,
       ].join('\n'),
     )
-    expect(again.buttons).toEqual([[{ text: 'Mark as Other Spend', data: `${rows[0].id}:other` }]])
+    expect(marksOf(again)).toEqual(['selected', 'other', 'fx'])
     expect(again).toMatchObject({ text: first.text, entities: first.entities, buttons: first.buttons })
     expect(await chat.lines('/spend')).toContain('evol | SGD 12.50 | 1 | 29 Sep to 29 Oct | 1 Nov')
 
@@ -302,7 +302,7 @@ describe('/add', () => {
     const [flagged] = await chat.ask('/add evol 12.50 Lunch', TWICE)
 
     expect(flagged.text.split('\n')[2]).toBe(`ID ${id}: Other Spend`)
-    expect(flagged.buttons).toEqual([[{ text: 'Mark as Online / Mobile Contactless Spend', data: `${id}:online` }]])
+    expect(marksOf(flagged)).toEqual(['online', 'selected', 'fx'])
 
     await chat.say(`/remove ${id}`)
     const [takenOut] = await chat.ask('/add evol 12.50 Lunch', TWICE)
@@ -335,7 +335,7 @@ describe('/add', () => {
 })
 
 describe('/add for a card that is linked to a product', () => {
-  it('says that the purchase is online when no rule places it, with the one button that flags it', async () => {
+  it('says that the purchase is online when no rule places it, with a button for each other category', async () => {
     const chat = await chatWithCards()
 
     const reply = await ask(chat, '/add evol 12.50 3/10 Lunch')
@@ -351,7 +351,7 @@ describe('/add for a card that is linked to a product', () => {
       ].join('\n'),
     )
     expect(markedIn(reply)).toEqual(['Lunch'])
-    expect(reply.buttons).toEqual([[{ text: 'Mark as Other Spend', data: `${row.id}:other` }]])
+    expect(marksOf(reply)).toEqual(['selected', 'other', 'fx'])
 
     // A press flags the purchase. The message says so, and has the button that takes the flag off again.
     const pressed = await chat.press(reply, 'Mark as Other Spend')
@@ -361,7 +361,7 @@ describe('/add for a card that is linked to a product', () => {
       'evol ••••5678: SGD 12.50 in 1 purchase, resets 1 Nov',
       `ID ${row.id}: Other Spend`,
     ])
-    expect(reply.buttons).toEqual([[{ text: 'Mark as Online / Mobile Contactless Spend', data: `${row.id}:online` }]])
+    expect(marksOf(reply)).toEqual(['online', 'selected', 'fx'])
     expect(await rowsOf(await chat.userId())).toMatchObject([{ category: 'other' }])
   })
 
@@ -377,10 +377,7 @@ describe('/add for a card that is linked to a product', () => {
     expect(row.category).toBe(category)
     expect(reply.text.split('\n')[0]).toContain(shown)
     expect(reply.text.split('\n')[2]).toBe(`ID ${row.id}: ${name}`)
-    expect(reply.buttons).toEqual([
-      [{ text: 'Mark as Online / Mobile Contactless Spend', data: `${row.id}:online` }],
-      [{ text: 'Mark as Other Spend', data: `${row.id}:other` }],
-    ])
+    expect(marksOf(reply)).toEqual(['online', 'selected', 'other', 'fx'].filter((key) => key !== category))
   })
 })
 

@@ -88,13 +88,6 @@ describe('the UOB EVOL Card', () => {
     for (const key of ['online', 'selected', 'other', 'fx']) expect(categoryOf(uobEvol, key)).toBe(key)
   })
 
-  it('has a button for each category that is chosen by hand, and none for those that a rule gives', () => {
-    expect(choicesOf(uobEvol).map(({ key, label }) => [key, label])).toEqual([
-      ['online', 'Online / Mobile Contactless Spend'],
-      ['other', 'Other Spend'],
-    ])
-  })
-
   it('calls a category by what its button calls it, or by the name of its group when it has no button', () => {
     const names = ['online', 'selected', 'other', 'fx'].map((key) => categoryName(uobEvol, key))
 

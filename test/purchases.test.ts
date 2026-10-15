@@ -709,40 +709,29 @@ describe('tables as messages', () => {
 })
 
 describe('where a purchase is sorted', () => {
-  it('ends a message with the one button that flags an online purchase as made with the physical card', () => {
-    const online = {
-      line: 'ID 57: Online / Mobile Contactless Spend',
-      buttons: [[{ text: 'Mark as Other Spend', data: '57:other' }]],
-    }
+  /** The button that marks purchase 57 as each category, on a row of its own. */
+  const MARK = {
+    online: [{ text: 'Mark as Online / Mobile Contactless Spend', data: '57:online' }],
+    selected: [{ text: 'Mark as Selected Gym, Telco and Streaming Spend', data: '57:selected' }],
+    other: [{ text: 'Mark as Other Spend', data: '57:other' }],
+    fx: [{ text: 'Mark as Overseas Foreign Currency Spend', data: '57:fx' }],
+  }
+
+  it('ends a message with a button for each category but the one that the purchase is in, a row to each', () => {
+    const online = { line: 'ID 57: Online / Mobile Contactless Spend', buttons: [MARK.selected, MARK.other, MARK.fx] }
 
     expect(sortEnd(uobEvol, { id: 57, category: null })).toEqual(online)
     expect(sortEnd(uobEvol, { id: 57, category: 'online' })).toEqual(online)
     expect(sortEnd(uobEvol, { id: 57, category: 'dining' })).toEqual(online)
-  })
-
-  it('ends a message with the one button that takes the flag off a purchase that has it', () => {
-    expect(sortEnd(uobEvol, { id: 57, category: 'other' })).toEqual({
-      line: 'ID 57: Other Spend',
-      buttons: [[{ text: 'Mark as Online / Mobile Contactless Spend', data: '57:online' }]],
-    })
-  })
-
-  it('ends a message with both buttons, a row to each, for a purchase that a rule placed', () => {
-    const both = [
-      [{ text: 'Mark as Online / Mobile Contactless Spend', data: '57:online' }],
-      [{ text: 'Mark as Other Spend', data: '57:other' }],
-    ]
-
-    expect(sortEnd(uobEvol, { id: 57, category: 'selected' })).toEqual({
-      line: 'ID 57: Selected Gym, Telco and Streaming Spend',
-      buttons: both,
-    })
     expect(sortEnd(uobEvol, { id: 57, category: 'fx' })).toEqual({
       line: 'ID 57: Overseas Foreign Currency Spend',
-      buttons: both,
+      buttons: [MARK.online, MARK.selected, MARK.other],
     })
-    // And for one that nothing has placed, on a product with no default.
-    expect(sortEnd(NO_DEFAULT, { id: 57, category: null })).toEqual({ line: 'ID 57: not sorted', buttons: both })
+    // And for one that nothing has placed, on a product with no default: a button for every category.
+    expect(sortEnd(NO_DEFAULT, { id: 57, category: null })).toEqual({
+      line: 'ID 57: not sorted',
+      buttons: [MARK.online, MARK.selected, MARK.other, MARK.fx],
+    })
   })
 })
 

@@ -26,7 +26,7 @@ import {
   TOKEN_URL,
 } from './connect-helpers'
 import { gmailMessage, gmailResults, htmlPart, textPart, type Message, type MessageOptions } from './gmail-helpers'
-import { alertText, seconds } from './helpers'
+import { alertText, marksOf, seconds } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const JANE = 'jane@example.test'
@@ -346,14 +346,11 @@ describe('a new alert for a card that is linked to a product', () => {
       `Running total: ${amount} in 1 purchase, resets 1 Nov`,
       `ID ${stored.id}: ${name}`,
     ])
-    // It can be flagged, or put with the online purchases.
-    expect(message.buttons).toEqual([
-      [{ text: 'Mark as Online / Mobile Contactless Spend', data: `${stored.id}:online` }],
-      [{ text: 'Mark as Other Spend', data: `${stored.id}:other` }],
-    ])
+    // It can be moved to any other category.
+    expect(marksOf(message)).toEqual(['online', 'selected', 'other', 'fx'].filter((key) => key !== category))
   })
 
-  it('is told of as online, with the one button that flags it, when no rule settles where it belongs', async () => {
+  it('is told of as online, with a button for each other category, when no rule settles where it belongs', async () => {
     const chat = await chatWithProduct()
     outside.mailboxes[JANE] = [alert('msg-1', 5)]
 
@@ -368,10 +365,10 @@ describe('a new alert for a card that is linked to a product', () => {
         `ID ${id}: Online / Mobile Contactless Spend`,
     )
     expect(message.entities).toEqual([{ type: 'code', offset: 28, length: 12 }])
-    expect(message.buttons).toEqual([[{ text: 'Mark as Other Spend', data: `${id}:other` }]])
+    expect(marksOf(message)).toEqual(['selected', 'other', 'fx'])
 
     // A press flags it. The message keeps what it said of the purchase and of the card, its last line changes, and
-    // its button becomes the one that takes the flag off.
+    // so do its buttons.
     expect(await chat.press(message, 'Mark as Other Spend')).toEqual({ answer: `ID ${id}: Other Spend`, sent: [] })
     expect(message.text).toBe(
       'evol ••••1234: SGD 12.40 at COFFEE PLACE\n' +
@@ -379,7 +376,7 @@ describe('a new alert for a card that is linked to a product', () => {
         `ID ${id}: Other Spend`,
     )
     expect(message.entities).toEqual([{ type: 'code', offset: 28, length: 12 }])
-    expect(message.buttons).toEqual([[{ text: 'Mark as Online / Mobile Contactless Spend', data: `${id}:online` }]])
+    expect(marksOf(message)).toEqual(['online', 'selected', 'fx'])
     expect((await sortedOf(await chat.userId()))['msg-1'].category).toBe('other')
   })
 
@@ -425,7 +422,7 @@ describe('a new alert for a card that is linked to a product', () => {
     // Only the message about the card with a product says where the purchase is, and has buttons.
     const told = posted.map(({ chatId, text, buttons }) => [chatId, text.split('\n').length, buttons?.length])
     expect(told).toEqual([
-      [jane.telegramId, 3, 2],
+      [jane.telegramId, 3, 3],
       [sam.telegramId, 2, undefined],
     ])
   })

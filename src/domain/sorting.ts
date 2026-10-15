@@ -87,8 +87,8 @@ export function categoryByCodes(product: Product, codes: number[]): string | nul
 /**
  * Sorts the purchases in the card's current window that the product's own rules settle, and that no category is
  * stored for yet. This is for a card that has just been linked to the product: its purchases until then were stored
- * with no category, or with one of another product that is forgotten by now, and the categories that only a rule
- * gives have no button to choose them by.
+ * with no category, or with one of another product that is forgotten by now, and what the rules settle is not left
+ * for its user to mark.
  */
 export async function sortByRules(
   store: Store,

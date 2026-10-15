@@ -9,7 +9,6 @@ import { handleUpdate } from '../src/telegram/handler'
 import {
   CANCELLED,
   DOING,
-  goesByCurrency,
   NO_CARDS,
   NO_PURCHASES_SAID,
   NOT_DONE,
@@ -268,17 +267,6 @@ describe('purchases that the assistant makes out in a message', () => {
     ])
   })
 
-  it('are added as if no category was named, with a note, when the one named cannot be chosen by hand', async () => {
-    const chat = await chatWithCard()
-    acting({ kind: 'add', reading: read([bought(520, 'LUNCH')], { card: 'evol', category: 'fx' }) })
-
-    const { texts } = await told(chat)
-
-    // No category is stored, so it is in the product's default.
-    expect(await rowsOf(await chat.userId())).toMatchObject([{ category: null }])
-    expect(texts.map((message) => message.text)).toEqual([goesByCurrency('Overseas Foreign Currency Spend')])
-  })
-
   it('are none when the assistant found none to add, which is said in one line', async () => {
     const chat = await chatWithCard()
     acting({ kind: 'add', reading: { status: 'nothing' } })
@@ -314,11 +302,11 @@ describe('purchases that the assistant is asked to sort', () => {
     expect(logged.events()).toEqual(loggedFor(userId, [{ kind: 'category', outcome: 'done' }]))
   })
 
-  it('are not moved to a category that cannot be chosen for their card’s product: one that only a rule of the product gives', async () => {
+  it('are not moved to a category that their card’s product does not have', async () => {
     const chat = await chatWithCard()
     const userId = await chat.userId()
     const purchase = await buy(userId, { cardLast4: '5678' })
-    acting({ kind: 'category', ids: [purchase], category: 'fx' })
+    acting({ kind: 'category', ids: [purchase], category: 'dining' })
     const logged = catchConsole()
 
     const { texts } = await told(chat)

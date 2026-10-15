@@ -112,6 +112,11 @@ export async function buy(userId: number, given: Partial<NewTransaction> & { at?
   return id
 }
 
+/** The categories that the buttons under a message move its purchase to, in their order. */
+export function marksOf(message: { buttons?: { data: string }[][] }): string[] | undefined {
+  return message.buttons?.flat().map((button) => button.data.split(':')[1])
+}
+
 // The blocks of a rich message as the bot is to send them, for a test to say what it expects in fewer lines. Each
 // is written out in full, as Telegram is posted it, in the first test of test/detail-rich.test.ts.
 

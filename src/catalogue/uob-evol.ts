@@ -60,12 +60,21 @@ export const uobEvol: Product = {
     {
       name: 'Selected Gym, Telco and Streaming Spend',
       limitMinor: 20000,
-      categories: [{ key: 'selected', automatic: new RegExp(SELECTED_MERCHANTS.join('|'), 'i') }],
+      categories: [
+        {
+          key: 'selected',
+          label: 'Selected Gym, Telco and Streaming Spend',
+          automatic: new RegExp(SELECTED_MERCHANTS.join('|'), 'i'),
+        },
+      ],
     },
     // All other local spend, as the bank has it, which is where a purchase made with the card itself, tapped or
     // inserted, belongs. A purchase is put here only when its user marks it.
     { name: 'Other Spend', categories: [{ key: 'other', label: 'Other Spend' }] },
-    { name: 'Overseas Foreign Currency Spend', categories: [{ key: 'fx', automatic: 'foreign-currency' }] },
+    {
+      name: 'Overseas Foreign Currency Spend',
+      categories: [{ key: 'fx', label: 'Overseas Foreign Currency Spend', automatic: 'foreign-currency' }],
+    },
   ],
   defaultCategory: 'online',
   sortingNote: 'Other Spend is where a purchase made with the physical card goes.',
