@@ -1,4 +1,4 @@
-import { choicesOf, productOf } from '../catalogue'
+import { categoriesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
 import { markAs } from '../domain/sorting'
 import { log, logFailure } from '../log'
@@ -210,7 +210,7 @@ async function press(deps: Deps, { id, from, data, message }: Press, handling: H
   if (!purchase) return refuse()
   const card = (await store.listCards()).find((each) => each.last4 === purchase.cardLast4)
   const product = productOf(card?.product)
-  const category = product && choicesOf(product).find((choice) => choice.key === pressed.category)
+  const category = product && categoriesOf(product).find((choice) => choice.key === pressed.category)
   if (!product || !category) return refuse()
 
   // This one purchase is all that a press moves. What is remembered of it for later purchases: see markAs.

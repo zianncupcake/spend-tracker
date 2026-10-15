@@ -2,7 +2,7 @@
 // done, each of which the bot's own code does, and the queries that they may run between them.
 
 import { answerQuestion, type Action, type Answer } from '../ai/assistant'
-import { choicesOf, productOf } from '../catalogue'
+import { categoriesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
 import { markAs } from '../domain/sorting'
 import { CONFIRMABLE, Failure, log, logFailure, type Events } from '../log'
@@ -532,7 +532,7 @@ async function sortAsked(deps: Deps, { user, room }: Asking, ids: number[], key:
       lines.push(`ID ${purchase.id} is on a card that is linked to no product, so there is nothing to sort it into.`)
       continue
     }
-    const category = choicesOf(product).find((choice) => choice.key === key)
+    const category = categoriesOf(product).find((choice) => choice.key === key)
     if (!category) {
       lines.push(
         `ID ${purchase.id} was not moved: a purchase on ${label(card)} cannot be marked as that. ` +

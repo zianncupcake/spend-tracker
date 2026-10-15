@@ -47,11 +47,8 @@ export interface Group {
 /** What a purchase is sorted into. */
 export interface Category {
   key: string
-  /**
-   * What the category is called on the button that puts a purchase here, which reads "Mark as" and then this. A
-   * category without it cannot be chosen by hand.
-   */
-  label?: string
+  /** What the category is called on the button that puts a purchase here, which reads "Mark as" and then this. */
+  label: string
   /**
    * What puts a purchase here with nobody choosing: that it was made in another currency than the product's, or
    * that the text of its merchant matches the pattern.
@@ -66,6 +63,3 @@ export interface Category {
 
 /** A merchant category code, or a run of them: its first and its last, which are both in it. */
 export type Mcc = number | [from: number, to: number]
-
-/** A category that a user can put a purchase in: one with a button. */
-export type Choice = Category & { label: string }

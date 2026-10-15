@@ -10,7 +10,7 @@
 // or is in the block of a table, and Telegram makes nothing of what is in either: see MessageEntity. In a rich
 // message it is told to make nothing of any text: see RichMessage.
 
-import { categoryName, categoryOf, choicesOf } from '../catalogue'
+import { categoriesOf, categoryName, categoryOf } from '../catalogue'
 import type { Product } from '../catalogue/types'
 import { leftOf, perCurrency, type Amount, type Breakdown } from '../domain/breakdown'
 import { MANUAL, type Card, type Transaction } from '../store'
@@ -229,7 +229,7 @@ export function sortEnd(
 ): { line: string; buttons: Button[][] } {
   const current = categoryOf(product, purchase.category)
   // A row to each button, so that no label is cut short on a phone.
-  const buttons = choicesOf(product)
+  const buttons = categoriesOf(product)
     .filter((choice) => choice.key !== current)
     .map(({ key, label }) => [{ text: `Mark as ${label}`, data: `${purchase.id}:${key}` }])
   const where = whereSorted(product, purchase.category)
