@@ -12,7 +12,7 @@ import { readLater, sizesOf } from './photos'
 import { readConfirmPress, readHeldPress, readPress, sortEnd } from './purchases'
 import { sendLater, sendReply } from './sending'
 import { codeWithin, type Handling, type Press, type Seen } from './shared'
-import { EDITED, FAILED, NOT_TEXT, NOT_TEXT_OR_PHOTO, PRESS_FAILED, STORED_NO_REPLY } from './texts'
+import { EDITED, FAILED, failureReply, NOT_TEXT, NOT_TEXT_OR_PHOTO, PRESS_FAILED, STORED_NO_REPLY } from './texts'
 
 /** The parts of a Telegram update this bot reads. All optional, because it arrives as unchecked JSON. */
 export interface Update {
@@ -99,7 +99,7 @@ async function handle(deps: Deps, update: Update, handling: Handling): Promise<L
   // one to answer.
   if (typeof from?.id !== 'number' || from.id !== chat.id) return ignore(seen, 'not_own_chat')
   const chatId = chat.id
-  handling.tell = () => deps.messenger.send(chatId, FAILED)
+  handling.tell = (error) => deps.messenger.send(chatId, failureReply(FAILED, error, deps.ray))
 
   // An edited message is not read again: a command in it is not run, and a question in it is not asked. Its user
   // is told so when it is one of text. One that is not was answered when it first came, and Telegram posts edits
@@ -137,7 +137,7 @@ async function handle(deps: Deps, update: Update, handling: Handling): Promise<L
   // fails after that is not answered with FAILED, which says to try again: see STORED_NO_REPLY.
   const stored = () => {
     handling.handled = true
-    handling.tell = () => deps.messenger.send(chatId, STORED_NO_REPLY)
+    handling.tell = (error) => deps.messenger.send(chatId, failureReply(STORED_NO_REPLY, error, deps.ray))
   }
   const answer =
     (await reply(deps, from.id, messageId, text, seen, stored)) ?? ask(deps, from.id, messageId, text.trim())
@@ -160,7 +160,7 @@ function ignore(seen: Seen, why: NonNullable<Seen['why']>): void {
 async function tellOfFailure(tell: Handling['tell'], error: unknown): Promise<boolean> {
   if (!tell || error instanceof ChatBlockedError) return false
   try {
-    await tell()
+    await tell(error)
     return true
   } catch {
     return false
@@ -184,7 +184,7 @@ async function press(deps: Deps, { id, from, data, message }: Press, handling: H
 
   // Telegram shows a button as waiting until its press is answered, and takes one answer to a press. So a press
   // whose handling fails is answered with that it did, unless it has been answered by then.
-  handling.tell = () => messenger.answer(id, PRESS_FAILED)
+  handling.tell = (error) => messenger.answer(id, failureReply(PRESS_FAILED, error, deps.ray))
   const answer = async (text: string) => {
     // A press is answered once what it asked for is done, or is found to be nothing that can be done.
     handling.handled = true

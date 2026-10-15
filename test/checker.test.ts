@@ -982,7 +982,7 @@ describe('held purchases that nobody answered for', () => {
     const found = { mailbox: true, user: userId, listed: 1, unknown: 1, headers: 1, read: 1 }
     expect(logged.events()).toEqual([
       { event: 'alert', outcome: 'stored', parser: 'example-bank' },
-      { event: 'check_failed', stage: 'batches', user: null, error: 'Error' },
+      { event: 'check_failed', stage: 'batches', user: null, error: 'Error', reason: 'database' },
       { event: 'check', ...NOTHING_DONE, ...found, stored: 1, notified: 1, checked: true },
     ])
     expect(logged.text()).not.toContain('held_batches')

@@ -3,6 +3,7 @@
 
 import { ATTEMPT_MINUTES } from '../connect'
 import { REMINDER_HOUR } from '../domain/reminder'
+import { isDatabaseError } from '../log'
 import {
   MAX_BY_HAND_PER_DAY,
   MAX_CARDS,
@@ -366,3 +367,19 @@ export const STORED_NO_REPLY =
   'Your purchase was stored, but the bot could not reply to it. Check it with /spend before adding it again.'
 
 export const PRESS_FAILED = 'Something went wrong. Please try again in a moment.'
+
+/** What a failure that says to try again says instead when it was the database that failed. */
+export const DATABASE_DOWN =
+  "The bot's database is not answering right now, which is a problem at Cloudflare. Please try again later."
+
+/** The failure texts that say to try again. The others say that something may have been done, and stay as they are. */
+const TRY_AGAIN = new Set([FAILED, PRESS_FAILED, NOT_ANSWERED, PHOTO_NOT_READ])
+
+/**
+ * What a user is told when something failed with `error`: `text`, or DATABASE_DOWN in its place, and then the
+ * reference of the request, which finds its lines in the log: see `ray` in ../deps. Nothing of the error is said.
+ */
+export function failureReply(text: string, error: unknown, ray: string | undefined): string {
+  const said = isDatabaseError(error) && TRY_AGAIN.has(text) ? DATABASE_DOWN : text
+  return ray ? `${said} Ref: ${ray}` : said
+}

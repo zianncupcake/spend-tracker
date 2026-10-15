@@ -20,6 +20,12 @@ export interface Deps {
    * for one: the bot then has no assistant, for anybody.
    */
   ai?: AiProvider
+  /**
+   * Cloudflare's id of the request that is being handled, which Workers Logs keeps as `$metadata.rayId` with each of
+   * its lines. A reply that says something failed ends with it: see failureReply in ./telegram/texts. Missing outside
+   * a request, and for a request that did not come through Cloudflare.
+   */
+  ray?: string
 }
 
 export function depsFor(env: Env): Deps {

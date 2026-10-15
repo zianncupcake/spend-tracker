@@ -71,7 +71,7 @@ async function telegramWebhook(request: Request, env: Env, ctx: ExecutionContext
   const began = Date.now()
   try {
     const update = await request.json<Update>()
-    const later = await handleUpdate(depsFor(env), update)
+    const later = await handleUpdate({ ...depsFor(env), ray: rayOf(request) }, update)
     // What is left is the answering of a question, which takes a model some seconds. Telegram resends an update
     // that it has waited too long to hear of, too. So that goes on after this response, for as long as a Worker is
     // given for it: 30 seconds.
@@ -115,6 +115,11 @@ async function forgetOldExchanges({ db, now }: Deps): Promise<void> {
   } catch (error) {
     logFailure('exchange_failed', error, { stage: 'forget', user: null })
   }
+}
+
+/** The id of a request in its cf-ray header, without the place after the dash, as Workers Logs has it. */
+function rayOf(request: Request): string | undefined {
+  return request.headers.get('cf-ray')?.split('-')[0] || undefined
 }
 
 /** Constant-time comparison. Hashing first gives both sides the same length. */

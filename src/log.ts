@@ -228,10 +228,12 @@ export interface Events {
 
 /**
  * Why an error of this codebase's own was thrown: see `Failure`. `http_error` is for an answer from outside that was
- * an error, and the error then holds the HTTP status of that answer.
+ * an error, and the error then holds the HTTP status of that answer. `database` is for an error of D1's: see
+ * isDatabaseError.
  */
 export type Reason =
   | 'http_error'
+  | 'database'
   | 'grant_lost'
   | 'page_token'
   | 'no_access_token'
@@ -270,6 +272,14 @@ export class Failure extends Error {
 }
 
 /**
+ * Whether an error is one that the D1 binding threw: a plain Error whose message begins `D1_`, as `D1_ERROR: …` and
+ * `D1_EXEC_ERROR: …` do. Only that beginning is read of the message.
+ */
+export function isDatabaseError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith('D1_')
+}
+
+/**
  * What is given for the fields of an event, which is to hold no field that the event has not. Left to itself the
  * compiler lets one through when it comes in with the fields of something else, as `...purchase` would bring them.
  */
@@ -293,7 +303,7 @@ export function log<E extends keyof Events, const F extends Events[E]>(event: E,
 
 /**
  * Writes the line of an event that failed, at the level of an error. To its fields this adds the class name of the
- * error, the reason of one that this codebase threw, and the HTTP status that the error holds, when it holds one.
+ * error, the reason of one that this codebase or D1 threw, and the HTTP status that the error holds, when it holds one.
  * Nothing else of an error is written, and its message never is.
  *
  * It is called where an error is caught, with whatever was thrown, and what an error holds is its thrower's to set.
@@ -312,7 +322,7 @@ export function logFailure<E extends keyof Events, const F extends Events[E]>(
       event,
       ...fields,
       error: typeof name === 'string' && CLASS_NAME.test(name) ? name : 'Error',
-      ...(error instanceof Failure && { reason: error.reason }),
+      ...(error instanceof Failure ? { reason: error.reason } : isDatabaseError(error) && { reason: 'database' }),
       ...(isHttpStatus(status) && { status }),
     }),
   )
