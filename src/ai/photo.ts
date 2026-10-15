@@ -12,7 +12,7 @@
 // Nothing of the photo, of its caption or of the answer goes into an error that is thrown here, and so none of it
 // can reach the log.
 
-import { productOf, ruledBy } from '../catalogue'
+import { choicesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
 import { CURRENCY, dayStart, ISO_DATE, noonOf } from '../domain/by-hand'
 import { dayOf, startOfDay } from '../domain/window'
@@ -27,11 +27,8 @@ import { completeJson, ProviderError, type AiProvider, type ChatMessage } from '
  */
 export interface PhotoCard {
   nickname: string
-  /**
-   * The categories of the card's product: none for a card with no product. One that cannot be chosen by hand is
-   * called by its group, and `by` says what alone puts a purchase in it.
-   */
-  categories: { key: string; label: string; by?: 'currency' | 'rules' }[]
+  /** The categories that a user can choose for a purchase on this card. Empty for a card with no product. */
+  categories: { key: string; label: string }[]
   /** What the card's product says of how its purchases are sorted, when it says anything. */
   note?: string
 }
@@ -243,9 +240,7 @@ function systemMessage(cards: PhotoCard[], now: Date, timeZone: string): string 
 /** A card of a user's as a model is told of it: its nickname, and what a purchase on it can be sorted into. */
 export function asPhotoCard(card: Card): PhotoCard {
   const product = productOf(card.product)
-  const categories = (product?.groups ?? []).flatMap(({ name, categories }) =>
-    categories.map((category) => ({ key: category.key, label: category.label ?? name, by: ruledBy(category) })),
-  )
+  const categories = product ? choicesOf(product).map(({ key, label }) => ({ key, label })) : []
   return { nickname: card.nickname, categories, note: product?.sortingNote }
 }
 
@@ -257,13 +252,10 @@ export function describeCards(cards: PhotoCard[]): string {
   return cards.length > 0 ? `The user has these cards. ${cards.map(described).join(' ')}` : 'The user has no cards.'
 }
 
-/** What the model is told of a category that cannot be chosen by hand, so that it does not offer it. */
-const RULED = { currency: 'set by the currency, not by hand', rules: "set by the card's rules, not by hand" }
-
 /** A card as the model is told of it. What its product says of the sorting is said after its categories. */
 function described({ nickname, categories, note }: PhotoCard): string {
   if (categories.length === 0) return `${nickname}: it has no categories.`
-  const listed = categories.map(({ key, label, by }) => `${key} = ${label}${by ? ` (${RULED[by]})` : ''}`).join(', ')
+  const listed = categories.map(({ key, label }) => `${key} = ${label}`).join(', ')
   const sorted = `${nickname}: its purchases are sorted into one of these categories: ${listed}.`
   return note ? `${sorted} ${note}` : sorted
 }

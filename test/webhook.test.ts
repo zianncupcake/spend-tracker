@@ -3,7 +3,8 @@ import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODEL } from '../src/ai/provider'
 import worker from '../src/index'
-import { BY_HAND_NOTE } from '../src/telegram/purchases'
+import { uobEvol } from '../src/catalogue/uob-evol'
+import { BY_HAND_NOTE, sortEnd } from '../src/telegram/purchases'
 import { busyReply } from '../src/telegram/replies'
 import { ASK, FAILED, WELCOME, WORKING } from '../src/telegram/texts'
 import { AI_URL, refusing, saying } from './ai-helpers'
@@ -240,7 +241,13 @@ describe('POST /telegram with buttons', () => {
     return { telegramId, message, id }
   }
 
-  it('sends a message with its button as an inline keyboard, and what the button holds for the bot', async () => {
+  /** The keyboard under the message of purchase `id` in the category, as Telegram is posted it. */
+  function keyboardOf(id: string, category: string) {
+    const { buttons } = sortEnd(uobEvol, { id: Number(id), category })
+    return { inline_keyboard: buttons.map((row) => row.map(({ text, data }) => ({ text, callback_data: data }))) }
+  }
+
+  it('sends a message with its buttons as an inline keyboard, and what each button holds for the bot', async () => {
     const { telegramId, message, id } = await onlinePurchase()
 
     const [purchased, total, sorted] = message.text.split('\n')
@@ -253,7 +260,7 @@ describe('POST /telegram with buttons', () => {
       // The merchant's name is marked as code, so that nothing in it can be tapped.
       entities: [{ type: 'code', offset: message.text.indexOf(MERCHANT), length: MERCHANT.length }],
       link_preview_options: { is_disabled: true },
-      reply_markup: { inline_keyboard: [[{ text: 'Mark as Other Spend', callback_data: `${id}:other` }]] },
+      reply_markup: keyboardOf(id, 'online'),
     })
   })
 
@@ -274,10 +281,8 @@ describe('POST /telegram with buttons', () => {
           text: `${purchased}\n${total}\nID ${id}: Other Spend`,
           entities: message.entities,
           link_preview_options: { is_disabled: true },
-          // The button that flagged the purchase gives way to the one that takes the flag off.
-          reply_markup: {
-            inline_keyboard: [[{ text: 'Mark as Online / Mobile Contactless Spend', callback_data: `${id}:online` }]],
-          },
+          // The buttons are those of a purchase that is flagged.
+          reply_markup: keyboardOf(id, 'other'),
         },
       ],
     ])

@@ -149,9 +149,9 @@ describe('a photo with a caption that names the card', () => {
           nickname: 'evol',
           categories: [
             { key: 'online', label: ONLINE },
-            { key: 'selected', label: 'Selected Gym, Telco and Streaming Spend', by: 'rules' },
+            { key: 'selected', label: 'Selected Gym, Telco and Streaming Spend' },
             { key: 'other', label: OTHER },
-            { key: 'fx', label: 'Overseas Foreign Currency Spend', by: 'currency' },
+            { key: 'fx', label: 'Overseas Foreign Currency Spend' },
           ],
           note: 'Other Spend is where a purchase made with the physical card goes.',
         },
@@ -213,9 +213,9 @@ describe('a photo with a caption that names the card', () => {
     expect(texts).toEqual([])
   })
 
-  it('takes no category that is none of those a purchase on the card can be put in by hand: one that only a rule gives', async () => {
+  it('takes no category that the product of the card does not have', async () => {
     const chat = await chatWithCard()
-    reading(read([bought(1240, 'COFFEE PLACE')], { card: 'evol', category: 'fx' }))
+    reading(read([bought(1240, 'COFFEE PLACE')], { card: 'evol', category: 'dining' }))
 
     const { rich } = await chat.photo('evol')
 

@@ -415,8 +415,6 @@ a minute with no `check` line, or an `update` that was `deferred` with nothing a
 - The limit of the OCBC Rewards Card is held against the whole amount of each purchase. The bank counts a purchase
   in blocks of S$5 and drops the rest, so what is left of that limit is a little less than what the bank has left.
   The bank's 15X campaign, which has a cap of its own, is not tracked.
-- A group that only a rule fills has no button. On the UOB EVOL Card, a purchase that its user moved out of
-  Selected Gym, Telco and Streaming Spend, or out of Overseas Foreign Currency Spend, cannot be moved back by hand.
 - The service is written inside what the Workers free plan gives one invocation: about 10 ms of CPU time, 50
   outbound requests and 50 database queries. So the mail check, which runs once a minute, checks one mailbox in a
   run and reads one alert at the most. With N mailboxes connected, each has its turn every N minutes: a purchase

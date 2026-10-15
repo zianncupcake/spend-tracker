@@ -23,12 +23,6 @@ export function choicesOf(product: Product): Choice[] {
   return categoriesOf(product).filter((category): category is Choice => category.label !== undefined)
 }
 
-/** What alone puts a purchase in a category that cannot be chosen by hand. Undefined for one that can be. */
-export function ruledBy(category: Category): 'currency' | 'rules' | undefined {
-  if (category.label !== undefined) return undefined
-  return category.automatic === 'foreign-currency' ? 'currency' : 'rules'
-}
-
 /**
  * What the user is shown for a category: what it is called on its button or, for one that has no button, the name
  * of its group. Undefined for a key that is none of the product's, and for the null of a purchase that is not sorted.
