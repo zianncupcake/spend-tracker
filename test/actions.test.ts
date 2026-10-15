@@ -9,6 +9,7 @@ import { handleUpdate } from '../src/telegram/handler'
 import {
   CANCELLED,
   DOING,
+  goesByCurrency,
   NO_CARDS,
   NO_PURCHASES_SAID,
   NOT_DONE,
@@ -265,6 +266,17 @@ describe('purchases that the assistant makes out in a message', () => {
       ...loggedFor(userId, [{ kind: 'add', outcome: 'done', stored: 2, held: 0 }]).slice(0, 2),
       { ...loggedFor(userId, [{}])[2], sent: 'rich' },
     ])
+  })
+
+  it('are added as if no category was named, with a note, when the one named cannot be chosen by hand', async () => {
+    const chat = await chatWithCard()
+    acting({ kind: 'add', reading: read([bought(520, 'LUNCH')], { card: 'evol', category: 'fx' }) })
+
+    const { texts } = await told(chat)
+
+    // No category is stored, so it is in the product's default.
+    expect(await rowsOf(await chat.userId())).toMatchObject([{ category: null }])
+    expect(texts.map((message) => message.text)).toEqual([goesByCurrency('Overseas Foreign Currency Spend')])
   })
 
   it('are none when the assistant found none to add, which is said in one line', async () => {
