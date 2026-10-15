@@ -319,6 +319,17 @@ export const TOO_MANY_BY_HAND =
   `You have added ${MAX_BY_HAND_PER_DAY} purchases by hand in the last 24 hours, which is as many as can be added ` +
   'in that time. Try again later.'
 
+// What the reply to an adding says of a category that its user named and that cannot be chosen by hand. The
+// purchases are added as if none was named. `group` is the category's group, as the user is shown it.
+
+export function goesByCurrency(group: string): string {
+  return `${group} goes by the currency: add the purchase in the currency that it was charged in, such as USD.`
+}
+
+export function goesByRules(group: string): string {
+  return `${group} cannot be chosen: the card's rules put purchases there.`
+}
+
 // What the bot says around the purchases that it asks about once it has added them, because no rule placed them:
 // see `unplaced` in ../catalogue. Where each counts until it is marked is said in its own message.
 

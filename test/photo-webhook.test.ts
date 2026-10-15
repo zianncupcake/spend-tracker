@@ -194,7 +194,9 @@ describe('POST /telegram with a photo', () => {
           nickname: 'evol',
           categories: [
             { key: 'online', label: 'Online / Mobile Contactless Spend' },
+            { key: 'selected', label: 'Selected Gym, Telco and Streaming Spend', by: 'rules' },
             { key: 'other', label: 'Other Spend' },
+            { key: 'fx', label: 'Overseas Foreign Currency Spend', by: 'currency' },
           ],
           note: 'Other Spend is where a purchase made with the physical card goes.',
         },

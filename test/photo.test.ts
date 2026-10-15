@@ -149,7 +149,9 @@ describe('a photo with a caption that names the card', () => {
           nickname: 'evol',
           categories: [
             { key: 'online', label: ONLINE },
+            { key: 'selected', label: 'Selected Gym, Telco and Streaming Spend', by: 'rules' },
             { key: 'other', label: OTHER },
+            { key: 'fx', label: 'Overseas Foreign Currency Spend', by: 'currency' },
           ],
           note: 'Other Spend is where a purchase made with the physical card goes.',
         },

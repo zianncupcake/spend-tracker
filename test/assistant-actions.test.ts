@@ -129,6 +129,12 @@ describe('a call of a tool that acts', () => {
       { card: 'evol', category: 'other', purchases: [GIVEN] },
       { kind: 'add', reading: reading([CHECKED], { card: 'evol', category: 'other' }) },
     ],
+    // One that cannot be chosen by hand is handed on too, so that the adding can say why it was not taken.
+    [
+      'add_purchases',
+      { card: 'evol', category: 'fx', purchases: [GIVEN] },
+      { kind: 'add', reading: reading([CHECKED], { card: 'evol', category: 'fx' }) },
+    ],
     // Neither the ids nor the key is looked up: the user has no purchase with either id.
     ['set_category', { ids: [12, 7], category: 'other' }, { kind: 'category', ids: [12, 7], category: 'other' }],
     // The line is taken with no blanks around it, and is not read: whether it is a command is not looked at.

@@ -2,7 +2,7 @@
 // that are held until their user answers for them with a button.
 
 import { MAX_PURCHASES_PER_PHOTO, type PhotoReading } from '../ai/photo'
-import { categoriesOf, categoryName, categoryOf, choicesOf, productOf, unplaced } from '../catalogue'
+import { categoriesOf, categoryName, categoryOf, choicesOf, productOf, ruledBy, unplaced } from '../catalogue'
 import type { Deps } from '../deps'
 import { perCurrency } from '../domain/breakdown'
 import { startingCategoriesOn } from '../domain/sorting'
@@ -43,7 +43,7 @@ import {
 import { label, spendLine } from './replies'
 import { sendReply, type Tabled } from './sending'
 import { DEFAULT_CURRENCY, type Handling } from './shared'
-import { moreNotPlaced, NOT_PLACED, TOO_MANY_BY_HAND } from './texts'
+import { goesByCurrency, goesByRules, moreNotPlaced, NOT_PLACED, TOO_MANY_BY_HAND } from './texts'
 
 /**
  * A reading of purchases to add, as `readPhoto` gives one when it found some. Nothing in it says what it was read
@@ -184,6 +184,7 @@ export async function pressHeld(
 
   const cards = await store.listCards()
   let kept: Kept
+  let unchosen: string[] = []
   if (before.length > 0) {
     // What the press asked for was done by the press before it, or cannot be done now that they are stored.
     handling.handled = true
@@ -194,6 +195,7 @@ export async function pressHeld(
     const last4 = pressed.choice === 'add' ? batch.cardLast4 : batch.cardLast4 === null ? pressed.choice : null
     const card = last4 === null ? undefined : cards.find((each) => each.last4 === last4)
     if (!card) return refused()
+    unchosen = unchosenNotes(card, batch.category)
     const categories = await categoriesFor(store, card, choiceOn(card, batch.category), batch.purchases)
     // What the press asked for is done once the purchases are stored, whatever fails after that.
     kept = await keep(store, card, categories, batch.messageId, batch.purchases, () => {
@@ -205,7 +207,7 @@ export async function pressHeld(
   const answered = added.length > 0 ? `Added ${counted(added.length)}.` : 'No purchases were added.'
   // After what was added comes the note of those that are counted in the window after theirs: see carriedNotes.
   const on = byCard(cards, added)
-  const notes = [...carriedNotes(on, now(), user.timezone, day), ...keptNotes(kept)]
+  const notes = [...unchosen, ...carriedNotes(on, now(), user.timezone, day), ...keptNotes(kept)]
   await done(answered, [...addedLines(on), ...notes.map((text) => ({ text }))])
   // Asked once the purchases are let go of, so a press that comes after this one asks nothing again. Two that come
   // together both ask, as both say what was added.
@@ -343,7 +345,7 @@ export async function addRead(
   const asked = unclear.length > 0 ? [heldPrompt(messageId, unclear, day, cards, card, named)] : []
 
   // What there is to know besides, a line to each: what was not added, what was not read, and what was not taken.
-  const notes = keptNotes(kept)
+  const notes = [...unchosenNotes(card, reading.category), ...keptNotes(kept)]
   if (reading.unreadable > 0) {
     const [purchases, them] = reading.unreadable === 1 ? ['purchase', 'it'] : ['purchases', 'them']
     // They are more where others were read, which their user has been told of by then.
@@ -480,6 +482,17 @@ function dayIn(timeZone: string, now: Date): (date: Date) => string {
 function choiceOn(card: Card | undefined, named: string | null): string | null {
   const product = productOf(card?.product)
   return product && choicesOf(product).some((choice) => choice.key === named) ? named : null
+}
+
+/** Why a category that a reading named was not taken, when it is one of the card's that cannot be chosen by hand. */
+function unchosenNotes(card: Card | undefined, named: string | null): string[] {
+  const product = productOf(card?.product)
+  for (const group of product?.groups ?? []) {
+    const category = group.categories.find((each) => each.key === named)
+    const by = category && ruledBy(category)
+    if (by) return [by === 'currency' ? goesByCurrency(group.name) : goesByRules(group.name)]
+  }
+  return []
 }
 
 /** A count of purchases as a user is told it: "1 purchase", or "3 purchases". */
