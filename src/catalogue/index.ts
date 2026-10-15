@@ -2,7 +2,7 @@ import { dbsWomansWorld } from './dbs-womans-world'
 import { hsbcRevolution } from './hsbc-revolution'
 import { codeOf } from './merchants'
 import { ocbcRewards } from './ocbc-rewards'
-import type { Category, Choice, Group, Mcc, Product } from './types'
+import type { Category, Group, Mcc, Product } from './types'
 import { uobEvol } from './uob-evol'
 
 /** The card products whose reward rules are known. A user links a card to one by its key. */
@@ -18,21 +18,12 @@ export function categoriesOf(product: Product): Category[] {
   return product.groups.flatMap((group) => group.categories)
 }
 
-/** The categories that a user can put a purchase in, in the order of their buttons. */
-export function choicesOf(product: Product): Choice[] {
-  return categoriesOf(product).filter((category): category is Choice => category.label !== undefined)
-}
-
 /**
- * What the user is shown for a category: what it is called on its button or, for one that has no button, the name
- * of its group. Undefined for a key that is none of the product's, and for the null of a purchase that is not sorted.
+ * What the user is shown for a category: what it is called on its button. Undefined for a key that is none of the
+ * product's, and for the null of a purchase that is not sorted.
  */
 export function categoryName(product: Product, key: string | null): string | undefined {
-  for (const group of product.groups) {
-    const category = group.categories.find((each) => each.key === key)
-    if (category) return category.label ?? group.name
-  }
-  return undefined
+  return categoriesOf(product).find((category) => category.key === key)?.label
 }
 
 /**

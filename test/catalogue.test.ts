@@ -3,7 +3,6 @@ import {
   categoriesOf,
   categoryName,
   categoryOf,
-  choicesOf,
   productOf,
   products,
   productTerms,
@@ -44,10 +43,10 @@ describe('the catalogue', () => {
     expect(new Set(keys).size).toBe(keys.length)
     // The category that a purchase is in by default, when the product has one, is one of its own.
     expect([undefined, ...keys]).toContain(product.defaultCategory)
-    // A button sends back the id of a purchase and the key of a category, in 64 bytes at most. Each choice has one
-    // under a purchase that is in another category.
+    // A button sends back the id of a purchase and the key of a category, in 64 bytes at most. Each category has
+    // one under a purchase that is in another category.
     const buttons = keys.flatMap((category) => sortEnd(product, { id: 999_999_999_999_999, category }).buttons.flat())
-    expect(new Set(buttons.map((button) => button.data)).size).toBe(choicesOf(product).length)
+    expect(new Set(buttons.map((button) => button.data)).size).toBe(keys.length)
     for (const button of buttons) {
       expect(new TextEncoder().encode(button.data).length).toBeLessThanOrEqual(64)
       expect(button.data).toMatch(/^\d{1,15}:[a-z0-9-]{1,40}$/)
@@ -88,7 +87,7 @@ describe('the UOB EVOL Card', () => {
     for (const key of ['online', 'selected', 'other', 'fx']) expect(categoryOf(uobEvol, key)).toBe(key)
   })
 
-  it('calls a category by what its button calls it, or by the name of its group when it has no button', () => {
+  it('calls a category by what its button calls it', () => {
     const names = ['online', 'selected', 'other', 'fx'].map((key) => categoryName(uobEvol, key))
 
     expect(names).toEqual([
@@ -319,7 +318,6 @@ describe('a product with other rules', () => {
     expect(at('NETFLIX.COM', other)).toBeNull()
     // With no category for another currency, such a purchase goes by its merchant like any other.
     expect(startingCategory(other, { currency: 'SGD', merchant: 'CORNER CAFE' })).toBe('dining')
-    expect(choicesOf(other).map((choice) => choice.key)).toEqual(['dining', 'rest'])
     expect(categoryName(other, 'rest')).toBe('everything else')
   })
 

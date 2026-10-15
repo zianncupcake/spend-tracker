@@ -2,7 +2,7 @@
 // that are held until their user answers for them with a button.
 
 import { MAX_PURCHASES_PER_PHOTO, type PhotoReading } from '../ai/photo'
-import { categoriesOf, categoryName, categoryOf, choicesOf, productOf, unplaced } from '../catalogue'
+import { categoriesOf, categoryName, categoryOf, productOf, unplaced } from '../catalogue'
 import type { Deps } from '../deps'
 import { perCurrency } from '../domain/breakdown'
 import { startingCategoriesOn } from '../domain/sorting'
@@ -479,7 +479,7 @@ function dayIn(timeZone: string, now: Date): (date: Date) => string {
  */
 function choiceOn(card: Card | undefined, named: string | null): string | null {
   const product = productOf(card?.product)
-  return product && choicesOf(product).some((choice) => choice.key === named) ? named : null
+  return product && categoriesOf(product).some((choice) => choice.key === named) ? named : null
 }
 
 /** A count of purchases as a user is told it: "1 purchase", or "3 purchases". */

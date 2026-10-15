@@ -12,7 +12,7 @@
 // Nothing of the photo, of its caption or of the answer goes into an error that is thrown here, and so none of it
 // can reach the log.
 
-import { choicesOf, productOf } from '../catalogue'
+import { categoriesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
 import { CURRENCY, dayStart, ISO_DATE, noonOf } from '../domain/by-hand'
 import { dayOf, startOfDay } from '../domain/window'
@@ -240,7 +240,7 @@ function systemMessage(cards: PhotoCard[], now: Date, timeZone: string): string 
 /** A card of a user's as a model is told of it: its nickname, and what a purchase on it can be sorted into. */
 export function asPhotoCard(card: Card): PhotoCard {
   const product = productOf(card.product)
-  const categories = product ? choicesOf(product).map(({ key, label }) => ({ key, label })) : []
+  const categories = product ? categoriesOf(product).map(({ key, label }) => ({ key, label })) : []
   return { nickname: card.nickname, categories, note: product?.sortingNote }
 }
 
