@@ -38,9 +38,9 @@ export interface Handling {
   /**
    * Tells whoever sent the update that the handling of it failed, in the words for how far the handling had got.
    * There is none before the update is known to be one to answer, and none for a press that has been answered, as
-   * Telegram takes one answer to a press.
+   * Telegram takes one answer to a press. It is given the error that the handling failed with: see failureReply.
    */
-  tell?: () => Promise<void>
+  tell?: (error: unknown) => Promise<void>
 }
 
 /**

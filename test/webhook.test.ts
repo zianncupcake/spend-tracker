@@ -6,7 +6,7 @@ import worker from '../src/index'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { BY_HAND_NOTE, sortEnd } from '../src/telegram/purchases'
 import { busyReply } from '../src/telegram/replies'
-import { ASK, FAILED, WELCOME, WORKING } from '../src/telegram/texts'
+import { ASK, DATABASE_DOWN, FAILED, NOT_ANSWERED, WELCOME, WORKING } from '../src/telegram/texts'
 import { AI_URL, refusing, saying } from './ai-helpers'
 import { newTelegramId, userCount, withoutCarried } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -379,12 +379,12 @@ describe('POST /telegram with /spend and a card', () => {
 
 describe('POST /telegram with a question', () => {
   /** The request that Telegram posts the Worker when a user sends the text in their private chat with the bot. */
-  function update(telegramId: number, text: string) {
+  function update(telegramId: number, text: string, ray?: string) {
     const [chat, from] = [{ id: telegramId, type: 'private' }, { id: telegramId }]
     const message = { message_id: ++lastMessage, date: 1, text, chat, from }
     return new IncomingRequest('https://spend-tracker.test/telegram', {
       method: 'POST',
-      headers: { 'X-Telegram-Bot-Api-Secret-Token': SECRET },
+      headers: { 'X-Telegram-Bot-Api-Secret-Token': SECRET, ...(ray && { 'cf-ray': ray }) },
       body: JSON.stringify({ update_id: 1, message }),
     })
   }
@@ -392,11 +392,11 @@ describe('POST /telegram with a question', () => {
   /**
    * Posts the Worker a message, and waits for what it leaves to be done once Telegram has been answered. The Worker
    * is called with an execution context of the test's own, which is what can be waited on, and with the settings
-   * of the service, or with others that a test gives it.
+   * of the service, or with others that a test gives it. `ray` is the cf-ray header that Cloudflare would set.
    */
-  async function tell(telegramId: number, text: string, settings: Env = env): Promise<Response> {
+  async function tell(telegramId: number, text: string, settings: Env = env, ray?: string): Promise<Response> {
     const ctx = createExecutionContext()
-    const response = await worker.fetch(update(telegramId, text), settings, ctx)
+    const response = await worker.fetch(update(telegramId, text, ray), settings, ctx)
     await waitOnExecutionContext(ctx)
     return response
   }
@@ -505,6 +505,32 @@ describe('POST /telegram with a question', () => {
     // Both the request and the question are failures, and neither line has what the provider said of the request.
     expect(logged.failures().map((event) => event.event)).toEqual(['ai_call', 'question'])
     for (const text of ['What did I buy', 'Rate limit']) expect(logged.text()).not.toContain(text)
+  })
+
+  it.each([
+    ['ends with the reference of its request', 'a1b2c3d4e5f60718-SIN', ' Ref: a1b2c3d4e5f60718'],
+    ['has no reference when the request came with none', undefined, ''],
+  ])('says that a question could not be answered, and %s', async (_, ray, ref) => {
+    const telegramId = newTelegramId()
+    provider.mockImplementation(async () => refusing(500)())
+
+    await tell(telegramId, 'What did I buy?', env, ray)
+
+    expect(asked().at(-1)).toEqual(inPlaceOf(telegramId, 1, NOT_ANSWERED + ref))
+  })
+
+  it('says that the database is not answering when D1 fails, says nothing of its error, and logs it so', async () => {
+    const logged = catchConsole()
+    const telegramId = newTelegramId()
+    vi.spyOn(env.DB, 'prepare').mockImplementation(() => {
+      throw new Error('D1_ERROR: a made-up overload that quotes made-up-secret-4242')
+    })
+
+    await tell(telegramId, 'What did I buy?', env, 'a1b2c3d4e5f60718-SIN')
+
+    expect(asked().at(-1)).toEqual(inPlaceOf(telegramId, 1, `${DATABASE_DOWN} Ref: a1b2c3d4e5f60718`))
+    expect(JSON.stringify(asked())).not.toContain('made-up')
+    expect(logged.events('question')).toMatchObject([{ outcome: 'failed', error: 'Error', reason: 'database' }])
   })
 
   it('leaves nothing for after its answer of a command, which is answered before it', async () => {

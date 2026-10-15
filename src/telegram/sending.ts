@@ -4,6 +4,7 @@
 import type { Deps } from '../deps'
 import type { Events } from '../log'
 import { ChatBlockedError, TelegramError, type Messenger, type Outgoing, type RichMessage } from './api'
+import { failureReply } from './texts'
 
 /**
  * A reply that is sent as one rich message: one that has tables in it, in which a table is drawn as one, or an
@@ -128,7 +129,7 @@ async function sendTabled(messenger: Messenger, chatId: number, { rich, asText }
  * in ./api.
  */
 export async function sendLater<Outcome extends string>(
-  { messenger, now }: Deps,
+  { messenger, now, ray }: Deps,
   chatId: number,
   reply: Deferred<Outcome>,
 ): Promise<void> {
@@ -171,7 +172,8 @@ export async function sendLater<Outcome extends string>(
       wrong = error
     }
     if (notice !== undefined) {
-      noted.sent = await sayInstead(messenger, chatId, placeholder, notice)
+      const said = wrong === undefined ? notice : failureReply(notice, wrong, ray)
+      noted.sent = await sayInstead(messenger, chatId, placeholder, said)
     } else if (placeholder !== undefined) {
       // The reply is in the chat, and a placeholder that stays above it is all that a failure to delete it leaves.
       await messenger.delete(chatId, placeholder).catch(() => {})

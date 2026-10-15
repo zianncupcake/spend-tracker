@@ -368,11 +368,12 @@ describe('a press that fails', () => {
       return prepare(query)
     })
     const logged = catchConsole()
+    deps.ray = 'a1b2c3d4e5f60718'
 
     const pressed = await chat.press(message, FLAG)
     failing.mockRestore()
 
-    expect(pressed).toEqual({ answer: PRESS_FAILED, sent: [] })
+    expect(pressed).toEqual({ answer: `${PRESS_FAILED} Ref: a1b2c3d4e5f60718`, sent: [] })
     expect(answered).toHaveLength(1)
     expect(await categoryOf(id)).toBeNull()
     expect(marksOf(message)).toEqual(FROM_ONLINE)

@@ -180,6 +180,7 @@ beforeEach(async () => {
   Object.assign(outside, newOutside())
   clock.now = NOW
   deps.ai = ai
+  deps.ray = undefined
   sent.length = 0
   posted.length = 0
   sentRich.length = 0

@@ -19,6 +19,7 @@ import { declined, type Carried } from './shared'
 import {
   DOING,
   DONE_NO_REPLY,
+  failureReply,
   MAX_QUESTION_LENGTH,
   NO_ASSISTANT,
   NO_CARDS,
@@ -375,7 +376,7 @@ async function act(deps: Deps, how: Asking, actions: Action[], before: number): 
     } catch (error) {
       // Nothing of the error's message is logged: it could quote what the action held, or what is stored.
       logFailure('action', error, { ...noted[at], outcome: 'failed' })
-      replies.push([{ text: wentWrong(before + at, before + actions.length) }])
+      replies.push([{ text: failureReply(wentWrong(before + at, before + actions.length), error, deps.ray) }])
       skip(at + 1)
       return { replies }
     }
