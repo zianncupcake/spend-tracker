@@ -1,4 +1,4 @@
-import type { Amount } from '../domain/breakdown'
+import { inHome, type Amount } from '../domain/breakdown'
 import type { CardTotals } from '../domain/totals'
 import { carriedInto, type SpendWindow, type WindowRule } from '../domain/window'
 import type { Rates } from '../reference-rates'
@@ -75,10 +75,10 @@ export function describeTotals({ window, totals, count }: CardTotals, timeZone: 
 
 /** The amounts as `describeTotals` has them with `converted`, each rounded to the cent before they are summed. */
 function convertedTotals(totals: Amount[], { homeCurrency, rates }: Converted): string {
-  const parts = totals.map(({ currency, amountMinor }) => {
-    const money = formatMoney(amountMinor, currency)
-    if (currency === homeCurrency) return { minor: amountMinor, written: money }
-    const minor = Math.round(amountMinor / rates[currency])
+  const parts = totals.map((amount) => {
+    const money = formatMoney(amount.amountMinor, amount.currency)
+    const minor = inHome(amount, homeCurrency, rates)
+    if (amount.currency === homeCurrency) return { minor, written: money }
     return { minor, written: `${money} (≈ ${formatMoney(minor, homeCurrency)})` }
   })
   const sum = parts.reduce((total, { minor }) => total + minor, 0)

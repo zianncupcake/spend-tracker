@@ -471,11 +471,11 @@ export function breakdownLines(product: Product, breakdown: Breakdown): string[]
   const others = otherCurrencyLines(breakdown, homeCurrency)
   const terms = `Limits are from the bank's terms for the ${name}, as of ${termsAsOf}.`
   if (minimumSpendMinor === undefined) return [...others, terms]
+  const about = breakdown.foreign === 'converted' ? '≈ ' : ''
   const counted = formatMoney(breakdown.countedMinor, homeCurrency)
-  const minimum = `Minimum spend: ${counted} of ${formatMoney(minimumSpendMinor, homeCurrency)}`
+  const minimum = `Minimum spend: ${about}${counted} of ${formatMoney(minimumSpendMinor, homeCurrency)}`
   return [
-    // What a purchase in another currency comes to in the product's own is not known here.
-    breakdown.foreignLeftOut ? `${minimum}, not counting purchases in other currencies` : minimum,
+    breakdown.foreign === 'left out' ? `${minimum}, not counting purchases in other currencies` : minimum,
     ...others,
     terms,
   ]

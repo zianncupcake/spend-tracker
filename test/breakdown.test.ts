@@ -29,13 +29,11 @@ function sum(category: string | null, amountMinor: number, currency = 'SGD', cou
 
 describe('what a product makes of a window', () => {
   it('sums each group, with what no category is stored for summed into the group of the default one', () => {
-    const made = breakDown(uobEvol, [
-      sum('online', 12000),
-      sum(null, 4550),
-      sum('selected', 1598),
-      sum('other', 800),
-      sum('fx', 500, 'USD'),
-    ])
+    const made = breakDown(
+      uobEvol,
+      [sum('online', 12000), sum(null, 4550), sum('selected', 1598), sum('other', 800), sum('fx', 500, 'USD')],
+      null,
+    )
 
     expect(made.groups).toEqual([
       {
@@ -59,7 +57,7 @@ describe('what a product makes of a window', () => {
   })
 
   it('has every group even when nothing was spent in it', () => {
-    const made = breakDown(uobEvol, [])
+    const made = breakDown(uobEvol, [], null)
 
     expect(made.groups.map((group) => [group.name, group.spent])).toEqual([
       ['Online and Mobile Contactless Spend', []],
@@ -67,16 +65,15 @@ describe('what a product makes of a window', () => {
       ['Other Spend', []],
       ['Overseas Foreign Currency Spend', []],
     ])
-    expect(made).toMatchObject({ unsorted: [], countedMinor: 0, foreignLeftOut: false })
+    expect(made).toMatchObject({ unsorted: [], countedMinor: 0, foreign: 'none' })
   })
 
   it('keeps apart what is not sorted, on a product with no default category', () => {
-    const made = breakDown(NO_DEFAULT, [
-      sum(null, 1240),
-      sum(null, 700, 'USD'),
-      sum('dining', 360),
-      sum('online', 100),
-    ])
+    const made = breakDown(
+      NO_DEFAULT,
+      [sum(null, 1240), sum(null, 700, 'USD'), sum('dining', 360), sum('online', 100)],
+      null,
+    )
 
     expect(made.unsorted).toEqual([
       { currency: 'SGD', amountMinor: 1600 },
@@ -88,23 +85,22 @@ describe('what a product makes of a window', () => {
   })
 
   it("counts towards the minimum spend whatever is in the product's currency, wherever it is sorted", () => {
-    const made = breakDown(uobEvol, [
-      sum('online', 30000),
-      sum('other', 20000),
-      sum(null, 10000),
-      sum('selected', 5000),
-    ])
+    const made = breakDown(
+      uobEvol,
+      [sum('online', 30000), sum('other', 20000), sum(null, 10000), sum('selected', 5000)],
+      null,
+    )
 
     expect(made.countedMinor).toBe(65000)
-    expect(made.foreignLeftOut).toBe(false)
+    expect(made.foreign).toBe('none')
   })
 
-  it('leaves purchases in other currencies out of the minimum spend, and says that it has', () => {
+  it('leaves purchases in other currencies out of the minimum spend without rates, and says that it has', () => {
     // The last of them was flagged as made with the physical card, and is no more known in the card's own currency.
-    const made = breakDown(uobEvol, [sum('online', 30000), sum('fx', 500, 'USD'), sum('other', 9900, 'JPY')])
+    const made = breakDown(uobEvol, [sum('online', 30000), sum('fx', 500, 'USD'), sum('other', 9900, 'JPY')], null)
 
     expect(made.countedMinor).toBe(30000)
-    expect(made.foreignLeftOut).toBe(true)
+    expect(made.foreign).toBe('left out')
   })
 
   it('totals a currency once, however many categories it was spent in', () => {
@@ -120,7 +116,7 @@ describe('what comes after the tables of a window', () => {
   it('is how far the spend is towards the minimum, and whose terms the limits are from', () => {
     const sums = [sum('online', 12000), sum(null, 4550), sum('selected', 1598), sum('other', 800)]
 
-    expect(breakdownLines(uobEvol, breakDown(uobEvol, sums))).toEqual([
+    expect(breakdownLines(uobEvol, breakDown(uobEvol, sums, null))).toEqual([
       'Minimum spend: SGD 189.48 of SGD 800.00',
       TERMS,
     ])
@@ -131,7 +127,7 @@ describe('what comes after the tables of a window', () => {
 
     // The purchases in other currencies are where the product's rule puts them, in a group with no limit. So these
     // two lines are all: nothing is said of a limit that they were not taken off.
-    expect(breakdownLines(uobEvol, breakDown(uobEvol, sums))).toEqual([
+    expect(breakdownLines(uobEvol, breakDown(uobEvol, sums, null))).toEqual([
       'Minimum spend: SGD 362.40 of SGD 800.00, not counting purchases in other currencies',
       TERMS,
     ])
@@ -141,7 +137,7 @@ describe('what comes after the tables of a window', () => {
     // On the HSBC Revolution Credit Card a purchase is in the group with the limit, whatever its currency.
     const sums = [sum('eligible', 100), sum('eligible', 100, 'USD')]
 
-    expect(breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums))).toEqual([
+    expect(breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums, null))).toEqual([
       notTakenOff('USD 1.00'),
       HSBC_TERMS,
     ])
@@ -151,7 +147,7 @@ describe('what comes after the tables of a window', () => {
     // Two sums of one currency are one total. Nothing is stored for the first, which is eligible all the same.
     const sums = [sum(null, 40, 'USD'), sum('eligible', 200, 'EUR'), sum('eligible', 60, 'USD'), sum('eligible', 100)]
 
-    expect(breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums))).toEqual([
+    expect(breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums, null))).toEqual([
       notTakenOff('USD 1.00 + EUR 2.00'),
       HSBC_TERMS,
     ])
@@ -161,7 +157,7 @@ describe('what comes after the tables of a window', () => {
     // The UOB EVOL Card has two groups with a limit, and a minimum spend. The third sum is in a group without one.
     const sums = [sum('online', 100, 'USD'), sum('selected', 250, 'USD'), sum('fx', 700, 'USD')]
 
-    expect(breakdownLines(uobEvol, breakDown(uobEvol, sums))).toEqual([
+    expect(breakdownLines(uobEvol, breakDown(uobEvol, sums, null))).toEqual([
       'Minimum spend: SGD 0.00 of SGD 800.00, not counting purchases in other currencies',
       notTakenOff('USD 3.50'),
       TERMS,
@@ -169,7 +165,7 @@ describe('what comes after the tables of a window', () => {
   })
 
   it('says nothing of other currencies that only a group without a limit holds, or that there are none of', () => {
-    const lines = (sums: CategoryTotal[]) => breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums))
+    const lines = (sums: CategoryTotal[]) => breakdownLines(hsbcRevolution, breakDown(hsbcRevolution, sums, null))
 
     expect(lines([sum('eligible', 100), sum('other', 100, 'USD')])).toEqual([HSBC_TERMS])
     expect(lines([sum('eligible', 100), sum('other', 100)])).toEqual([HSBC_TERMS])

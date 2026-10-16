@@ -131,10 +131,10 @@ describe('/spend with a card, when Telegram does not take the rich message', () 
 })
 
 describe('/spend with a card that has purchases in another currency', () => {
-  /** A chat whose user has a card with no product, which is in SGD, and on it a purchase in SGD and one in MYR. */
-  async function spentInMyr() {
+  /** A chat whose user has a card in SGD, linked to the product if one is given, with a purchase in SGD and one in MYR. */
+  async function spentInMyr(product = '') {
     const chat = openChat()
-    await chat.say('/addcard amex 0005 calendar')
+    await chat.say(`/addcard amex 0005 calendar ${product}`)
     const userId = await chat.userId()
     await buy(userId, { cardLast4: '0005' })
     await buy(userId, { cardLast4: '0005', currency: 'MYR', amountMinor: 4000 })
@@ -171,6 +171,27 @@ describe('/spend with a card that has purchases in another currency', () => {
     const [total, next] = fromTotal(message)
     expect(total).toBe('Total: MYR 40.00 + SGD 12.40 in 2 purchases, resets 1 Nov')
     expect(next).toBe(OCTOBER_COUNTS)
+  })
+
+  /** The line of a reply that says how far the spend is towards the minimum. */
+  const minimumIn = ({ text }: Posted) => text.split('\n').find((line) => line.startsWith('Minimum spend: '))
+
+  it('counts the MYR towards the minimum spend of a product, converted as the total converts it', async () => {
+    const chat = await spentInMyr('uob-evol')
+    services.rates = { MYR: 4 }
+
+    const [message] = await chat.ask('/spend amex')
+
+    expect(minimumIn(message)).toContain('≈ SGD 22.40 of')
+  })
+
+  it('leaves the MYR out of the minimum spend without rates', async () => {
+    const chat = await spentInMyr('uob-evol')
+    services.rates = () => new Response(null, { status: 500 })
+
+    const [message] = await chat.ask('/spend amex')
+
+    expect(minimumIn(message)).toMatch(/^Minimum spend: SGD 12\.40 of SGD 800\.00, not counting/)
   })
 })
 

@@ -65,13 +65,14 @@ function describeWait(seconds: number): string {
 
 /** What /best answers with: the card to use, and a line for each card, best first. `options` has one at the least. */
 export function bestReply(options: Option[]): string {
-  const lines = options.map(({ card, product, bonus, group, leftMinor, neededMinor }) => {
+  const lines = options.map(({ card, product, bonus, group, leftMinor, neededMinor, neededConverted }) => {
     const money = (minor: number) => formatMoney(minor, product.homeCurrency)
     const where = group?.name ?? 'not sorted'
     const unsure = `not sure, counts in ${where} until marked`
     const said = [{ yes: `bonus in ${where}`, no: `no bonus, ${where}`, depends: unsure }[bonus]]
     if (leftMinor !== undefined) said.push(leftMinor > 0 ? `${money(leftMinor)} of the cap left` : 'cap used up')
-    if (neededMinor !== undefined) said.push(`${money(neededMinor)} more to reach the minimum spend`)
+    const about = neededConverted ? '≈ ' : ''
+    if (neededMinor !== undefined) said.push(`${about}${money(neededMinor)} more to reach the minimum spend`)
     return `${label(card)}: ${said.join(', ')}`
   })
   return [useCard(label(options[0].card)), ...lines].join('\n')
@@ -279,7 +280,8 @@ async function readWindow(store: Store, card: Card, now: Date, timeZone: string)
  * minimum, when it has one. A card with no product has one table, of all its purchases. It is one rich message. As
  * text, it can come to more than one message takes. `patterns` are the user's, on whichever card: what those of
  * this card hold back is taken off what is left of a group's limit. `rates` are today's of the card's other
- * currencies against its own, when they could be had: the total then has what each comes to in its own.
+ * currencies against its own, when they could be had: the total and the minimum spend then have what each comes to
+ * in its own.
  *
  * The purchases are those that the window counts, which begin some days before the window does: see currentWindow.
  * The heading has the window as its bank has it, each purchase has its own day, and the line under the total says
@@ -291,7 +293,7 @@ function spendDetail(
   rates: Rates | null,
   timeZone: string,
 ): Tabled {
-  const breakdown = product && breakDown(product, sums)
+  const breakdown = product && breakDown(product, sums, rates)
   // What was spent at a pattern's merchant is counted from the purchases that are listed.
   const onCard = patterns.filter(({ cardLast4 }) => cardLast4 === card.last4)
   const toCome = product ? toComeByGroup(product, onCard, latest, window, timeZone) : []

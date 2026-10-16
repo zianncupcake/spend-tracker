@@ -97,6 +97,17 @@ describe('the cards to pay with at a merchant', () => {
     expect(evol.neededMinor).toBe(80000 - 1240)
   })
 
+  it("counts a purchase in another currency towards the minimum spend, at today's rates", async () => {
+    const chat = await chatWith(EVOL)
+    await buy(await chat.userId(), { cardLast4: '5678', amountMinor: 1240 })
+    await buy(await chat.userId(), { cardLast4: '5678', amountMinor: 4000, currency: 'MYR' })
+    outside.rates = { MYR: 4 }
+
+    const [evol] = await bestAt(chat)
+
+    expect(evol).toMatchObject({ neededMinor: 80000 - 1240 - 1000, neededConverted: true })
+  })
+
   it('is answered with its usage when no merchant is given', async () => {
     expect(await openChat().say('/best')).toBe(BEST_USAGE)
   })
