@@ -27,6 +27,7 @@ export const REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
 export const TELEGRAM_URL = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`
 const STORES_URL = 'https://www.check-mcc.sg/api/store/search'
 const HEYMAX_URL = 'https://heymax.ai/api/merchants'
+const RATES_URL = 'https://api.frankfurter.dev/v1/latest'
 
 /** What the stand-in for Google and Telegram has been sent, and how it is to answer. */
 interface Outside {
@@ -83,6 +84,10 @@ interface Outside {
   stores: object[] | (() => Response | Promise<Response>)
   /** How heymax.ai answers a search, as `stores` is for check-mcc.sg: each store with its `name` and its `mcc_code`. */
   heymax: object[] | (() => Response | Promise<Response>)
+  /** What frankfurter.dev was asked for, oldest first: the parameters of each request. */
+  ratesAsked: Record<string, string>[]
+  /** How frankfurter.dev answers, whatever was asked: with these rates, or with whatever a function returns. */
+  rates: Record<string, number> | (() => Response | Promise<Response>)
 }
 
 function newOutside(): Outside {
@@ -106,6 +111,8 @@ function newOutside(): Outside {
     searches: [],
     stores: [],
     heymax: [],
+    ratesAsked: [],
+    rates: {},
   }
 }
 
@@ -197,7 +204,7 @@ afterEach(() => {
 })
 
 /**
- * Google, Telegram, the AI provider, check-mcc.sg and heymax.ai are reached with the
+ * Google, Telegram, the AI provider, check-mcc.sg, heymax.ai and frankfurter.dev are reached with the
  * global fetch. This takes its place, so no test signs in to anything real, or asks a
  * real model or a real list of stores anything. Its Google has an account for
  * every authorisation code:
@@ -302,6 +309,12 @@ async function fakeFetch(url: string, init: RequestInit = {}): Promise<Response>
       outside.searches.push(searchParams.get('query') ?? '')
       const { heymax } = outside
       return unlessEnded(init.signal, typeof heymax === 'function' ? heymax() : Response.json(heymax))
+    }
+    case RATES_URL: {
+      outside.ratesAsked.push(Object.fromEntries(searchParams))
+      const { rates } = outside
+      const answer = { base: searchParams.get('base'), date: '2026-10-09', rates }
+      return unlessEnded(init.signal, typeof rates === 'function' ? rates() : Response.json(answer))
     }
     default:
       throw new Error('A test made a request it should not have')

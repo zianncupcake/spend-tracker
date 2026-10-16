@@ -13,7 +13,7 @@ import type { RichBlock } from './api'
 import { commandIn, ran } from './commands'
 import { confirmFor } from './confirming'
 import { inMessages, MAX_LENGTH, sortEnd } from './purchases'
-import { busyReply, label, spendDetail } from './replies'
+import { busyReply, label, spendDetails } from './replies'
 import type { Asked, Deferred, Made, Reply, Sent, Tabled } from './sending'
 import { declined, type Carried } from './shared'
 import {
@@ -430,7 +430,7 @@ function wentWrong(answered: number, asked: number): string {
  * /spend shows, in the bot's own tables: none of it is a model's writing.
  *
  * `nickname` is the card to show, as the assistant gave it, or nothing for every card. One card is shown as /spend
- * with its nickname shows it: see spendDetail. Every card is shown so too, each in a reply of its own and in the
+ * with its nickname shows it: see spendDetails. Every card is shown so too, each in a reply of its own and in the
  * order that /cards lists them in, when their user has no more of them than SHOWN_IN_FULL. A user with more is
  * shown what /spend with no card named shows: a row for each card, in the one table of one message.
  *
@@ -456,11 +456,11 @@ async function showAsked(deps: Deps, how: Asking, nickname?: string): Promise<Ca
   // The cards that are each shown in full: every card, or the one of that nickname, when there is one.
   const shown = nickname === undefined ? cards : cards.filter((card) => card.nickname === nickname)
   if (shown.length === 0) return declined(NOT_DONE)
-  // The user's patterns, which are read once for all the cards, and two queries for each card: see spendDetail.
+  // The user's patterns, which are read once for all the cards, and two queries for each card: see spendDetails.
   if (!take(room, 1 + 2 * shown.length)) return 'full'
   const now = deps.now()
   const patterns = await store.listPatterns()
-  const replies = await Promise.all(shown.map((card) => spendDetail(store, card, patterns, now, user.timezone)))
+  const replies = await spendDetails(store, shown, patterns, now, user.timezone)
   return { replies, outcome: 'done' }
 }
 

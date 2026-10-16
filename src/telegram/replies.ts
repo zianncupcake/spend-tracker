@@ -8,6 +8,7 @@ import { groupFor, toComeByGroup } from '../domain/patterns'
 import { WINDOW_LIMIT } from '../domain/sorting'
 import type { CardTotals } from '../domain/totals'
 import { countedIn, currentWindow } from '../domain/window'
+import { ratesFor, type Rates } from '../reference-rates'
 import { MANUAL, type Card, type Pattern, type Store } from '../store'
 import type { Connection } from '../store-connect'
 import type { MailSummary } from '../store-mail'
@@ -39,7 +40,7 @@ import {
 } from './purchases'
 import type { Tabled } from './sending'
 import { DEFAULT_CURRENCY } from './shared'
-import { HOLDS_NOTHING, STATUS_DAYS, useCard } from './texts'
+import { AT_REFERENCE_RATES, HOLDS_NOTHING, STATUS_DAYS, useCard } from './texts'
 
 /**
  * What a question is answered with when the AI provider has had as many requests as it takes for now. It says when
@@ -231,32 +232,65 @@ export function productsReply(): Tabled {
 }
 
 /**
- * A card's current window in full: its purchases from the earliest on, in tables that end with what they come to,
- * and after the tables what the whole window comes to. A card with a product has a table for each group of the
- * product, which ends with the group's limit where it has one, and then how far the spend is towards the product's
- * minimum, when it has one. A card with no product has one table, of all its purchases. It is one rich message. As
- * text, it can come to more than one message takes. `patterns` are the user's, on whichever card: what those of
- * this card hold back is taken off what is left of a group's limit.
- *
- * The purchases are those that the window counts, which begin some days before the window does: see currentWindow.
- * The heading has the window as its bank has it, each purchase has its own day, and the line under the total says
- * which days are counted, and why.
+ * Each card's current window in full, as spendDetail sets it out, in the order of the cards. What a card's purchases
+ * in other currencies come to in its own is asked once for all the cards of that home currency: see ratesFor. A
+ * card has nothing of it when the rates could not be had.
  */
-export async function spendDetail(
+export async function spendDetails(
   store: Store,
-  card: Card,
+  cards: Card[],
   patterns: Pattern[],
   now: Date,
   timeZone: string,
-): Promise<Tabled> {
+): Promise<Tabled[]> {
+  const read = await Promise.all(cards.map((card) => readWindow(store, card, now, timeZone)))
+  const foreignOf = ({ homeCurrency, sums }: ReadWindow) =>
+    sums.map(({ currency }) => currency).filter((currency) => currency !== homeCurrency)
+  const homes = [...new Set(read.map(({ homeCurrency }) => homeCurrency))]
+  const ratesOf = async (home: string) => {
+    const foreign = read.filter(({ homeCurrency }) => homeCurrency === home).flatMap(foreignOf)
+    return [home, await ratesFor(home, [...new Set(foreign)])] as const
+  }
+  const rates = new Map(await Promise.all(homes.map(ratesOf)))
+  return read.map((each) => spendDetail(each, patterns, rates.get(each.homeCurrency) ?? null, timeZone))
+}
+
+type ReadWindow = Awaited<ReturnType<typeof readWindow>>
+
+/**
+ * A card's current window, in two queries however many purchases there are: the sums, which take in all of them, and
+ * the latest to list.
+ */
+async function readWindow(store: Store, card: Card, now: Date, timeZone: string) {
   const window = currentWindow(card, now, timeZone)
   const { start, end } = countedIn(window)
-  // Two queries, however many purchases there are: the sums, which take in all of them, and the latest to list.
   const [sums, latest] = await Promise.all([
     store.sumByCategory(card.last4, start, end),
     store.listTransactions(card.last4, start, end, WINDOW_LIMIT),
   ])
   const product = productOf(card.product)
+  return { card, product, window, sums, latest, homeCurrency: product?.homeCurrency ?? DEFAULT_CURRENCY }
+}
+
+/**
+ * A card's current window in full: its purchases from the earliest on, in tables that end with what they come to,
+ * and after the tables what the whole window comes to. A card with a product has a table for each group of the
+ * product, which ends with the group's limit where it has one, and then how far the spend is towards the product's
+ * minimum, when it has one. A card with no product has one table, of all its purchases. It is one rich message. As
+ * text, it can come to more than one message takes. `patterns` are the user's, on whichever card: what those of
+ * this card hold back is taken off what is left of a group's limit. `rates` are today's of the card's other
+ * currencies against its own, when they could be had: the total then has what each comes to in its own.
+ *
+ * The purchases are those that the window counts, which begin some days before the window does: see currentWindow.
+ * The heading has the window as its bank has it, each purchase has its own day, and the line under the total says
+ * which days are counted, and why.
+ */
+function spendDetail(
+  { card, product, window, sums, latest, homeCurrency }: ReadWindow,
+  patterns: Pattern[],
+  rates: Rates | null,
+  timeZone: string,
+): Tabled {
   const breakdown = product && breakDown(product, sums)
   // What was spent at a pattern's merchant is counted from the purchases that are listed.
   const onCard = patterns.filter(({ cardLast4 }) => cardLast4 === card.last4)
@@ -270,9 +304,11 @@ export async function spendDetail(
   }))
   // A card with a product has a table for each group of the product. A card with none has one table, of all that
   // is listed, when anything is.
-  const whole: Section[] = listed.length > 0 ? [{ purchases: listed, spent: perCurrency(sums) }] : []
+  const totals = perCurrency(sums)
+  const whole: Section[] = listed.length > 0 ? [{ purchases: listed, spent: totals }] : []
   const sections = product && breakdown ? sectionsOf(product, breakdown, listed, toCome) : whole
-  const homeCurrency = product?.homeCurrency ?? DEFAULT_CURRENCY
+  const foreign = totals.some(({ currency }) => currency !== homeCurrency)
+  const converted = rates && foreign ? { homeCurrency, rates } : undefined
 
   // What is said around the tables: a heading, and the lines above the tables and below them, a part at a time.
   const heading = `${label(card)}: ${shortDate(window.start)} to ${shortDate(new Date(window.end.getTime() - 1))}`
@@ -283,7 +319,8 @@ export async function spendDetail(
       ...(toCome.some((minor) => minor > 0) ? [TO_COME_NOTE] : []),
     ],
     [
-      `Total: ${describeTotals({ card, window, totals: perCurrency(sums), count }, timeZone)}`,
+      `Total: ${describeTotals({ card, window, totals, count }, timeZone, converted)}`,
+      ...(converted ? [AT_REFERENCE_RATES] : []),
       ...describeCounted(card, window, shortDate),
     ],
     product && breakdown ? breakdownLines(product, breakdown) : [],

@@ -1,5 +1,7 @@
+import type { Amount } from '../domain/breakdown'
 import type { CardTotals } from '../domain/totals'
 import { carriedInto, type SpendWindow, type WindowRule } from '../domain/window'
+import type { Rates } from '../reference-rates'
 import type { Card } from '../store'
 
 const thousands = new Intl.NumberFormat('en-US')
@@ -54,11 +56,33 @@ export function describeWindow(card: WindowRule): string {
     : `statement closes on the ${ordinal(card.statementDay)} of the month`
 }
 
-/** What a card's window holds and when it starts again, such as "SGD 12.40 in 1 purchase, resets 16 Oct". */
-export function describeTotals({ window, totals, count }: CardTotals, timeZone: string): string {
-  const amounts = formatTotals(totals)
+/** The home currency of a card, and today's rates of its other currencies against it: see ratesFor. */
+interface Converted {
+  homeCurrency: string
+  rates: Rates
+}
+
+/**
+ * What a card's window holds and when it starts again, such as "SGD 12.40 in 1 purchase, resets 16 Oct". With
+ * `converted`, each amount in another currency has what it comes to in the home currency beside it, and the amounts
+ * have their sum in that currency after them: "MYR 40.00 (≈ SGD 10.00) + SGD 12.40 ≈ SGD 22.40, in 2 purchases".
+ */
+export function describeTotals({ window, totals, count }: CardTotals, timeZone: string, converted?: Converted): string {
+  const amounts = converted ? `${convertedTotals(totals, converted)},` : formatTotals(totals)
   const spent = count === 0 ? 'no purchases' : `${amounts} in ${count} ${count === 1 ? 'purchase' : 'purchases'}`
   return `${spent}, resets ${formatShortDate(window.end, timeZone)}`
+}
+
+/** The amounts as `describeTotals` has them with `converted`, each rounded to the cent before they are summed. */
+function convertedTotals(totals: Amount[], { homeCurrency, rates }: Converted): string {
+  const parts = totals.map(({ currency, amountMinor }) => {
+    const money = formatMoney(amountMinor, currency)
+    if (currency === homeCurrency) return { minor: amountMinor, written: money }
+    const minor = Math.round(amountMinor / rates[currency])
+    return { minor, written: `${money} (≈ ${formatMoney(minor, homeCurrency)})` }
+  })
+  const sum = parts.reduce((total, { minor }) => total + minor, 0)
+  return `${parts.map(({ written }) => written).join(' + ')} ≈ ${formatMoney(sum, homeCurrency)}`
 }
 
 // What the bot says of the days that a total counts. A purchase is known by the day that it was made, and a bank

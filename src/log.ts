@@ -111,6 +111,7 @@ export interface Events {
   review: { user: number | null; outcome: 'offered' | 'nothing' | 'blocked' | 'failed'; offered: number }
   alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | null }
   mcc_lookup: { source: 'check-mcc.sg' | 'heymax.ai'; outcome: 'found' | 'none' | 'failed' }
+  rates_lookup: { outcome: 'found' | 'failed' }
   connect_link: { user: number }
   connect_callback: {
     outcome:
@@ -256,6 +257,7 @@ export type Reason =
   | 'no_vision_model'
   | 'cut_short'
   | 'no_stores'
+  | 'no_rates'
 
 /**
  * An error that this codebase throws of its own accord. It says what went wrong twice: in its message, for whoever

@@ -35,7 +35,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/removecard <nickname>` | Stops tracking a card. |
 | `/renamecard <nickname> <new nickname>` | Gives a card another nickname. Nothing else of the card changes. |
 | `/spend` | Shows what you have spent on each card in its current window. |
-| `/spend <nickname>` | Lists every purchase on one card in its current window, with what they come to. |
+| `/spend <nickname>` | Lists every purchase on one card in its current window, with what they come to. Where some are in another currency, the total has what each of those comes to in the card's own beside it, and the sum, at the European Central Bank's reference rates of the day from frankfurter.dev. |
 | `/best <merchant>` | Says which of your cards to pay with at a merchant: by whether it earns the card's bonus there and what is left of the cap, not by earn rates, which the bot does not know. |
 | `/add <nickname> <amount> <merchant>` | Adds a purchase by hand. Its date can go before the merchant. |
 | `/remove <purchase id>` | Takes a purchase out. |
@@ -342,6 +342,7 @@ There are two places to read the log:
 | `review` | A user's monthly review, which a scheduled run made after its reminder and before its `check` line: `offered`, `nothing` when there was nothing to offer, `blocked` by its chat or `failed`. `offered` is how many patterns it offered. One that was `blocked` or `failed` is not made again that month, and what it had to offer is offered by the next, though some of its messages may have been sent. One whose next 1st could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. A run that only sets when a user is next due, the first time it sees them or after `/timezone`, writes no line. |
 | `alert` | An alert that was given to the parser of its bank: `stored`, `duplicate` or `unparsed`. An `unparsed` is what a bank that has changed the wording of its alerts looks like. |
 | `mcc_lookup` | A search of one of two services for the category code of a merchant, as a purchase is added: `found` when it listed stores, `none` when it listed none, or `failed`. Both are searched at the same time, so a search writes two lines, each with its `source`: `check-mcc.sg`, which comes first, and `heymax.ai`, whose stores are used only for a merchant that the first lists no store for. One that `failed` was not answered in 2 seconds, or was answered with an error, which is a 429 when check-mcc.sg has had its 100 requests in 15 minutes: the purchase is added all the same, with no category from a code of that service. |
+| `rates_lookup` | A request to frankfurter.dev for the rates of a reply to `/spend` with a card, or of the assistant's showing of cards: `found`, or `failed` when it was not answered in 2 seconds, was answered with an error, or lacked a rate of one of the currencies. The total is then shown without them. |
 | `connect_link` | `/connect` gave a user a sign-in link. |
 | `connect_callback` | Google sent a browser back to `/oauth/callback`, with what came of it. |
 | `connect_code` | Six digits were sent in a chat, with whether they connected the mailbox. |

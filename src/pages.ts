@@ -178,6 +178,9 @@ paid in the two months before, each with its card and what you spent there in a 
 <li>check-mcc.sg and heymax.ai, two public services that list the category codes of merchants, are each sent the
 first word of a merchant's name to look up its code, when a purchase is added at a merchant whose code the bot does
 not know. Nothing that is sent with the word says whose purchase it is.</li>
+<li>frankfurter.dev, a public service of the European Central Bank's exchange rates, is sent the codes of the
+currencies of a card's purchases, such as MYR, when <code>/spend</code> shows a card with purchases in another
+currency. No amount is sent, and nothing that is sent with the codes says whose purchases they are.</li>
 <li>An AI assistant that you connect with your assistant access token can read your card totals and purchases,
 until you remove the token with <code>/mcp revoke</code>.</li>${assistant ? provider : ''}
 </ul>

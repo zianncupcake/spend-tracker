@@ -13,10 +13,11 @@ import {
   NO_PURCHASES_SAID,
   NOT_DONE,
   SEE_REPLY,
+  AT_REFERENCE_RATES,
   SORTED_AGAIN,
   WILL_SORT_AGAIN,
 } from '../src/telegram/texts'
-import { connectedChat, connectionOf, deps, openChat, sentRich, signIn, type Posted } from './connect-helpers'
+import { connectedChat, connectionOf, deps, openChat, outside, sentRich, signIn, type Posted } from './connect-helpers'
 import {
   bold,
   buy,
@@ -174,6 +175,20 @@ describe('what was spent, when the assistant makes out that it is to be shown', 
     ])
     // Each is the reply to /spend with its card, whole.
     expect(rich).toEqual([await chat.rich('/spend visa'), await chat.rich('/spend evol')])
+  })
+
+  it("has today's rates of every card's other currencies asked for in one request, when every card is shown", async () => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    await buy(userId, { currency: 'MYR' })
+    await buy(userId, { cardLast4: '5678', currency: 'USD' })
+    outside.rates = { MYR: 4, USD: 0.8 }
+    acting({ kind: 'show' })
+
+    const { rich } = await told(chat)
+
+    expect(rich.map((shown) => linesOf(shown).includes(AT_REFERENCE_RATES))).toEqual([true, true])
+    expect(outside.ratesAsked).toEqual([{ base: 'SGD', symbols: 'MYR,USD' }])
   })
 
   it('is shown in full for five cards at the most: a user with six is shown what /spend with no card named shows, which is one table of them all', async () => {
