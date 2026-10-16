@@ -39,7 +39,7 @@ import {
   patternLine,
   patternsReply,
   productsReply,
-  spendDetail,
+  spendDetails,
   spendReply,
   statusReply,
 } from './replies'
@@ -186,7 +186,8 @@ export async function reply(
       if (args.length === 1) {
         const card = cards.find((each) => each.nickname === nickname)
         if (!card) return `You have no card called ${nickname}.`
-        return spendDetail(store, card, await store.listPatterns(), now(), timezone)
+        const [detail] = await spendDetails(store, [card], await store.listPatterns(), now(), timezone)
+        return detail
       }
       return spendReply(await cardTotals(store, cards, now(), timezone), timezone)
     }

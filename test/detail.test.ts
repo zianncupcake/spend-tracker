@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TelegramError } from '../src/telegram/api'
 import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { BY_HAND_NOTE } from '../src/telegram/purchases'
-import { FAILED } from '../src/telegram/texts'
-import { clock, deps, openChat, sent, sentRich, type Posted } from './connect-helpers'
+import { AT_REFERENCE_RATES, FAILED } from '../src/telegram/texts'
+import { clock, deps, openChat, outside as services, sent, sentRich, type Posted } from './connect-helpers'
 import { buy } from './helpers'
 import { catchConsole } from './log-helpers'
 
@@ -109,6 +109,8 @@ describe('/spend with a card, when Telegram does not take the rich message', () 
       { event: 'update', kind: 'command', command: 'spend', outcome: 'replied', ms: 0 },
     ])
     for (const text of ['amex', '0005', 'COFFEE', '12.40']) expect(logged.text()).not.toContain(text)
+    // A card whose purchases are all in its own currency has no rates asked for.
+    expect(services.ratesAsked).toEqual([])
   })
 
   it('sends nothing as text after a request that never reached Telegram, and logs the update as one that failed', async () => {
@@ -125,6 +127,50 @@ describe('/spend with a card, when Telegram does not take the rich message', () 
     // The reply had been made, and it was the sending of it that failed: so the log has the command as handled.
     const line = { event: 'update', kind: 'command', command: 'spend', outcome: 'failed', handled: true, told: true }
     expect(logged.events()).toEqual([{ ...line, ms: 0, error: 'TypeError' }])
+  })
+})
+
+describe('/spend with a card that has purchases in another currency', () => {
+  /** A chat whose user has a card with no product, which is in SGD, and on it a purchase in SGD and one in MYR. */
+  async function spentInMyr() {
+    const chat = openChat()
+    await chat.say('/addcard amex 0005 calendar')
+    const userId = await chat.userId()
+    await buy(userId, { cardLast4: '0005' })
+    await buy(userId, { cardLast4: '0005', currency: 'MYR', amountMinor: 4000 })
+    return chat
+  }
+
+  /** The lines of a reply from the one that has the total of the window on. */
+  function fromTotal({ text }: Posted): string[] {
+    const lines = text.split('\n')
+    return lines.slice(lines.findIndex((line) => line.startsWith('Total: ')))
+  }
+
+  it("has what the MYR comes to in SGD beside it, and the sum in SGD, at today's rates", async () => {
+    const chat = await spentInMyr()
+    services.rates = { MYR: 4 }
+
+    const [message] = await chat.ask('/spend amex')
+
+    const [total, note] = fromTotal(message)
+    expect(total).toContain('MYR 40.00 (≈ SGD 10.00) + SGD 12.40 ≈ SGD 22.40,')
+    expect(note).toBe(AT_REFERENCE_RATES)
+    expect(services.ratesAsked).toEqual([{ base: 'SGD', symbols: 'MYR' }])
+  })
+
+  it.each<[string, typeof services.rates]>([
+    ['answers 500', () => new Response(null, { status: 500 })],
+    ['has no rate of MYR', { USD: 0.8 }],
+  ])('has the total as it is without rates, when frankfurter.dev %s', async (_, rates) => {
+    const chat = await spentInMyr()
+    services.rates = rates
+
+    const [message] = await chat.ask('/spend amex')
+
+    const [total, next] = fromTotal(message)
+    expect(total).toBe('Total: MYR 40.00 + SGD 12.40 in 2 purchases, resets 1 Nov')
+    expect(next).toBe(OCTOBER_COUNTS)
   })
 })
 

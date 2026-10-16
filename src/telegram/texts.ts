@@ -232,6 +232,9 @@ export const PHOTO_READ_NO_REPLY =
 
 export const NO_CARDS = `You have no cards yet. Add one with:\n${ADD_CARD_USAGE}`
 
+/** What follows a card's total whose amounts in other currencies have what they come to in its own beside them. */
+export const AT_REFERENCE_RATES = "≈ at today's reference rates; the bank's rate and fees differ."
+
 export const NONE_LINKED =
   'None of your cards is linked to a product, so the bot does not know where a purchase would earn a bonus. To ' +
   'link one, send /product <nickname> <product key>.'
