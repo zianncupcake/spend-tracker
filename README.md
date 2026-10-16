@@ -342,7 +342,7 @@ There are two places to read the log:
 | `review` | A user's monthly review, which a scheduled run made after its reminder and before its `check` line: `offered`, `nothing` when there was nothing to offer, `blocked` by its chat or `failed`. `offered` is how many patterns it offered. One that was `blocked` or `failed` is not made again that month, and what it had to offer is offered by the next, though some of its messages may have been sent. One whose next 1st could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. A run that only sets when a user is next due, the first time it sees them or after `/timezone`, writes no line. |
 | `alert` | An alert that was given to the parser of its bank: `stored`, `duplicate` or `unparsed`. An `unparsed` is what a bank that has changed the wording of its alerts looks like. |
 | `mcc_lookup` | A search of one of two services for the category code of a merchant, as a purchase is added: `found` when it listed stores, `none` when it listed none, or `failed`. Both are searched at the same time, so a search writes two lines, each with its `source`: `check-mcc.sg`, which comes first, and `heymax.ai`, whose stores are used only for a merchant that the first lists no store for. One that `failed` was not answered in 2 seconds, or was answered with an error, which is a 429 when check-mcc.sg has had its 100 requests in 15 minutes: the purchase is added all the same, with no category from a code of that service. |
-| `rates_lookup` | A request to frankfurter.dev for the rates of a reply to `/spend` with a card, or of the assistant's showing of cards: `found`, or `failed` when it was not answered in 2 seconds, was answered with an error, or lacked a rate of one of the currencies. The total is then shown without them. |
+| `rates_lookup` | A request to frankfurter.dev for the rates of a reply to `/spend` with a card or to `/best`, or of the assistant's showing of cards: `found`, or `failed` when it was not answered in 2 seconds, was answered with an error, or lacked a rate of one of the currencies. The total and the minimum spend are then shown without them. |
 | `connect_link` | `/connect` gave a user a sign-in link. |
 | `connect_callback` | Google sent a browser back to `/oauth/callback`, with what came of it. |
 | `connect_code` | Six digits were sent in a chat, with whether they connected the mailbox. |
@@ -401,8 +401,10 @@ a minute with no `check` line, or an `update` that was `deferred` with nothing a
   the other three products, and is taken to hold for other cards. The two days are the owner's choice: how long a
   posting takes was not measured.
 - A cap counts the card's own currency only. A purchase in another currency is listed and totalled in its own
-  currency, is not taken off what is left of a cap, and is left out of the minimum spend: an alert does not say
-  what it comes to in the card's currency.
+  currency, and is not taken off what is left of a cap: an alert does not say what it comes to in the card's
+  currency. The terms of the UOB product count every purchase of the month towards its minimum spend, whatever its
+  currency, so `/spend` with a card and `/best` count one at the day's reference rates, as an estimate, and leave it
+  out when the rates cannot be had.
 - A product's limits are held against the card's window as the card was added. The terms of the HSBC, OCBC and DBS
   products count by the calendar month, and those of the UOB product by the statement month: a card has to be
   added with `calendar`, or with its statement day, for its limit to be counted as the bank counts it. Nothing

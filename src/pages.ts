@@ -180,7 +180,7 @@ first word of a merchant's name to look up its code, when a purchase is added at
 not know. Nothing that is sent with the word says whose purchase it is.</li>
 <li>frankfurter.dev, a public service of the European Central Bank's exchange rates, is sent the codes of the
 currencies of a card's purchases, such as MYR, when <code>/spend</code> shows a card with purchases in another
-currency. No amount is sent, and nothing that is sent with the codes says whose purchases they are.</li>
+currency, or <code>/best</code> counts them towards a minimum spend. No amount is sent, and nothing that is sent with the codes says whose purchases they are.</li>
 <li>An AI assistant that you connect with your assistant access token can read your card totals and purchases,
 until you remove the token with <code>/mcp revoke</code>.</li>${assistant ? provider : ''}
 </ul>
