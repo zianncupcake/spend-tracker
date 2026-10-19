@@ -17,6 +17,7 @@ import { busyReply, label, spendDetails } from './replies'
 import type { Asked, Deferred, Made, Reply, Sent, Tabled } from './sending'
 import { declined, type Carried } from './shared'
 import {
+  assumedCodes,
   DOING,
   DONE_NO_REPLY,
   failureReply,
@@ -210,7 +211,8 @@ export function ask(
       switch (result.status) {
         case 'answered':
           read = result.afterReading
-          return { outcome: 'answered', rich: answered(result.text) }
+          const { text, assumed } = result
+          return { outcome: 'answered', rich: answered(assumed.length ? `${text}\n${assumedCodes(assumed)}` : text) }
         case 'acting': {
           asked.actions = result.actions.length
           // Nothing is begun once the time is up: its user has been told so by then, and may ask again.
