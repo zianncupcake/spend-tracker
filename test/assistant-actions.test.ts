@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { answerQuestion, MAX_ACTIONS, type Answer, type Taken } from '../src/ai/assistant'
 import type { AiProvider } from '../src/ai/provider'
-import { productTerms, rulesFor } from '../src/catalogue'
+import { productTerms, rulesForCode } from '../src/catalogue'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { depsFor, type Deps } from '../src/deps'
 import { findOrCreateUser, storeFor, type User } from '../src/store'
@@ -364,7 +364,7 @@ describe('a call of card_rules', () => {
     await ask(user, 'A made-up asking.')
 
     const [rules, terms, noSuchCode] = requests()[1].messages.slice(3).map(({ content }) => content)
-    expect(rules).toBe(JSON.stringify(rulesFor({ mcc: 5812 })))
+    expect(rules).toBe(JSON.stringify(rulesForCode(5812, undefined)))
     // A call with no argument asks what the products' terms are.
     expect(terms).toBe(JSON.stringify(productTerms()))
     // A call whose code is no code is told which argument was wrong.

@@ -1,13 +1,17 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai/provider'
+import { hsbcRevolution } from '../src/catalogue/hsbc-revolution'
+import { uobEvol } from '../src/catalogue/uob-evol'
 import { depsFor } from '../src/deps'
+import { storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
 import { handleUpdate, type Update } from '../src/telegram/handler'
 import { busyReply } from '../src/telegram/replies'
 import {
   ASK,
   ASK_TOO,
+  assumedCodes,
   COMMANDS,
   NOT_ANSWERED,
   QUESTION_TOO_LONG,
@@ -514,6 +518,65 @@ describe('a model that calls find_purchases', () => {
     expect(none.transactions).toMatchObject([{ merchant: 'BOOK SHOP' }, { merchant: 'COFFEE PLACE' }])
     expect(nulls).toEqual(none)
     expect(one.transactions).toMatchObject([{ merchant: 'BOOK SHOP' }])
+  })
+})
+
+describe('a model that calls card_rules about a merchant', () => {
+  /** What card_rules answers for a merchant that the bot's own list does not know. */
+  async function rulesAt(arrange: (chat: ReturnType<typeof openChat>) => Promise<unknown> = async () => {}) {
+    const chat = openChat()
+    await arrange(chat)
+    outside.model = [calling(['call_1', 'card_rules', { merchant: 'SAMPLE EATERY' }]), saying('A made-up answer.')]
+
+    await chat.rich('Does SAMPLE EATERY earn a bonus?')
+
+    return dataOf(messagesOf(2).at(-1)!)
+  }
+
+  /** What the answer has of the product with the name. */
+  const of = (rules: { products: { product: string }[] }, name: string) =>
+    rules.products.find(({ product }) => product === name)
+
+  it('is told the code that the lookup finds for it, and the bonus of that code', async () => {
+    outside.stores = [{ Store: 'Sample Eatery', MCC: '5812' }]
+
+    const rules = await rulesAt()
+
+    expect(rules.mcc).toBe(5812)
+    expect(of(rules, hsbcRevolution.name)).toMatchObject({ bonus: 'yes', by: 'code' })
+  })
+
+  it('is told the bonus of the category that its user marked the merchant as', async () => {
+    const mark = async (chat: ReturnType<typeof openChat>) =>
+      storeFor(env.DB, await chat.userId()).remember('hsbc-revolution', 'Sample Eatery', 'other')
+
+    expect(of(await rulesAt(mark), hsbcRevolution.name)).toMatchObject({ bonus: 'no', by: 'mark' })
+  })
+
+  it('is told that the bonus depends when nothing places the merchant, and what each bonus group goes by', async () => {
+    const rules = await rulesAt()
+
+    expect(of(rules, hsbcRevolution.name)).toMatchObject({ bonus: 'depends', by: null })
+    const gym = { group: 'Selected Gym, Telco and Streaming Spend', goesBy: 'named merchants' }
+    expect(of(rules, uobEvol.name)).toMatchObject({ bonusGroups: expect.arrayContaining([gym]) })
+  })
+})
+
+describe('an answer that went by a code that card_rules was given with no merchant', () => {
+  const ASSUMING = 'Assuming code 4121, usual for ride-hailing, a made-up answer.'
+  const RIDE = 'Does A MADE-UP RIDE earn a bonus?'
+
+  it.each([
+    ['is followed by a line that says the code is assumed', RIDE, 'A made-up answer.', true],
+    ['is not, when the question has the code', 'Does code 4121 earn a bonus?', 'A made-up answer.', false],
+    ['is not, when the answer says the code is assumed', RIDE, ASSUMING, false],
+  ])('%s', async (_, question, said, followed) => {
+    const chat = openChat()
+    outside.model = [calling(['call_1', 'card_rules', { mcc: 4121, merchant: null }]), saying(said)]
+
+    const lines = linesOf(await chat.rich(question))
+
+    expect(lines).toEqual(followed ? [said, assumedCodes([4121])] : [said])
   })
 })
 

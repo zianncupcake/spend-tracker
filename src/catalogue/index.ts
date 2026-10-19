@@ -99,35 +99,60 @@ export function byCodes(product: Product): boolean {
 }
 
 /**
- * Where each product counts a purchase in its own currency, at a merchant of the code or of the name: what the
- * assistant's card_rules answers. A name that the product lists comes before a code, as in `startingCategory`. The
- * code is the one that was given or, with none, the one that ./merchants knows for the name: `mcc` is that, or null.
- * `bonus` is 'yes' or 'no' when a rule of the product put the purchase in its group: a group with a limit is one
- * that earns the bonus, on every product here. It is 'depends' when no rule did: the group is then only the one
- * that a purchase starts in, and is null on a product that leaves such a purchase not sorted.
+ * The category that a purchase is placed in on a product, and by what: a name that the product lists, a merchant
+ * code, or its user's mark of the merchant.
  */
-export function rulesFor(asked: { mcc?: number; merchant?: string }) {
-  const { merchant } = asked
-  const mcc = asked.mcc ?? (merchant === undefined ? undefined : codeOf(merchant))
+export interface Placed {
+  category: string
+  by: 'name' | 'code' | 'mark'
+}
+
+/**
+ * Where each product counts a purchase in its own currency: what the assistant's card_rules answers. `placed` is
+ * where each product, in the order of `products`, places the purchase, or undefined where nothing does. `mcc` is the
+ * code that was asked about or that is known for the merchant, or null. `bonus` is 'yes' or 'no' when the purchase
+ * was placed in its group: a group with a limit is one that earns the bonus, on every product here. It is 'depends'
+ * when it was not: the group is then only the one that a purchase starts in, and is null on a product that leaves
+ * such a purchase not sorted. `bonusGroups` are the groups with a limit, and what each goes by.
+ */
+export function rulesFor(mcc: number | null, placed: (Placed | undefined)[]) {
   return {
-    mcc: mcc ?? null,
-    products: products.map((product) => {
-      const byName = merchant === undefined ? undefined : ruledByName(product, merchant)
-      const byCode = mcc === undefined ? undefined : ruledByCode(product, mcc)
-      const { group, bonus } = placing(product, byName ?? byCode)
+    mcc,
+    products: products.map((product, at) => {
+      const { group, bonus } = placing(product, placed[at]?.category)
       return {
         product: product.name,
         group: group?.name ?? null,
         monthlyCap: money(group?.limitMinor, product.homeCurrency),
         bonus,
+        by: placed[at]?.by ?? null,
+        bonusGroups: product.groups
+          .filter(({ limitMinor }) => limitMinor !== undefined)
+          .map((each) => ({ group: each.name, goesBy: goesBy(each) })),
       }
     }),
   }
 }
 
 /**
- * The group that a purchase in the product's own currency counts in, when a rule put it in the category `ruled` or
- * no rule did, and whether that earns the bonus: see `rulesFor`.
+ * What card_rules answers for a code that it is given, at the merchant when one is named: the rules of each product
+ * alone place the purchase, and a name that the product lists comes before the code, as in `startingCategory`.
+ */
+export function rulesForCode(mcc: number, merchant: string | undefined) {
+  return rulesFor(
+    mcc,
+    products.map((product): Placed | undefined => {
+      const byName = merchant === undefined ? undefined : ruledByName(product, merchant)
+      if (byName !== undefined) return { category: byName, by: 'name' }
+      const byCode = ruledByCode(product, mcc)
+      return byCode === undefined ? undefined : { category: byCode, by: 'code' }
+    }),
+  )
+}
+
+/**
+ * The group that a purchase in the product's own currency counts in, when it was placed in the category `ruled` or
+ * was not, and whether that earns the bonus: see `rulesFor`.
  */
 export function placing(product: Product, ruled: string | undefined): { group?: Group; bonus: Bonus } {
   const group = groupOf(product, categoryOf(product, ruled ?? null))
@@ -138,16 +163,29 @@ export type Bonus = 'yes' | 'no' | 'depends'
 
 /**
  * What each product's terms set for a month, in the order of the catalogue: its minimum spend, and the limit of each
- * of its groups. Null is for one that the terms do not set. It is what the assistant's card_rules answers when it is
- * asked about no purchase.
+ * of its groups and what a purchase gets into the group by. Null is for one that the terms do not set. It is what the
+ * assistant's card_rules answers when it is asked about no purchase.
  */
 export function productTerms() {
   return products.map(({ name, termsAsOf, minimumSpendMinor, homeCurrency, groups }) => ({
     product: name,
     termsAsOf,
     monthlyMinimumSpend: money(minimumSpendMinor, homeCurrency),
-    groups: groups.map((group) => ({ group: group.name, monthlyCap: money(group.limitMinor, homeCurrency) })),
+    groups: groups.map((group) => ({
+      group: group.name,
+      monthlyCap: money(group.limitMinor, homeCurrency),
+      goesBy: goesBy(group),
+    })),
   }))
+}
+
+/**
+ * What a purchase gets into the group by: merchant codes, or only the merchants that the terms name, which a merchant
+ * of the same kind is not. Null for neither, as for a group that goes by how a purchase is paid.
+ */
+function goesBy({ categories }: Group): 'codes' | 'named merchants' | null {
+  if (categories.some(({ mccs }) => mccs !== undefined)) return 'codes'
+  return categories.some(({ automatic }) => automatic instanceof RegExp) ? 'named merchants' : null
 }
 
 /** Hundredths as a decimal number in a string, which is how find_purchases gives the model an amount. Null for none. */

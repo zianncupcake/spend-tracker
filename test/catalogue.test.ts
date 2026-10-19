@@ -7,7 +7,7 @@ import {
   products,
   productTerms,
   ruledByCode,
-  rulesFor,
+  rulesForCode,
   startingCategory,
 } from '../src/catalogue'
 import { dbsWomansWorld } from '../src/catalogue/dbs-womans-world'
@@ -253,29 +253,28 @@ describe('the category code of a merchant', () => {
   })
 })
 
-describe('where the products count a purchase, by the code or the name of its merchant', () => {
-  type Asked = Parameters<typeof rulesFor>[0]
+describe('where the products count a purchase of a code that is given, at a merchant when one is named', () => {
+  type Row = [key: string, mcc: number, merchant: string | undefined, group: string, cap: string | null, bonus: string]
 
-  it.each<[key: string, asked: Asked, mcc: number | null, group: string, cap: string | null, bonus: string]>([
+  it.each<[...Row, by: string | null]>([
     // A code that the product lists, and one that falls to its category for the codes that it does not list.
-    ['hsbc-revolution', { mcc: 5812 }, 5812, 'Eligible Transactions', '1000.00', 'yes'],
-    ['ocbc-rewards', { mcc: 5812 }, 5812, 'Other Spend', null, 'no'],
+    ['hsbc-revolution', 5812, undefined, 'Eligible Transactions', '1000.00', 'yes', 'code'],
+    ['ocbc-rewards', 5812, undefined, 'Other Spend', null, 'no', 'code'],
     // The product lists other codes and has no such category, or lists none: the group is where a purchase starts.
-    ['dbs-womans-world', { mcc: 5812 }, 5812, 'Online Spend', '1000.00', 'depends'],
-    ['uob-evol', { mcc: 5812 }, 5812, 'Online and Mobile Contactless Spend', '300.00', 'depends'],
+    ['dbs-womans-world', 5812, undefined, 'Online Spend', '1000.00', 'depends', null],
+    ['uob-evol', 5812, undefined, 'Online and Mobile Contactless Spend', '300.00', 'depends', null],
     // A name that the product lists comes before the merchant's code, which the product does not list.
-    ['ocbc-rewards', { merchant: 'SHOPEE SINGAPORE' }, 5262, 'Shopping Spend', '1110.00', 'yes'],
-    // A merchant that nothing knows.
-    ['ocbc-rewards', { merchant: 'A MADE-UP SHOP' }, null, 'Shopping Spend', '1110.00', 'depends'],
-  ])('on %s, has %j, with the code %s, in %s', (key, asked, mcc, group, cap, bonus) => {
+    ['ocbc-rewards', 5262, 'SHOPEE SINGAPORE', 'Shopping Spend', '1110.00', 'yes', 'name'],
+  ])('on %s, has %s at %s in %s', (key, mcc, merchant, group, cap, bonus, by) => {
     const at = products.findIndex((product) => product.key === key)
 
-    const rules = rulesFor(asked)
+    const rules = rulesForCode(mcc, merchant)
 
     // The code and the products, and nothing of the name that was asked about.
     expect(rules).toEqual({ mcc, products: expect.any(Array) })
     const monthlyCap = cap && { amount: cap, currency: 'SGD' }
-    expect(rules.products[at]).toEqual({ product: products[at].name, group, monthlyCap, bonus })
+    const entry = { product: products[at].name, group, monthlyCap, bonus, by, bonusGroups: expect.any(Array) }
+    expect(rules.products[at]).toEqual(entry)
   })
 })
 
@@ -291,10 +290,16 @@ describe("what the products' terms set for a month", () => {
       termsAsOf: dbsWomansWorld.termsAsOf,
       monthlyMinimumSpend: null,
       groups: [
-        { group: 'Online Spend', monthlyCap: { amount: '1000.00', currency: 'SGD' } },
-        { group: 'Other Spend', monthlyCap: null },
+        { group: 'Online Spend', monthlyCap: { amount: '1000.00', currency: 'SGD' }, goesBy: null },
+        { group: 'Other Spend', monthlyCap: null, goesBy: 'codes' },
       ],
     })
+  })
+
+  it('says of a group whether it goes by codes, or only by the merchants that the terms name', () => {
+    const [uob, hsbc] = productTerms()
+
+    expect([uob.groups[1].goesBy, hsbc.groups[0].goesBy]).toEqual(['named merchants', 'codes'])
   })
 })
 

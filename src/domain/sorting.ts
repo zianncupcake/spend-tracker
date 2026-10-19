@@ -1,5 +1,14 @@
-import { byCodes, categoryOf, productOf, ruledByCode, startingCategory, unplaced } from '../catalogue'
-import { lettersOf, nameOf } from '../catalogue/merchants'
+import {
+  byCodes,
+  categoryOf,
+  productOf,
+  ruledByCode,
+  ruledByName,
+  startingCategory,
+  unplaced,
+  type Placed,
+} from '../catalogue'
+import { codeOf, lettersOf, nameOf } from '../catalogue/merchants'
 import type { Product } from '../catalogue/types'
 import { codesFoundFor } from '../mcc-lookup'
 import type { Card, Mark, Store, Transaction } from '../store'
@@ -40,6 +49,37 @@ export async function startingCategoriesOn(
   const codes = await codesFoundFor(open.map(({ merchant }) => merchant))
   for (const [nth, { at }] of open.entries()) starts[at].category = categoryByCodes(product, codes[nth])
   return starts
+}
+
+/**
+ * Where a purchase at the merchant in its own currency would start on each of the products, in their order: by
+ * `startOf`, and then by what ../mcc-lookup finds. Undefined on a product that nothing places it on. One query, for
+ * the user's marks, and the merchant is looked up once, when a product is left that would go by its codes. `mcc` is
+ * the merchant's code that ./merchants knows or, with none, that the stores which were found all have, or null.
+ */
+export async function placedOn(
+  store: Store,
+  products: Product[],
+  merchant: string,
+): Promise<{ mcc: number | null; placed: (Placed | undefined)[] }> {
+  const marks = await store.listMarks()
+  const starts = products.map((product) => startOf(product, marks, { currency: product.homeCurrency, merchant }))
+  const asks = products.some((product, at) =>
+    unplaced(product, { currency: product.homeCurrency, category: starts[at].category }),
+  )
+  const [codes = []] = asks ? await codesFoundFor([merchant]) : []
+  const [found, ...others] = new Set(codes)
+  const mcc = codeOf(merchant) ?? (others.length === 0 ? (found ?? null) : null)
+  const placed = products.map((product, at): Placed | undefined => {
+    const { category, remembered } = starts[at]
+    if (category === null) {
+      const found = categoryByCodes(product, codes)
+      return found === null ? undefined : { category: found, by: 'code' }
+    }
+    // A rule of the product goes by a name that the product lists before a code: see `startingCategory`.
+    return { category, by: remembered ? 'mark' : ruledByName(product, merchant) === undefined ? 'code' : 'name' }
+  })
+  return { mcc, placed }
 }
 
 /**
