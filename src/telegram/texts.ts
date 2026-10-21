@@ -191,8 +191,8 @@ export const REST_NOT_DONE = 'The rest of what you asked for was not done. Ask f
 export function assumedCodes(codes: number[]): string {
   const named = codes.map((code) => String(code).padStart(4, '0'))
   return codes.length === 1
-    ? `Code ${named[0]} is assumed from the kind of business: the bot does not know this merchant's code.`
-    : `Codes ${named.join(', ')} are assumed from the kinds of business: the bot does not know these merchants' codes.`
+    ? `Code ${named[0]} is assumed: the usual code for that kind of business, not one the bot found.`
+    : `Codes ${named.join(', ')} are assumed: the usual codes for that kind of business, not ones the bot found.`
 }
 
 /** What goes before a command that is too long to ride under a button: see confirmButtons. */

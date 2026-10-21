@@ -8,10 +8,12 @@ import {
   productTerms,
   ruledByCode,
   rulesForCode,
+  rulesForCodes,
   startingCategory,
 } from '../src/catalogue'
 import { dbsWomansWorld } from '../src/catalogue/dbs-womans-world'
 import { hsbcRevolution } from '../src/catalogue/hsbc-revolution'
+import { mccName } from '../src/catalogue/mcc-names'
 import { codeOf } from '../src/catalogue/merchants'
 import { ocbcRewards } from '../src/catalogue/ocbc-rewards'
 import type { Product } from '../src/catalogue/types'
@@ -270,11 +272,32 @@ describe('where the products count a purchase of a code that is given, at a merc
 
     const rules = rulesForCode(mcc, merchant)
 
-    // The code and the products, and nothing of the name that was asked about.
-    expect(rules).toEqual({ mcc, products: expect.any(Array) })
+    // The code, its name and the products, and nothing of the merchant's name that was asked about.
+    expect(rules).toEqual({ mcc, name: mccName(mcc), products: expect.any(Array) })
     const monthlyCap = cap && { amount: cap, currency: 'SGD' }
     const entry = { product: products[at].name, group, monthlyCap, bonus, by, bonusGroups: expect.any(Array) }
     expect(rules.products[at]).toEqual(entry)
+  })
+
+  it('sorts several codes, on each product, into those that earn its bonus, those that do not, and those that depend', () => {
+    const at = products.findIndex((product) => product.key === 'hsbc-revolution')
+
+    expect(rulesForCodes([5734, 7399], undefined)[at]).toEqual({
+      product: hsbcRevolution.name,
+      bonus: [{ mcc: 5734, name: mccName(5734), group: 'Eligible Transactions' }],
+      noBonus: [{ mcc: 7399, name: mccName(7399), group: 'Other Transactions' }],
+      dependsOnHowPaid: [],
+      bonusGroups: expect.any(Array),
+    })
+  })
+})
+
+describe('the name of a merchant category code', () => {
+  it.each([
+    [5734, 'Computer Software Stores'],
+    [0, undefined],
+  ])('of %s is %s', (mcc, name) => {
+    expect(mccName(mcc)).toBe(name)
   })
 })
 

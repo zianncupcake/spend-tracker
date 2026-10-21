@@ -1,5 +1,6 @@
 import { dbsWomansWorld } from './dbs-womans-world'
 import { hsbcRevolution } from './hsbc-revolution'
+import { mccName } from './mcc-names'
 import { codeOf } from './merchants'
 import { ocbcRewards } from './ocbc-rewards'
 import type { Category, Group, Mcc, Product } from './types'
@@ -110,14 +111,15 @@ export interface Placed {
 /**
  * Where each product counts a purchase in its own currency: what the assistant's card_rules answers. `placed` is
  * where each product, in the order of `products`, places the purchase, or undefined where nothing does. `mcc` is the
- * code that was asked about or that is known for the merchant, or null. `bonus` is 'yes' or 'no' when the purchase
- * was placed in its group: a group with a limit is one that earns the bonus, on every product here. It is 'depends'
- * when it was not: the group is then only the one that a purchase starts in, and is null on a product that leaves
- * such a purchase not sorted. `bonusGroups` are the groups with a limit, and what each goes by.
+ * code that was asked about or that is known for the merchant, or null, and `name` is its name. `bonus` is 'yes' or
+ * 'no' when the purchase was placed in its group: a group with a limit is one that earns the bonus, on every product
+ * here. It is 'depends' when it was not: the group is then only the one that a purchase starts in, and is null on a
+ * product that leaves such a purchase not sorted. `bonusGroups` are the groups with a limit, and what each goes by.
  */
 export function rulesFor(mcc: number | null, placed: (Placed | undefined)[]) {
   return {
     mcc,
+    name: mcc === null ? undefined : mccName(mcc),
     products: products.map((product, at) => {
       const { group, bonus } = placing(product, placed[at]?.category)
       return {
@@ -126,17 +128,22 @@ export function rulesFor(mcc: number | null, placed: (Placed | undefined)[]) {
         monthlyCap: money(group?.limitMinor, product.homeCurrency),
         bonus,
         by: placed[at]?.by ?? null,
-        bonusGroups: product.groups
-          .filter(({ limitMinor }) => limitMinor !== undefined)
-          .map((each) => ({ group: each.name, goesBy: goesBy(each) })),
+        bonusGroups: bonusGroupsOf(product),
       }
     }),
   }
 }
 
+/** The groups of the product with a limit, which are those that earn the bonus, and what each goes by. */
+function bonusGroupsOf(product: Product) {
+  return product.groups
+    .filter(({ limitMinor }) => limitMinor !== undefined)
+    .map((each) => ({ group: each.name, goesBy: goesBy(each) }))
+}
+
 /**
- * What card_rules answers for a code that it is given, at the merchant when one is named: the rules of each product
- * alone place the purchase, and a name that the product lists comes before the code, as in `startingCategory`.
+ * Where each product counts a purchase of a code that is given, at the merchant when one is named: the rules of each
+ * product alone place the purchase, and a name that the product lists comes before the code, as in `startingCategory`.
  */
 export function rulesForCode(mcc: number, merchant: string | undefined) {
   return rulesFor(
@@ -148,6 +155,28 @@ export function rulesForCode(mcc: number, merchant: string | undefined) {
       return byCode === undefined ? undefined : { category: byCode, by: 'code' }
     }),
   )
+}
+
+/**
+ * What card_rules answers for codes that it is given: for each product, the codes that earn its bonus, those that do
+ * not and those for which it depends on how a purchase is paid, each with its name and group, as `rulesForCode`
+ * places each code. A name that `mccName` has none for is left out of the JSON.
+ */
+export function rulesForCodes(mccs: number[], merchant: string | undefined) {
+  const placed = mccs.map((mcc) => ({ mcc, on: rulesForCode(mcc, merchant).products }))
+  return products.map((product, at) => {
+    const codes = (bonus: Bonus) =>
+      placed
+        .filter(({ on }) => on[at].bonus === bonus)
+        .map(({ mcc, on }) => ({ mcc, name: mccName(mcc), group: on[at].group }))
+    return {
+      product: product.name,
+      bonus: codes('yes'),
+      noBonus: codes('no'),
+      dependsOnHowPaid: codes('depends'),
+      bonusGroups: bonusGroupsOf(product),
+    }
+  })
 }
 
 /**
