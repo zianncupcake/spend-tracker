@@ -84,7 +84,10 @@ const TOOLS = [
       name: 'card_rules',
       parameters: {
         type: 'object',
-        properties: { mcc: { type: ['integer', 'null'] }, merchant: { type: ['string', 'null'] } },
+        properties: {
+          mccs: { type: ['array', 'null'], items: { type: 'integer' } },
+          merchant: { type: ['string', 'null'] },
+        },
       },
     },
   },
@@ -572,7 +575,7 @@ describe('an answer that went by a code that card_rules was given with no mercha
     ['is not, when the answer says the code is assumed', RIDE, ASSUMING, false],
   ])('%s', async (_, question, said, followed) => {
     const chat = openChat()
-    outside.model = [calling(['call_1', 'card_rules', { mcc: 4121, merchant: null }]), saying(said)]
+    outside.model = [calling(['call_1', 'card_rules', { mccs: [4121], merchant: null }]), saying(said)]
 
     const lines = linesOf(await chat.rich(question))
 

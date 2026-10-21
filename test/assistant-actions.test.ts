@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { answerQuestion, MAX_ACTIONS, type Answer, type Taken } from '../src/ai/assistant'
 import type { AiProvider } from '../src/ai/provider'
-import { productTerms, rulesForCode } from '../src/catalogue'
+import { productTerms, rulesForCodes } from '../src/catalogue'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { depsFor, type Deps } from '../src/deps'
 import { findOrCreateUser, storeFor, type User } from '../src/store'
@@ -353,9 +353,10 @@ describe('a call of card_rules', () => {
     const user = await userWithCards()
     model(
       calling(
-        ['call_1', 'card_rules', { mcc: 5812, merchant: null }],
+        ['call_1', 'card_rules', { mccs: [5812], merchant: null }],
         ['call_2', 'card_rules'],
-        ['call_3', 'card_rules', { mcc: 12345 }],
+        ['call_3', 'card_rules', { mccs: [12345] }],
+        ['call_4', 'card_rules', { mccs: [5812, 5813, 5814, 5815, 5816, 5817, 5818, 5819, 5820] }],
       ),
       saying('A made-up answer.'),
     )
@@ -363,13 +364,14 @@ describe('a call of card_rules', () => {
 
     await ask(user, 'A made-up asking.')
 
-    const [rules, terms, noSuchCode] = requests()[1].messages.slice(3).map(({ content }) => content)
-    expect(rules).toBe(JSON.stringify(rulesForCode(5812, undefined)))
+    const [rules, terms, noSuchCode, tooMany] = requests()[1].messages.slice(3).map(({ content }) => content)
+    expect(rules).toBe(JSON.stringify(rulesForCodes([5812], undefined)))
     // A call with no argument asks what the products' terms are.
     expect(terms).toBe(JSON.stringify(productTerms()))
-    // A call whose code is no code is told which argument was wrong.
-    expect(noSuchCode).toMatch(/^Error: .*`mcc`/)
-    const outcomes = ['ok', 'ok', 'invalid'] as const
+    // A call whose code is no code, or that gives more codes than it may, is told which argument was wrong.
+    expect(noSuchCode).toMatch(/^Error: .*`mccs`/)
+    expect(tooMany).toMatch(/^Error: .*`mccs`/)
+    const outcomes = ['ok', 'ok', 'invalid', 'invalid'] as const
     expect(logged.events('assistant_tool')).toEqual(outcomes.map((outcome) => toolLine(user, 'card_rules', outcome)))
   })
 })
