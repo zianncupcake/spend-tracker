@@ -1,10 +1,11 @@
+import { dbs } from './dbs'
 import { hsbc } from './hsbc'
 import { ocbc } from './ocbc'
 import type { AlertEmail, ParsedTransaction, Parser } from './types'
 import { uob } from './uob'
 
 /** Exported for the tests, which add a stand-in for a bank to it. */
-export const parsers: Parser[] = [ocbc, uob, hsbc]
+export const parsers: Parser[] = [ocbc, uob, hsbc, dbs]
 
 // Email text can be hostile, so no parser ever sees more of it than this.
 const MAX_TEXT_LENGTH = 20_000

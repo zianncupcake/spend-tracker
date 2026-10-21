@@ -525,6 +525,7 @@ describe('what a run asks of Gmail', () => {
       'noreply@notify.ocbc.com',
       'unialerts@uobgroup.com',
       'hsbc.bank.singapore.limited@notification.hsbc.com.hk',
+      'ibanking.alert@dbs.com',
     ].join(' OR ')
     const since = (time: number) => `from:(${senders}) after:${time} smaller:1M`
     // The second run makes the search that the first made, an hour and a half after it. Only a full check moves
