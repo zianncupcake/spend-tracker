@@ -141,20 +141,20 @@ function bonusGroupsOf(product: Product) {
     .map((each) => ({ group: each.name, goesBy: goesBy(each) }))
 }
 
-/**
- * Where each product counts a purchase of a code that is given, at the merchant when one is named: the rules of each
- * product alone place the purchase, and a name that the product lists comes before the code, as in `startingCategory`.
- */
+/** Where each product counts a purchase of a code that is given, at the merchant when one is named. */
 export function rulesForCode(mcc: number, merchant: string | undefined) {
-  return rulesFor(
-    mcc,
-    products.map((product): Placed | undefined => {
-      const byName = merchant === undefined ? undefined : ruledByName(product, merchant)
-      if (byName !== undefined) return { category: byName, by: 'name' }
-      const byCode = ruledByCode(product, mcc)
-      return byCode === undefined ? undefined : { category: byCode, by: 'code' }
-    }),
-  )
+  return rulesFor(mcc, products.map((product) => codePlaced(product, mcc, merchant)))
+}
+
+/**
+ * Where the product places a purchase of the code, at the merchant when one is named: by its rules alone, with a
+ * name that the product lists before the code, as in `startingCategory`.
+ */
+export function codePlaced(product: Product, mcc: number, merchant: string | undefined): Placed | undefined {
+  const byName = merchant === undefined ? undefined : ruledByName(product, merchant)
+  if (byName !== undefined) return { category: byName, by: 'name' }
+  const byCode = ruledByCode(product, mcc)
+  return byCode === undefined ? undefined : { category: byCode, by: 'code' }
 }
 
 /**

@@ -1,9 +1,12 @@
 // What the bot says to a user: the texts of its replies and the usage of its commands, with two numbers that such
 // texts are made from. What a model is told is not here: see toldOf in ./actions.
 
+import type { Checked, Found, Reported } from '../ai/assistant'
+import type { Bonus } from '../catalogue'
 import { ATTEMPT_MINUTES } from '../connect'
 import { REMINDER_HOUR } from '../domain/reminder'
 import { isDatabaseError } from '../log'
+import { SOURCES } from '../mcc-lookup'
 import {
   MAX_BY_HAND_PER_DAY,
   MAX_CARDS,
@@ -193,6 +196,86 @@ export function assumedCodes(codes: number[]): string {
   return codes.length === 1
     ? `Code ${named[0]} is assumed: the usual code for that kind of business, not one the bot found.`
     : `Codes ${named.join(', ')} are assumed: the usual codes for that kind of business, not ones the bot found.`
+}
+
+/**
+ * What follows an answer for a merchant that card_rules was asked about: what placed it. That is what each lookup
+ * service lists for it, those that list a store first, or the bot's own list, or the user's mark, or that nothing
+ * did, so that a code shown for it is inferred.
+ */
+export function foundLine(merchant: string, found: Found): string {
+  const ands = new Intl.ListFormat('en')
+  switch (found.by) {
+    case 'reports':
+      return `${merchant}: ${reportsSaid(found.reported)}.`
+    case 'list':
+      return `${merchant}: the bot's own list gives ${codeNamed(found.mcc, found.name)}.`
+    case 'mark':
+      return found.products.length === 0
+        ? `${merchant}: placed as you marked it before.`
+        : `${merchant}: placed as you marked it before, on the ${ands.format(found.products)}.`
+    case 'none':
+      return `${merchant}: no store was found for it on ${SOURCES.join(' or ')}, so any codes below are inferred.`
+  }
+}
+
+/** What each lookup service lists, those that list a store first. */
+function reportsSaid(reported: Reported[]): string {
+  const listed = (source: string) =>
+    reported.filter((one) => one.source === source).map(({ store, mcc, name }) => `${store} as ${codeNamed(mcc, name)}`)
+  const listing = SOURCES.filter((source) => listed(source).length > 0)
+  return [
+    ...listing.map((source) => `${source} lists ${new Intl.ListFormat('en').format(listed(source))}`),
+    ...SOURCES.filter((source) => !listing.includes(source)).map((source) => `${source} has nothing`),
+  ].join('; ')
+}
+
+/**
+ * The bot's answer to a question that card_rules looked at codes for, in the place of the model's: each card once,
+ * those that earn their bonus on some of the codes first, with them, the most first, then those that do if paid
+ * online, then the rest.
+ */
+export function verdictLine({ cards, rows }: Checked): string {
+  const each = cards.map((card, at) => ({
+    card,
+    codes: rows.filter(({ on }) => on[at].bonus === 'yes').map(({ mcc }) => String(mcc).padStart(4, '0')),
+    depends: rows.find(({ on }) => on[at].bonus === 'depends')?.on[at],
+  }))
+  const earning = each
+    .filter(({ codes }) => codes.length > 0)
+    .sort((one, other) => other.codes.length - one.codes.length)
+  // A card that earns on none of the codes is said as its cells say it: see `bonusCell`.
+  const others = new Map<string, string[]>()
+  const rest = each.filter(({ codes }) => codes.length === 0)
+  const dependsFirst = [...rest.filter(({ depends }) => depends), ...rest.filter(({ depends }) => !depends)]
+  for (const { card, depends } of dependsFirst) {
+    const said = depends ? `Bonus ${bonusCell(depends.bonus, depends.group).toLowerCase()}` : bonusCell('no', undefined)
+    others.set(said, [...(others.get(said) ?? []), card])
+  }
+  const ands = new Intl.ListFormat('en')
+  return [
+    ['Bonus on these codes', earning.map(({ card, codes }) => `${card} (${codes.join(', ')})`)] as const,
+    ...others,
+  ]
+    .filter(([, listed]) => listed.length > 0)
+    .map(([said, listed]) => `${said}: ${ands.format(listed)}.`)
+    .join(' ')
+}
+
+/** A merchant category code with its published name, when it has one: "5734 Computer Software Stores". */
+export function codeNamed(mcc: number, name: string | undefined): string {
+  const code = String(mcc).padStart(4, '0')
+  return name === undefined ? code : `${code} ${name}`
+}
+
+/**
+ * How a card counts a code, in the table after an answer. Where that depends on how a purchase is paid, it is said by
+ * the group that the purchase would then be in: "Online Spend" as "If paid online".
+ */
+export function bonusCell(bonus: Bonus, group: string | undefined): string {
+  if (bonus === 'yes') return 'Bonus'
+  if (bonus === 'no') return 'No bonus'
+  return group === undefined ? 'Depends' : `If paid ${group.replace(/ Spend$/, '').toLowerCase()}`
 }
 
 /** What goes before a command that is too long to ride under a button: see confirmButtons. */

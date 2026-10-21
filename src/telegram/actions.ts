@@ -1,7 +1,7 @@
 // The carrying out of what the assistant makes of a message: the asking of it, the things that it asks to have
 // done, each of which the bot's own code does, and the queries that they may run between them.
 
-import { answerQuestion, type Action, type Answer } from '../ai/assistant'
+import { answerQuestion, type Action, type Answer, type Checked } from '../ai/assistant'
 import { categoriesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
 import { markAs } from '../domain/sorting'
@@ -9,7 +9,7 @@ import { CONFIRMABLE, Failure, log, logFailure, type Events } from '../log'
 import { findOrCreateUser, MAX_CARDS, storeFor, type User } from '../store'
 import { exchangeStoreFor } from '../store-exchanges'
 import { addRead, readBefore, type Adding } from './adding'
-import type { RichBlock } from './api'
+import type { RichBlock, TableCell } from './api'
 import { commandIn, ran } from './commands'
 import { confirmFor } from './confirming'
 import { inMessages, MAX_LENGTH, sortEnd } from './purchases'
@@ -18,9 +18,12 @@ import type { Asked, Deferred, Made, Reply, Sent, Tabled } from './sending'
 import { declined, type Carried } from './shared'
 import {
   assumedCodes,
+  bonusCell,
+  codeNamed,
   DOING,
   DONE_NO_REPLY,
   failureReply,
+  foundLine,
   MAX_QUESTION_LENGTH,
   NO_ASSISTANT,
   NO_CARDS,
@@ -33,6 +36,7 @@ import {
   READ_ALREADY,
   REST_NOT_DONE,
   TOOK_TOO_LONG,
+  verdictLine,
   WORKING,
 } from './texts'
 
@@ -211,8 +215,7 @@ export function ask(
       switch (result.status) {
         case 'answered':
           read = result.afterReading
-          const { text, assumed } = result
-          return { outcome: 'answered', rich: answered(assumed.length ? `${text}\n${assumedCodes(assumed)}` : text) }
+          return { outcome: 'answered', rich: answered(result) }
         case 'acting': {
           asked.actions = result.actions.length
           // Nothing is begun once the time is up: its user has been told so by then, and may ask again.
@@ -629,13 +632,41 @@ async function keepExchange(
  * to each line of the answer and every text plain, in which Telegram is told to make nothing of any text: see
  * RichMessage. As the text that is sent when Telegram does not take that, the whole of it is marked as code, in
  * which nothing can be tapped either.
+ *
+ * Where card_rules looked at codes for a card that is linked to a product, the bot answers in the model's place, as
+ * a model was seen to contradict what it was given: see `verdictLine`. Then come the bot's own lines of what
+ * card_rules looked at: a line for each merchant, and a table with a row for each code and a column for each card
+ * that is linked to a product. As text, a row of the table is a line. Then comes the line of the codes that were
+ * assumed.
  */
-function answered(answer: string): Tabled {
-  const text = cutToFit(answer)
-  const paragraph = (line: string): RichBlock => ({ type: 'paragraph', text: line })
+function answered({ text, assumed, checked }: Extract<Answer, { status: 'answered' }>): Tabled {
+  const lines = (checked?.merchants ?? []).map(({ merchant, found }) => foundLine(merchant, found))
+  const table = checked && codeTable(checked)
+  const said = checked && table ? verdictLine(checked) : text
+  const end = assumed.length > 0 ? [assumedCodes(assumed)] : []
+  const paragraphs = (texts: string[]) => texts.map((line): RichBlock => ({ type: 'paragraph', text: line }))
+  const blocks = [...paragraphs([...cutToFit(said).split('\n'), ...lines]), ...(table ? [table.block] : [])]
+  const whole = cutToFit([said, ...lines, ...(table ? table.asLines : []), ...end].join('\n'))
   return {
-    rich: { blocks: text.split('\n').map(paragraph), skip_entity_detection: true },
-    asText: () => [{ text, entities: [{ type: 'code', offset: 0, length: text.length }] }],
+    rich: { blocks: [...blocks, ...paragraphs(end)], skip_entity_detection: true },
+    asText: () => [{ text: whole, entities: [{ type: 'code', offset: 0, length: whole.length }] }],
+  }
+}
+
+/**
+ * The table of the codes that card_rules looked at, as a block and as lines of text. None when no code was looked
+ * at, or when no card of the user's is linked to a product, as there is then nothing to say of a code.
+ */
+function codeTable({ cards, rows }: Checked): { block: RichBlock; asLines: string[] } | undefined {
+  if (cards.length === 0 || rows.length === 0) return undefined
+  const body = rows.map(({ mcc, name, on }) => [
+    codeNamed(mcc, name),
+    ...on.map(({ bonus, group }) => bonusCell(bonus, group)),
+  ])
+  const header = ['Code', ...cards].map((text): TableCell => ({ text, is_header: true }))
+  return {
+    block: { type: 'table', cells: [header, ...body.map((row) => row.map((text) => ({ text })))], is_bordered: true },
+    asLines: body.map(([code, ...on]) => `${code}: ${on.map((cell, at) => `${cards[at]} ${cell}`).join(', ')}`),
   }
 }
 

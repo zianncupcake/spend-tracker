@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runCheck } from '../src/checker'
-import { codesAmong } from '../src/mcc-lookup'
+import { codesAmong, storesNaming } from '../src/mcc-lookup'
 import { connectedChat, deps, openChat, outside } from './connect-helpers'
 import { gmailMessage, textPart } from './gmail-helpers'
 import { alertText } from './helpers'
@@ -36,6 +36,13 @@ describe('the stores that count for a merchant', () => {
   ])('%s', (_, stores, codes) => {
     expect(codesAmong('SAMPLE EATERY SINGAPORE SG', stores)).toEqual(codes)
   })
+
+  it.each([
+    ['include one whose name begins with the merchant', 'SAMPLE SOFT SG', [{ store: 'SAMPLE SOFT SG', mcc: 4816 }]],
+    ['do not include one whose name holds the merchant later on', 'THE SAMPLE SOFT', []],
+  ])('of a question %s', (_, name, reported) => {
+    expect(storesNaming('sample soft', [listed(name, '4816')])).toEqual(reported)
+  })
 })
 
 describe('a purchase that nothing placed', () => {
@@ -61,6 +68,7 @@ describe('a purchase that nothing placed', () => {
       'other',
     ],
     ['of none, when the second service has no store that the text holds', [], [second('Sample Mart', '5812')], null],
+    ['of none, when the only store has a name that holds the text', [store('SAMPLE EATERY SG', '5812')], [], null],
   ])('is stored with the category %s', async (_, stores, heymax, category) => {
     Object.assign(outside, { stores, heymax })
 

@@ -10,7 +10,7 @@ import {
 } from '../catalogue'
 import { codeOf, lettersOf, nameOf } from '../catalogue/merchants'
 import type { Product } from '../catalogue/types'
-import { codesFoundFor } from '../mcc-lookup'
+import { codesFoundFor, lookedUp, type Report } from '../mcc-lookup'
 import type { Card, Mark, Store, Transaction } from '../store'
 import { countedIn, currentWindow } from './window'
 
@@ -56,18 +56,19 @@ export async function startingCategoriesOn(
  * `startOf`, and then by what ../mcc-lookup finds. Undefined on a product that nothing places it on. One query, for
  * the user's marks, and the merchant is looked up once, when a product is left that would go by its codes. `mcc` is
  * the merchant's code that ./merchants knows or, with none, that the stores which were found all have, or null.
+ * `reported` are the stores that the lookup reports for a question about the merchant: none when it was not looked up.
  */
 export async function placedOn(
   store: Store,
   products: Product[],
   merchant: string,
-): Promise<{ mcc: number | null; placed: (Placed | undefined)[] }> {
+): Promise<{ mcc: number | null; placed: (Placed | undefined)[]; reported: Report[] }> {
   const marks = await store.listMarks()
   const starts = products.map((product) => startOf(product, marks, { currency: product.homeCurrency, merchant }))
   const asks = products.some((product, at) =>
     unplaced(product, { currency: product.homeCurrency, category: starts[at].category }),
   )
-  const [codes = []] = asks ? await codesFoundFor([merchant]) : []
+  const { codes, reported } = asks ? await lookedUp(merchant) : { codes: [], reported: [] }
   const [found, ...others] = new Set(codes)
   const mcc = codeOf(merchant) ?? (others.length === 0 ? (found ?? null) : null)
   const placed = products.map((product, at): Placed | undefined => {
@@ -79,7 +80,7 @@ export async function placedOn(
     // A rule of the product goes by a name that the product lists before a code: see `startingCategory`.
     return { category, by: remembered ? 'mark' : ruledByName(product, merchant) === undefined ? 'code' : 'name' }
   })
-  return { mcc, placed }
+  return { mcc, placed, reported }
 }
 
 /**
