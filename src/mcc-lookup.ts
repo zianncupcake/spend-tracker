@@ -39,6 +39,14 @@ const HEYMAX: Service = {
   code: 'mcc_code',
 }
 
+/** The services, in the order that their stores are looked at. */
+const SERVICES = [CHECK_MCC, HEYMAX]
+
+export const SOURCES = SERVICES.map(({ source }) => source)
+
+/** The most stores that a question about a merchant reports. */
+const MAX_REPORTS = 6
+
 /**
  * How long an answer is waited for. The adding of a purchase waits with it, and the assistant's adding has this long
  * between the time that its model is given and its own.
@@ -61,6 +69,13 @@ const MAX_STORES = 50
 
 /** A store as a service lists it, which nothing has checked. */
 type Listed = { name: unknown; code: unknown }
+
+/** A store that a service lists for a merchant that a question names, and its code. */
+export interface Report {
+  source: Service['source']
+  store: string
+  mcc: number
+}
 
 /** A service answered a search with an error. The URL holds the word that was asked, so only the status is kept. */
 class SearchError extends Failure {
@@ -86,28 +101,76 @@ export function codesAmong(merchant: string, stores: Listed[]): number[] {
   })
   const longest = Math.max(...counted.map(({ name }) => name.length))
   const codes = counted.filter(({ name }) => name.length === longest).map(({ code }) => code)
-  const fourDigits = (code: unknown) => typeof code === 'string' && /^\d{4}$/.test(code)
   return codes.every(fourDigits) ? codes.map(Number) : []
 }
 
 /**
- * The codes of the stores that count for each of the merchants, in their order: see `codesAmong`. A service is asked
- * for the first word of a merchant's text, as it finds nothing for the longer text of a bank. Both are asked for each
- * distinct first word, all at the same time, and for MAX_SEARCHES words at the most. The stores of heymax.ai are
- * looked at only for a merchant that those of check-mcc.sg give no codes. A merchant past those words has no codes,
- * and neither has one whose first word is not asked for: see `wordToAsk`.
+ * The stores that a question about the merchant reports, of those that a service listed, each with its code. A store
+ * counts when either name begins with the other, as whole words: "Sample Soft SG" counts for "sample soft", as a
+ * question names a business more loosely than an alert does, and "The Sample Soft" does not. A store whose code is
+ * not four digits is left out, and so is one that is listed again with the same code.
+ */
+export function storesNaming(merchant: string, stores: Listed[]): Omit<Report, 'source'>[] {
+  const asked = lettersOf(merchant)
+  const named = stores.flatMap(({ name, code }) => {
+    if (typeof name !== 'string' || !fourDigits(code)) return []
+    const letters = lettersOf(name)
+    const counts = letters.length >= SHORTEST_NAME && (begins(name, asked) || begins(merchant, letters))
+    return counts ? [{ store: name.trim(), mcc: Number(code) }] : []
+  })
+  return named.filter((one, at) => named.findIndex(({ store, mcc }) => store === one.store && mcc === one.mcc) === at)
+}
+
+/** Whether the text begins with the name, given as `lettersOf` makes it, and the name ends where a word does. */
+function begins(text: string, name: string): boolean {
+  const words = wordsOf(text)
+  const ends = words.map((_, at) => words.slice(0, at + 1).join('').length)
+  return name !== '' && words.join('').startsWith(name) && ends.includes(name.length)
+}
+
+function fourDigits(code: unknown): boolean {
+  return typeof code === 'string' && /^\d{4}$/.test(code)
+}
+
+/**
+ * The codes of the stores that count for each of the merchants, in their order: see `codesAmong`. The stores of
+ * heymax.ai are looked at only for a merchant that those of check-mcc.sg give no codes.
  */
 export async function codesFoundFor(merchants: string[]): Promise<number[][]> {
+  return (await listedFor(merchants)).map((listed, at) => codesOf(merchants[at], listed))
+}
+
+/**
+ * What the services find for a merchant that a question names, from the one search of each: the codes that a
+ * purchase there goes by, as `codesFoundFor` has them, and the stores that `storesNaming` reports, MAX_REPORTS at the
+ * most.
+ */
+export async function lookedUp(merchant: string): Promise<{ codes: number[]; reported: Report[] }> {
+  const [listed] = await listedFor([merchant])
+  const reported = SERVICES.flatMap(({ source }, at) =>
+    storesNaming(merchant, listed[at]).map((store) => ({ source, ...store })),
+  )
+  return { codes: codesOf(merchant, listed), reported: reported.slice(0, MAX_REPORTS) }
+}
+
+function codesOf(merchant: string, [first, second]: Listed[][]): number[] {
+  const codes = codesAmong(merchant, first)
+  return codes.length > 0 ? codes : codesAmong(merchant, second)
+}
+
+/**
+ * The stores that each service lists for each of the merchants, in their order and in the order of SERVICES. A
+ * service is asked for the first word of a merchant's text, as it finds nothing for the longer text of a bank. Both
+ * are asked for each distinct first word, all at the same time, and for MAX_SEARCHES words at the most. A merchant
+ * past those words has no stores, and neither has one whose first word is not asked for: see `wordToAsk`.
+ */
+async function listedFor(merchants: string[]): Promise<Listed[][][]> {
   const words = merchants.map(wordToAsk)
   const asked = [...new Set(words)].filter((word) => word !== '').slice(0, MAX_SEARCHES)
-  const bothFor = async (word: string) =>
-    [word, await Promise.all([search(CHECK_MCC, word), search(HEYMAX, word)])] as const
-  const listed = new Map(await Promise.all(asked.map(bothFor)))
-  return merchants.map((merchant, at) => {
-    const [first, second] = listed.get(words[at]) ?? [[], []]
-    const codes = codesAmong(merchant, first)
-    return codes.length > 0 ? codes : codesAmong(merchant, second)
-  })
+  const allFor = async (word: string) =>
+    [word, await Promise.all(SERVICES.map((service) => search(service, word)))] as const
+  const listed = new Map(await Promise.all(asked.map(allFor)))
+  return words.map((word) => listed.get(word) ?? SERVICES.map(() => []))
 }
 
 /**

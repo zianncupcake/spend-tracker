@@ -67,13 +67,17 @@ follow `except`. The bot answers only in a user's own private chat with it.
 
 A text message that is not a command, and is not the 6-digit code of a sign-in, goes to the bot's assistant, where
 the service has an AI provider. A question such as "how much did I spend at the book shop last month?" is answered
-in a model's words, from the user's purchases. So is one about what earns a card's bonus, such as "does the OCBC
-Rewards Card include MCC 5812?", or about a product's caps and minimum spend, from the rules of the card products
-below. A message can also ask for what the commands do, as in "add 5.20 lunch to evol as other spend" or "set my
-time zone to Tokyo", and for several things at once. The model only works out what was asked for: the bot's own
-code does it, and the reply is the bot's. A message is sent with the user's last three questions of the past 30
-minutes and the text of the bot's replies to them, so that a follow-up such as a merchant's name alone is
-understood: they are kept for 30 minutes, and then deleted.
+in a model's words, from the user's purchases. So is one about a product's caps and minimum spend, from the rules of
+the card products below. One about what earns a card's bonus, such as "does the OCBC Rewards Card include MCC
+5812?", is answered by the bot itself once the model has worked out the merchant and the codes to look at: which of
+the user's linked cards earn their bonus on which codes, what placed a merchant that was asked about (the stores that
+check-mcc.sg and heymax.ai list for it, the bot's own list, the user's mark, or nothing, so that its codes are
+inferred), and a table of each code that was looked at with how each of the user's linked cards counts it. A message
+can also ask for what the commands do, as in "add 5.20 lunch to evol as other spend" or "set my time zone to Tokyo",
+and for several things at once. The model only works out what was asked for: the bot's own code does it, and the
+reply is the bot's. A message is sent with the user's last three questions of the past 30 minutes and the text of
+the bot's replies to them, so that a follow-up such as a merchant's name alone is understood: they are kept for 30
+minutes, and then deleted.
 
 What removes or revokes something waits for a tap on "Do it" under the bot's message: taking out a purchase or a
 card, disconnecting the Gmail, making or removing the token of `/mcp`, starting a new sign-in, saving or removing
