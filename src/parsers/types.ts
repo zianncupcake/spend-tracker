@@ -25,7 +25,7 @@ export interface Parser {
    * parser is added here, and to the `alert` event in src/log.ts. `example-bank` is the tests' stand-in for a bank,
    * which the service has no parser of.
    */
-  name: 'example-bank' | 'ocbc' | 'uob' | 'hsbc'
+  name: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | 'dbs'
   /** The bare addresses that the bank sends its alerts from, in lower case. */
   senders: string[]
   /** Null when the email is from this parser's bank but holds no purchase it can read. */

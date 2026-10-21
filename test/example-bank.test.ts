@@ -38,7 +38,7 @@ describe('Example Bank alerts', () => {
     expect(parserOf(alertEmail({ from: 'offers@examplebank.test' }))).toBeUndefined()
   })
 
-  it("is not shipped: the service looks for mail from the three real banks' senders and from no other", async () => {
+  it("is not shipped: the service looks for mail from the four real banks' senders and from no other", async () => {
     // Loaded anew, the parsers are as they ship: the tests' set-up, which adds this bank, has not touched the copy.
     vi.resetModules()
     const shipped = await import('../src/parsers')
@@ -47,6 +47,7 @@ describe('Example Bank alerts', () => {
       'noreply@notify.ocbc.com',
       'unialerts@uobgroup.com',
       'hsbc.bank.singapore.limited@notification.hsbc.com.hk',
+      'ibanking.alert@dbs.com',
     ])
   })
 

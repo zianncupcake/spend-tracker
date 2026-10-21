@@ -109,7 +109,7 @@ export interface Events {
   access_lost: { user: number; told: boolean }
   reminder: { user: number | null; outcome: 'sent' | 'blocked' | 'failed' }
   review: { user: number | null; outcome: 'offered' | 'nothing' | 'blocked' | 'failed'; offered: number }
-  alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | null }
+  alert: { outcome: 'stored' | 'duplicate' | 'unparsed'; parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | 'dbs' | null }
   mcc_lookup: { source: 'check-mcc.sg' | 'heymax.ai'; outcome: 'found' | 'none' | 'failed' }
   rates_lookup: { outcome: 'found' | 'failed' }
   connect_link: { user: number }

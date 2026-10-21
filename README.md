@@ -93,9 +93,9 @@ not as a file. The photo is not stored.
 
 ### Banks
 
-Alerts are read from three banks, all of Singapore, each for its card transaction alerts: OCBC, UOB and HSBC. Each
-has a parser in `src/parsers/`, which names the address that the bank sends its alerts from, and mail from no other
-sender is looked for. When a mailbox is connected, the alerts of the 35 days before are read too. The bot tells of
+Alerts are read from four banks, all of Singapore, each for its card transaction alerts: OCBC, UOB, HSBC and DBS.
+Each has a parser in `src/parsers/`, which names the address that the bank sends its alerts from, and mail from no
+other sender is looked for. When a mailbox is connected, the alerts of the 35 days before are read too. The bot tells of
 a purchase only when its alert came in the last six hours, so that catching up does not flood the chat. A purchase
 is stored even when its card has not been added yet: the bot then says how to add the card.
 
