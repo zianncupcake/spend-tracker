@@ -11,12 +11,13 @@ import { cardTotals } from '../domain/totals'
 import { currentWindow } from '../domain/window'
 import { COMMAND_NAMES } from '../log'
 import { issueToken } from '../mcp/tokens'
-import { deleteUser, findOrCreateUser, MAX_CARDS, setTimezone, storeFor } from '../store'
+import { deleteUser, findOrCreateUser, findUser, MAX_CARDS, setTimezone, storeFor } from '../store'
 import { connectStoreFor } from '../store-connect'
 import { mailStoreFor } from '../store-mail'
 import { mcpStoreFor } from '../store-mcp'
 import { reminderStoreFor } from '../store-reminders'
 import { addPurchase } from './adding'
+import type { Outgoing } from './api'
 import {
   CODE,
   NICKNAME,
@@ -31,7 +32,7 @@ import {
   timeZoneNamed,
 } from './arguments'
 import { describeWindow, formatShortDate, formatShortDateTime, maskLast4, shortDateIn } from './format'
-import { inMessages, purchaseLine, sortPrompt, whereSorted } from './purchases'
+import { addCardEnd, inMessages, purchaseLine, sortPrompt, whereSorted } from './purchases'
 import {
   bestReply,
   cardsReply,
@@ -107,7 +108,10 @@ export async function reply(
 
     case '/addcard': {
       const card = parseCard(args)
-      if (typeof card === 'string') return card
+      if (typeof card === 'string') {
+        const offers = args.length === 0 ? await unaddedOffers(db, telegramId) : []
+        return offers.length > 0 ? offers : card
+      }
       const { id, timezone } = await user()
       const store = storeFor(db, id)
       if (await store.addCard(card)) {
@@ -438,6 +442,27 @@ export async function ran(deps: Deps, telegramId: number, messageId: number, lin
   const said = await reply(deps, telegramId, messageId, line, { kind: 'other' }, () => {})
   if (typeof said === 'string') return [{ text: said }]
   return said
+}
+
+/** The most cards that /addcard alone offers to add: a message each. */
+const MAX_OFFERED = 5
+
+/**
+ * What /addcard alone shows: for each card that the user's purchases are on and that they have not added, the end of
+ * the alert of a purchase on it, with its buttons. None for somebody who has no user row.
+ */
+async function unaddedOffers(db: D1Database, telegramId: number): Promise<Outgoing[]> {
+  const user = await findUser(db, telegramId)
+  if (!user) return []
+  const store = storeFor(db, user.id)
+  const nicknames = (await store.listCards()).map((card) => card.nickname)
+  const unadded = await store.unaddedCards(MAX_OFFERED)
+  return unadded.map(({ last4, parser }, at) => {
+    // A card offered above is to be named for its bank too, and two cards cannot have one nickname.
+    const taken = [...nicknames, ...unadded.slice(0, at).map((each) => each.parser)]
+    const { text, buttons } = addCardEnd(taken, parser, last4)
+    return { text: `Card ${maskLast4(last4)}\n${text}`, buttons }
+  })
 }
 
 async function confirmReply(deps: Deps, userId: number, code: string): Promise<string> {

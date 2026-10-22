@@ -5,7 +5,7 @@
 // longest, and reads one alert from it at most. Whatever is left is read by
 // the runs that follow.
 
-import { productOf, productOfBank } from './catalogue'
+import { productOf } from './catalogue'
 import { revokeStored } from './connect'
 import type { Deps } from './deps'
 import { cardTotals } from './domain/totals'
@@ -26,8 +26,7 @@ import { storeFor, type Card, type Transaction } from './store'
 import { mailStoreFor, removeExpiredAttempts, removeExpiredBatches, takeNextMailbox, type Mailbox } from './store-mail'
 import { ChatBlockedError, type MessageEntity } from './telegram/api'
 import { carriedNotes, describeTotals, formatMoney, formatShortDate, maskLast4 } from './telegram/format'
-import { addCardButtons, sortEnd } from './telegram/purchases'
-import { ADD_CARD_OTHERWISE, ADD_CARD_USAGE, tapToAddCard } from './telegram/texts'
+import { addCardEnd, sortEnd } from './telegram/purchases'
 
 /**
  * How many alerts one run reads: the messages it fetches whole. A run that read three took 14 ms of CPU time, which
@@ -332,18 +331,9 @@ async function tellOfPurchase(
     : undefined
 
   if (!card) {
-    // The card is added in one press: named for the bank, or for the bank and the digits when the user has a card
-    // called so already, and linked to the bank's product when the bank has one.
-    const taken = (await store.listCards()).some((each) => each.nickname === purchase.parser)
-    const nickname = taken ? `${purchase.parser}${cardLast4}` : purchase.parser
-    const buttons = addCardButtons(nickname, cardLast4, productOfBank(purchase.parser)?.key)
-    if (buttons) {
-      const text = [spent, tapToAddCard(nickname), ADD_CARD_OTHERWISE].join('\n')
-      return deps.messenger.send(mailbox.chatId, text, marked, buttons)
-    }
-    const usage = ADD_CARD_USAGE.replaceAll('<last4>', cardLast4)
-    const text = `${spent}\nThis card is not added yet. Add it with:\n${usage}`
-    return deps.messenger.send(mailbox.chatId, text, marked)
+    const taken = (await store.listCards()).map((each) => each.nickname)
+    const { text, buttons } = addCardEnd(taken, purchase.parser, cardLast4)
+    return deps.messenger.send(mailbox.chatId, `${spent}\n${text}`, marked, buttons)
   }
   const [totals] = await cardTotals(store, [card], deps.now(), mailbox.timezone)
   // After the total comes the note of a purchase that is counted in the window after the one that it was made in:

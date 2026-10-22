@@ -256,7 +256,7 @@ export async function pressConfirm(
   log('confirm_press', { user: user.id, command, outcome: 'done' })
   // The reply first: it can be all that there is of what the command did. Then the press is answered and the
   // message edited, each whatever came of the other. A request that Telegram refuses has its line in the log.
-  // A card can be added by a press under an alert, with a nickname that the bot chose: see addCardButtons.
+  // A card can be added by a press under an alert, with a nickname that the bot chose: see addCardEnd.
   const reply = command === 'addcard' && Array.isArray(said) ? [...said, { text: RENAME_ADDED }] : said
   await sendReply(messenger, chatId, reply)
   await answer(SEE_REPLY).catch(() => {})

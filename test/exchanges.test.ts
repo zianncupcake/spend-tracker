@@ -7,29 +7,30 @@ import { calling, saying, type ChatMessage } from './ai-helpers'
 import { clock, connectedChat, MINUTE, NOW, openChat, outside } from './connect-helpers'
 import { rowsOwnedBy } from './helpers'
 
-// The assistant's recent exchanges: a user's last questions, each with the text of its reply, which go before a new
-// question for 30 minutes. The chats, the clock and the provider are those of ./connect-helpers.
-
-const SYSTEM: ChatMessage = { role: 'system', content: expect.any(String) }
-
-function user(content: string): ChatMessage {
-  return { role: 'user', content }
-}
-
-function assistant(content: string): ChatMessage {
-  return { role: 'assistant', content }
-}
+// The assistant's recent exchanges: a user's last questions, each with the text of its reply, which the model is
+// told of in the system message of a new question for 30 minutes. The chats, the clock and the provider are those of
+// ./connect-helpers.
 
 /** The messages of one of the requests that the provider was posted, which are counted from 1. */
 function messagesOf(nth: number): ChatMessage[] {
   return outside.completions[nth - 1].body.messages
 }
 
+/** The system message of one of those requests, which is its first message. */
+function systemOf(nth: number): string {
+  const [system] = messagesOf(nth)
+  expect(system.role).toBe('system')
+  return String(system.content)
+}
+
 describe('a question that follows earlier ones', () => {
   it.each([
-    [29, [user('Add a made-up pattern to evol.'), assistant('Which merchant?')]],
-    [31, []],
-  ])('after %i minutes, is sent with the earlier question and its reply before it, or not', async (minutes, before) => {
+    [29, true],
+    [31, false],
+  ])('after %i minutes, is the one user message, with the earlier exchange in the system message or not', async (
+    minutes,
+    told,
+  ) => {
     const chat = openChat()
     outside.model = [saying('Which merchant?'), saying('A made-up answer.')]
 
@@ -37,37 +38,43 @@ describe('a question that follows earlier ones', () => {
     clock.now = new Date(NOW.getTime() + minutes * MINUTE)
     await chat.rich('MADE-UP SHOP')
 
-    expect(messagesOf(2)).toEqual([SYSTEM, ...before, user('MADE-UP SHOP')])
+    expect(messagesOf(2).slice(1)).toEqual([{ role: 'user', content: 'MADE-UP SHOP' }])
+    expect(systemOf(2).includes('Add a made-up pattern to evol.')).toBe(told)
+    expect(systemOf(2).includes('Which merchant?')).toBe(told)
   })
 
-  it('is sent with the latest 3 of them, oldest first', async () => {
+  it('is told of the latest 3 of them, oldest first', async () => {
     const chat = openChat()
     outside.model = [1, 2, 3, 4, 5].map((n) => saying(`Answer ${n}.`))
 
     for (const n of [1, 2, 3, 4, 5]) await chat.rich(`Question ${n}?`)
 
-    const earlier = [2, 3, 4].flatMap((n) => [user(`Question ${n}?`), assistant(`Answer ${n}.`)])
-    expect(messagesOf(5)).toEqual([SYSTEM, ...earlier, user('Question 5?')])
+    const system = systemOf(5)
+    expect(system).not.toContain('Question 1?')
+    const at = [2, 3, 4].flatMap((n) => [system.indexOf(`Question ${n}?`), system.indexOf(`Answer ${n}.`)])
+    expect(at[0]).toBeGreaterThan(-1)
+    expect(at).toEqual([...at].sort((a, b) => a - b))
   })
 
-  it("is sent with none of another user's", async () => {
+  it("is told of none of another user's", async () => {
     outside.model = [saying('An answer for one.'), saying('An answer for the other.')]
 
     await openChat().rich('A question of one user?')
     await openChat().rich('A question of another?')
 
-    expect(messagesOf(2)).toEqual([SYSTEM, user('A question of another?')])
+    expect(systemOf(2)).not.toContain('A question of one user?')
   })
 
-  it('is sent with the first 1,000 characters of a longer reply', async () => {
+  it('is told of the first 1,000 characters of a longer reply', async () => {
     const chat = openChat()
-    const long = 'A made-up answer that goes on. '.repeat(40)
+    const long = 'A made-up answer that goes on. '.repeat(40).trim()
     outside.model = [saying(long), saying('Another answer.')]
 
     await chat.rich('A question?')
     await chat.rich('And another?')
 
-    expect(messagesOf(2)[2]).toEqual(assistant(long.trim().slice(0, 1000)))
+    expect(systemOf(2)).toContain(long.slice(0, 1000))
+    expect(systemOf(2)).not.toContain(long.slice(0, 1001))
   })
 })
 
