@@ -569,8 +569,8 @@ async function sortAsked(deps: Deps, { user, room }: Asking, ids: number[], key:
  * What is run is what is listed to be run, and nothing else: see RUN_AT_ONCE. A line of one of those commands is
  * run as if its user had sent it: see ran. A line of a command that removes or revokes is not run. Its user is
  * asked first, with buttons, and so they are about a command that changes something when the model had read before
- * it gave the line: see confirmFor. Only /timezone with nothing after it is not asked about then, as it shows the
- * time zone and changes nothing.
+ * it gave the line: see confirmFor. Only /timezone and /addcard with nothing after them are not asked about then, as
+ * they show the time zone, or the cards that can be added, and change nothing.
  *
  * A line of /delete is not run either, whatever follows the command. It is answered with what /delete answers when
  * it is sent with nothing after it, which says what to send to go ahead: the deleting of everything is done for a
@@ -584,7 +584,7 @@ async function sortAsked(deps: Deps, { user, room }: Asking, ids: number[], key:
 async function runAsked(deps: Deps, how: Asking, line: string): Promise<Came> {
   const { telegramId, messageId, room, afterReading } = how
   const { name, args } = commandIn(line)
-  const shows = name === 'timezone' && args.length === 0
+  const shows = (name === 'timezone' || name === 'addcard') && args.length === 0
   const asked =
     ASKED_FIRST.find((each) => each === name) ??
     (afterReading && !shows ? CHANGING.find((each) => each === name) : undefined)

@@ -181,6 +181,24 @@ export function storeFor(db: D1Database, ownerId: number) {
     },
 
     /**
+     * The last four digits that the user's purchases are on and none of their cards has, each with the parser of the
+     * latest purchase on it, latest first, and `limit` of them at the most. Purchases added by hand name no bank, and
+     * are passed over. One query.
+     */
+    async unaddedCards(limit: number): Promise<{ last4: string; parser: string }[]> {
+      // SQLite takes the bare column `parser` from the row that has the MAX(id).
+      const { results } = await db
+        .prepare(
+          `SELECT card_last4 AS last4, parser, MAX(id) AS latest FROM transactions
+           WHERE owner_id = ?1 AND parser != ?2 AND card_last4 NOT IN (SELECT last4 FROM cards WHERE owner_id = ?1)
+           GROUP BY card_last4 ORDER BY latest DESC LIMIT ?3`,
+        )
+        .bind(ownerId, MANUAL, limit)
+        .all<{ last4: string; parser: string }>()
+      return results.map(({ last4, parser }) => ({ last4, parser }))
+    },
+
+    /**
      * Links the card to a product of the catalogue, by the product's key, or to none. With `forget`, which is for a
      * card that had another product, the categories of its purchases are forgotten in the same batch.
      */

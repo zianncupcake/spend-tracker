@@ -28,7 +28,7 @@ export const MAX_QUESTION_LENGTH = 500
 export const ADD_CARD_USAGE = `/addcard <nickname> <last4> statement <day>
 /addcard <nickname> <last4> calendar`
 
-/** What the bot says of a card that is not added, above the buttons that add it as `nickname`: see addCardButtons. */
+/** What the bot says of a card that is not added, above the buttons that add it as `nickname`: see addCardEnd. */
 export function tapToAddCard(nickname: string): string {
   return (
     `This card is not added yet. Tap below to add it as ${nickname}: by calendar month, or by the day its ` +
@@ -36,9 +36,12 @@ export function tapToAddCard(nickname: string): string {
   )
 }
 
-export const ADD_CARD_OTHERWISE = 'Or send /addcard to add it with another nickname.'
+/** What the bot says under that, of the card that ends in `last4`, for a nickname of the user's own. */
+export function addCardOtherwise(last4: string): string {
+  return `Or send /addcard <nickname> ${last4} calendar (or statement <day>) to choose another nickname.`
+}
 
-/** What the bot says after a press that added a card, whose nickname the bot chose: see addCardButtons. */
+/** What the bot says after a press that added a card, whose nickname the bot chose: see addCardEnd. */
 export const RENAME_ADDED = 'To change its nickname, send /renamecard <nickname> <new nickname>.'
 
 export const ADD_USAGE = `Usage:

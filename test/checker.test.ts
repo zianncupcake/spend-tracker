@@ -7,7 +7,7 @@ import worker from '../src/index'
 import { storeFor } from '../src/store'
 import { heldStoreFor } from '../src/store-held'
 import { mailStoreFor } from '../src/store-mail'
-import { ADD_CARD_OTHERWISE, NO_SIGN_IN, RENAME_ADDED, tapToAddCard } from '../src/telegram/texts'
+import { addCardOtherwise, NO_SIGN_IN, RENAME_ADDED, tapToAddCard } from '../src/telegram/texts'
 import {
   attemptOf,
   clock,
@@ -26,7 +26,7 @@ import {
   TOKEN_URL,
 } from './connect-helpers'
 import { gmailMessage, gmailResults, htmlPart, textPart, type Message, type MessageOptions } from './gmail-helpers'
-import { alertText, CARDS_HEADER, marksOf, seconds } from './helpers'
+import { alertText, buy, CARDS_HEADER, marksOf, seconds } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const JANE = 'jane@example.test'
@@ -35,8 +35,8 @@ const DAY = 86_400
 /** The address that OCBC sends its card alerts from. A bank's domain is public. */
 const OCBC = 'noreply@notify.ocbc.com'
 
-/** What the bot says of a card that is not added, above the buttons that add it as `nickname`. */
-const addCardHint = (nickname: string) => [tapToAddCard(nickname), ADD_CARD_OTHERWISE].join('\n')
+/** What the bot says of a card ending 1234 that is not added, above the buttons that add it as `nickname`. */
+const addCardHint = (nickname: string) => [tapToAddCard(nickname), addCardOtherwise('1234')].join('\n')
 
 /** That, of a card of the invented Example Bank. */
 const ADD_CARD_HINT = addCardHint('example-bank')
@@ -339,7 +339,7 @@ describe('a new alert for a card that is not added', () => {
     expect(message?.text.split('\n')).toEqual([
       'Card ••••4321: SGD 12.40 at SAMPLE SHOP',
       tapToAddCard('dbs'),
-      ADD_CARD_OTHERWISE,
+      addCardOtherwise('4321'),
     ])
     const buttons = message?.buttons?.flat() ?? []
     const days = Array.from({ length: 31 }, (_, at) => String(at + 1))
@@ -379,6 +379,21 @@ describe('a new alert for a card that is not added', () => {
     await runCheck(deps)
 
     expect(posted.at(-1)?.buttons?.[0]).toEqual([{ text: 'Calendar month', data: `do:/addcard ${calendar}` }])
+  })
+})
+
+describe('/addcard alone', () => {
+  it('offers a card that a purchase is on and that is not added, with the buttons of its alert', async () => {
+    const chat = openChat()
+    await buy(await chat.userId(), { cardLast4: '4321' })
+
+    const replies = await chat.ask('/addcard')
+
+    expect(replies).toHaveLength(1)
+    const buttons = replies[0].buttons?.flat() ?? []
+    const days = Array.from({ length: 31 }, (_, at) => String(at + 1))
+    expect(buttons.map((button) => button.text)).toEqual(['Calendar month', ...days])
+    expect(buttons[15].data).toBe('do:/addcard example-bank 4321 statement 15')
   })
 })
 

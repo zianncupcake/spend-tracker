@@ -184,6 +184,8 @@ describe('/addcard and /cards', () => {
   })
 
   it.each([
+    // With no purchase on a card that is not added, there is nothing to offer.
+    ['/addcard', 'Usage:'],
     ['/addcard visa', 'Usage:'],
     ['/addcard visa 1234 weekly', 'Usage:'],
     ['/addcard visa 1234 statement', 'Usage:'],

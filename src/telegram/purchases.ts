@@ -10,13 +10,14 @@
 // or is in the block of a table, and Telegram makes nothing of what is in either: see MessageEntity. In a rich
 // message it is told to make nothing of any text: see RichMessage.
 
-import { categoriesOf, categoryName, categoryOf } from '../catalogue'
+import { categoriesOf, categoryName, categoryOf, productOfBank } from '../catalogue'
 import type { Product } from '../catalogue/types'
 import { leftOf, perCurrency, type Amount, type Breakdown } from '../domain/breakdown'
 import { MANUAL, type Card, type Transaction } from '../store'
 import type { HeldPurchase } from '../store-held'
 import type { Button, MessageEntity, Outgoing, RichBlock, TableCell } from './api'
 import { formatAmount, formatMoney, formatShortDate } from './format'
+import { ADD_CARD_USAGE, addCardOtherwise, tapToAddCard } from './texts'
 
 /**
  * The most text that Telegram takes in one message. It is counted here in UTF-16 code units, of which a text has
@@ -290,7 +291,7 @@ export function confirmButtons(line: string): Button[][] | null {
  * as its "Do it" would: see confirmButtons. One adds it by calendar month, and the others, seven to a row, by the
  * day that its statement closes on. Null when the lines do not fit in what a button sends back.
  */
-export function addCardButtons(nickname: string, last4: string, product: string | undefined): Button[][] | null {
+function addCardButtons(nickname: string, last4: string, product: string | undefined): Button[][] | null {
   const line = (window: string) => ['/addcard', nickname, last4, window, ...(product ? [product] : [])].join(' ')
   // The line of a day of two digits is the longest.
   if (!fits(line('statement 31'))) return null
@@ -298,6 +299,19 @@ export function addCardButtons(nickname: string, last4: string, product: string 
   const days = Array.from({ length: 31 }, (_, at) => button(String(at + 1), `statement ${at + 1}`))
   const rows = Array.from({ length: Math.ceil(days.length / 7) }, (_, row) => days.slice(row * 7, row * 7 + 7))
   return [[button('Calendar month', 'calendar')], ...rows]
+}
+
+/**
+ * What a message of a card that is not added ends with: the card has the digits, and the bank of the parser named
+ * it. The card is added in one press, named for the bank, or for the bank and the digits when a card is called so
+ * already, which is one of `taken`, and linked to the bank's product when the bank has one. When those lines do not
+ * fit under a button, it ends with the usage of /addcard instead, and has no buttons.
+ */
+export function addCardEnd(taken: string[], parser: string, last4: string): { text: string; buttons?: Button[][] } {
+  const nickname = taken.includes(parser) ? `${parser}${last4}` : parser
+  const buttons = addCardButtons(nickname, last4, productOfBank(parser)?.key)
+  if (buttons) return { text: `${tapToAddCard(nickname)}\n${addCardOtherwise(last4)}`, buttons }
+  return { text: `This card is not added yet. Add it with:\n${ADD_CARD_USAGE.replaceAll('<last4>', last4)}` }
 }
 
 /** Whether a button can send back the command of the line to be run: Telegram takes 64 bytes, counted as UTF-8. */
