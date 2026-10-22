@@ -9,14 +9,16 @@ import {
   NICKNAME,
   noSuchProduct,
   parseCard,
+  parseCycle,
   parsePattern,
   parseReminder,
   PRODUCT_KEY,
   PURCHASE_ID,
   timeZoneNamed,
+  windowWords,
 } from './arguments'
 import { commandIn, ran } from './commands'
-import { formatAmount, formatShortDate, maskLast4 } from './format'
+import { describeWindow, formatAmount, formatShortDate, maskLast4 } from './format'
 import { confirmButtons, inMessages, purchaseLine, type Line } from './purchases'
 import { describeCard, label, patternLine } from './replies'
 import { sendReply } from './sending'
@@ -108,9 +110,17 @@ export async function confirmFor(
     case 'addcard': {
       const card = parseCard(args)
       if (typeof card === 'string') return declined(NOT_DONE)
-      const window = card.windowType === 'statement' ? `statement ${card.statementDay}` : 'calendar'
-      const words = ['/addcard', card.nickname, card.last4, window, ...(card.product ? [card.product] : [])]
+      const words = ['/addcard', card.nickname, card.last4, windowWords(card), ...(card.product ? [card.product] : [])]
       return confirmation(words.join(' '), [{ text: 'Add this card?' }, { text: describeCard(card) }])
+    }
+    case 'cycle': {
+      const asked = parseCycle(args)
+      if (typeof asked === 'string') return declined(NOT_DONE)
+      const card = (await storeFor(db, user.id).listCards()).find((each) => each.nickname === asked.nickname)
+      if (!card) return declined(`You have no card called ${asked.nickname}.`)
+      return confirmation(`/cycle ${asked.nickname} ${windowWords(asked)}`, [
+        { text: `Change the window of ${label(card)}? From now on: ${describeWindow(asked)}.` },
+      ])
     }
     case 'renamecard': {
       const [nickname = '', renamed = ''] = args

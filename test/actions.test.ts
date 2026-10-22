@@ -361,6 +361,15 @@ describe('a command that the assistant gives to be run', () => {
     expect(texts.map((message) => message.text)).toEqual([await chat.say('/best SAMPLE EATERY')])
   })
 
+  it('is run at once when it is /cycle, which is undone in a step', async () => {
+    const chat = await chatWithCard()
+    acting(command('/cycle evol statement 1'))
+
+    const { texts } = await told(chat)
+
+    expect(texts.map((message) => message.text)).toEqual([await chat.say('/cycle evol statement 1')])
+  })
+
   it('is answered with the table that the command replies with, when it is one that shows things in a table', async () => {
     const chat = await chatWithCards()
     const userId = await chat.userId()

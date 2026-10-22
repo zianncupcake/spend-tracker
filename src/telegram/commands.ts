@@ -8,6 +8,7 @@ import { bestFor } from '../domain/best'
 import { nextReminder, reminderIn } from '../domain/reminder'
 import { sortByRules } from '../domain/sorting'
 import { cardTotals } from '../domain/totals'
+import { currentWindow } from '../domain/window'
 import { COMMAND_NAMES } from '../log'
 import { issueToken } from '../mcp/tokens'
 import { deleteUser, findOrCreateUser, MAX_CARDS, setTimezone, storeFor } from '../store'
@@ -21,6 +22,7 @@ import {
   NICKNAME,
   noSuchProduct,
   parseCard,
+  parseCycle,
   parseEntry,
   parsePattern,
   parseReminder,
@@ -28,7 +30,7 @@ import {
   PURCHASE_ID,
   timeZoneNamed,
 } from './arguments'
-import { formatShortDate, formatShortDateTime, maskLast4 } from './format'
+import { describeWindow, formatShortDate, formatShortDateTime, maskLast4, shortDateIn } from './format'
 import { inMessages, purchaseLine, sortPrompt, whereSorted } from './purchases'
 import {
   bestReply,
@@ -174,6 +176,23 @@ export async function reply(
       // card's digits, its window and its product stay as they are, and its purchases go by its digits.
       const done = await store.renameCard(nickname, renamed)
       return done ? `Renamed ${label(card)} to ${renamed}.` : `You already have a card called ${renamed}.`
+    }
+
+    case '/cycle': {
+      const asked = parseCycle(args)
+      if (typeof asked === 'string') return asked
+      const { id, timezone } = await user()
+      const store = storeFor(db, id)
+      const card = (await store.listCards()).find((each) => each.nickname === asked.nickname)
+      if (!card) return `You have no card called ${asked.nickname}.`
+      // The purchases stay as they are, and are counted by the new window from now on.
+      await store.setWindow(asked.nickname, asked)
+      const window = currentWindow({ ...asked, product: card.product }, now(), timezone)
+      const shortDate = shortDateIn(timezone)
+      return (
+        `Changed ${label(card)}: ${describeWindow(asked)}. ` +
+        `Its current window runs from ${shortDate(window.start)} and resets ${shortDate(window.end)}.`
+      )
     }
 
     case '/spend': {

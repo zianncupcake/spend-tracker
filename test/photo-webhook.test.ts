@@ -192,6 +192,7 @@ describe('POST /telegram with a photo', () => {
         { nickname: 'visa', categories: [], note: undefined },
         {
           nickname: 'evol',
+          product: 'UOB EVOL Card',
           categories: [
             { key: 'online', label: 'Online / Mobile Contactless Spend' },
             { key: 'selected', label: 'Selected Gym, Telco and Streaming Spend' },

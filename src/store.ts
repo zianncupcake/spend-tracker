@@ -191,6 +191,15 @@ export function storeFor(db: D1Database, ownerId: number) {
       await db.batch(forget ? [forgetting(nickname), linking] : [linking])
     },
 
+    /** Gives the card another window, and changes nothing else of it. */
+    async setWindow(nickname: string, window: WindowRule): Promise<void> {
+      const statementDay = window.windowType === 'statement' ? window.statementDay : null
+      await db
+        .prepare('UPDATE cards SET window_type = ?, statement_day = ? WHERE owner_id = ? AND nickname = ?')
+        .bind(window.windowType, statementDay, ownerId, nickname)
+        .run()
+    },
+
     /**
      * Gives the card another nickname, and changes nothing else of it. False, with nothing changed, when the user
      * has no card with that nickname, and when a card of theirs has the new one already: which the card itself has
