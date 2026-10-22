@@ -7,7 +7,7 @@ import worker from '../src/index'
 import { storeFor } from '../src/store'
 import { heldStoreFor } from '../src/store-held'
 import { mailStoreFor } from '../src/store-mail'
-import { NO_SIGN_IN } from '../src/telegram/texts'
+import { ADD_CARD_OTHERWISE, NO_SIGN_IN, RENAME_ADDED, tapToAddCard } from '../src/telegram/texts'
 import {
   attemptOf,
   clock,
@@ -26,7 +26,7 @@ import {
   TOKEN_URL,
 } from './connect-helpers'
 import { gmailMessage, gmailResults, htmlPart, textPart, type Message, type MessageOptions } from './gmail-helpers'
-import { alertText, marksOf, seconds } from './helpers'
+import { alertText, CARDS_HEADER, marksOf, seconds } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const JANE = 'jane@example.test'
@@ -35,11 +35,11 @@ const DAY = 86_400
 /** The address that OCBC sends its card alerts from. A bank's domain is public. */
 const OCBC = 'noreply@notify.ocbc.com'
 
-const ADD_CARD_HINT = [
-  'This card is not added yet. Add it with:',
-  '/addcard <nickname> 1234 statement <day>',
-  '/addcard <nickname> 1234 calendar',
-].join('\n')
+/** What the bot says of a card that is not added, above the buttons that add it as `nickname`. */
+const addCardHint = (nickname: string) => [tapToAddCard(nickname), ADD_CARD_OTHERWISE].join('\n')
+
+/** That, of a card of the invented Example Bank. */
+const ADD_CARD_HINT = addCardHint('example-bank')
 
 /**
  * What the line that a run logs of itself says of a run that did nothing, in no time: there was no mailbox to
@@ -222,7 +222,8 @@ describe('a new alert', () => {
       },
     ])
     expect(await seenOf(userId)).toEqual([])
-    expect(sent.map((message) => message.text)).toEqual([`Card ••••1234: SGD 12.34 at SOME MERCHANT\n${ADD_CARD_HINT}`])
+    const text = `Card ••••1234: SGD 12.34 at SOME MERCHANT\n${addCardHint('ocbc')}`
+    expect(sent.map((message) => message.text)).toEqual([text])
   })
 
   it.each<[what: string, nickname: string | null, offset: number, rest: string]>([
@@ -246,6 +247,8 @@ describe('a new alert', () => {
         // In UTF-16 code units, as the indices of a string are: the 𝒳 is two of the 38.
         entities: [{ type: 'code', offset, length: 38 }],
         link_preview_options: { is_disabled: true },
+        // The buttons that add a card that is not added.
+        ...(nickname ? {} : { reply_markup: expect.anything() }),
       },
     ])
     // The name is marked, and no more or less of the message than the name.
@@ -282,7 +285,8 @@ describe('a new alert', () => {
     expect(await purchasesOf(await chat.userId())).toMatchObject([
       { source_id: 'msg-1', parser: 'uob', occurred_at: seconds('2026-10-09T12:00:00+08:00') },
     ])
-    expect(sent.map((message) => message.text)).toEqual([`Card ••••1234: SGD 45.60 at SAMPLE EATERY\n${ADD_CARD_HINT}`])
+    const text = `Card ••••1234: SGD 45.60 at SAMPLE EATERY\n${addCardHint('uob')}`
+    expect(sent.map((message) => message.text)).toEqual([text])
   })
 
   it('is stored without a message when its email came six hours ago or longer', async () => {
@@ -309,6 +313,72 @@ describe('a new alert', () => {
 
     expect(sent).toHaveLength(1)
     expect(await purchasesOf(await chat.userId())).toHaveLength(1)
+  })
+})
+
+describe('a new alert for a card that is not added', () => {
+  /** A DBS card alert for the card ending 4321, as Gmail has it when it authenticated the bank. */
+  const dbsAlert = () =>
+    gmailMessage({
+      from: 'DBS <ibanking.alert@dbs.com>',
+      receivedAt: now() - 60,
+      results: [gmailResults('pass', 'dbs.com')],
+      content: textPart(
+        'Date & Time: 09 OCT 11:58 (SGT)\nAmount: SGD12.40\nFrom: DBS/POSB card ending 4321\nTo: SAMPLE SHOP\n\n' +
+          'If unauthorised, please login to DBS digibank mobile to report fraud dispute immediately.',
+      ),
+    })
+
+  it("comes with buttons that add it, named for its bank and linked to the bank's one product", async () => {
+    const chat = await connectedChat(JANE)
+    outside.mailboxes[JANE] = [dbsAlert()]
+
+    await runCheck(deps)
+
+    const message = posted.at(-1)
+    expect(message?.text.split('\n')).toEqual([
+      'Card ••••4321: SGD 12.40 at SAMPLE SHOP',
+      tapToAddCard('dbs'),
+      ADD_CARD_OTHERWISE,
+    ])
+    const buttons = message?.buttons?.flat() ?? []
+    const days = Array.from({ length: 31 }, (_, at) => String(at + 1))
+    expect(buttons.map((button) => button.text)).toEqual(['Calendar month', ...days])
+    expect(buttons[0].data).toBe('do:/addcard dbs 4321 calendar dbs-womans-world')
+    expect(buttons[15].data).toBe('do:/addcard dbs 4321 statement 15 dbs-womans-world')
+    expect(await purchasesOf(await chat.userId())).toHaveLength(1)
+  })
+
+  it('is added with its product by a press of "Calendar month", and /cards then lists it', async () => {
+    const chat = await connectedChat(JANE)
+    outside.mailboxes[JANE] = [dbsAlert()]
+    await runCheck(deps)
+
+    const [notice] = posted.slice(-1)
+    const pressed = await chat.press(notice, 'Calendar month')
+
+    expect(pressed.sent.map((message) => message.text)).toEqual([expect.stringMatching(/^Added dbs /), RENAME_ADDED])
+    const row = "dbs | ••••4321 | calendar month | DBS Woman's World Card | -"
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, row])
+  })
+
+  it.each<[what: string, before: string | null, message: () => Message, calendar: string]>([
+    [
+      'whose nickname a card has already',
+      '/addcard dbs 9999 calendar',
+      dbsAlert,
+      'dbs4321 4321 calendar dbs-womans-world',
+    ],
+    // The invented Example Bank has no product.
+    ['with no product', null, () => alert('msg-1', 1, alertText('SGD 12.40', '4321')), 'example-bank 4321 calendar'],
+  ])('of a bank %s has its own line of /addcard under "Calendar month"', async (_, before, message, calendar) => {
+    const chat = await connectedChat(JANE)
+    if (before) await chat.say(before)
+    outside.mailboxes[JANE] = [message()]
+
+    await runCheck(deps)
+
+    expect(posted.at(-1)?.buttons?.[0]).toEqual([{ text: 'Calendar month', data: `do:/addcard ${calendar}` }])
   })
 })
 
@@ -1296,6 +1366,7 @@ describe('through the Worker', () => {
         text: `Card ••••1234: SGD 12.40 at COFFEE PLACE\n${ADD_CARD_HINT}`,
         entities: [{ type: 'code', offset: 28, length: 12 }],
         link_preview_options: { is_disabled: true },
+        reply_markup: expect.anything(),
       },
     ])
     expect(await purchasesOf(await chat.userId())).toMatchObject([{ source_id: 'msg-1', occurred_at: receivedAt }])

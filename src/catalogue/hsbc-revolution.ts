@@ -68,6 +68,7 @@ const ELIGIBLE_MCCS: Mcc[] = [
 
 export const hsbcRevolution: Product = {
   key: 'hsbc-revolution',
+  bank: 'hsbc',
   name: 'HSBC Revolution Credit Card',
   homeCurrency: 'SGD',
   // Where the bank publishes the terms that the limits are from:

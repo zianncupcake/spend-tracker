@@ -68,6 +68,7 @@ const SHOPPING_MERCHANTS = [
 
 export const ocbcRewards: Product = {
   key: 'ocbc-rewards',
+  bank: 'ocbc',
   name: 'OCBC Rewards Card',
   homeCurrency: 'SGD',
   // Where the bank publishes the terms that the limits are from:

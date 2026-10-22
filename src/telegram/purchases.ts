@@ -277,13 +277,32 @@ export function readHeldPress(data: string): { messageId: number; choice: string
 /**
  * The buttons under a message that asks before a command is run: one that runs it, and one that does not. `line` is
  * the command as its user would send it, and it rides in what each button sends back. Null when it does not fit
- * there: Telegram takes 64 bytes, and counts them as UTF-8.
+ * there: see `fits`.
  */
 export function confirmButtons(line: string): Button[][] | null {
-  const [run, leave] = [`do:${line}`, `no:${line}`]
-  if (new TextEncoder().encode(run).byteLength > MAX_DATA_BYTES) return null
+  if (!fits(line)) return null
   // A row to each button, as under a purchase.
-  return [[{ text: 'Do it', data: run }], [{ text: 'Cancel', data: leave }]]
+  return [[{ text: 'Do it', data: `do:${line}` }], [{ text: 'Cancel', data: `no:${line}` }]]
+}
+
+/**
+ * The buttons under the message that tells of a purchase on a card that is not added, each of which adds the card
+ * as its "Do it" would: see confirmButtons. One adds it by calendar month, and the others, seven to a row, by the
+ * day that its statement closes on. Null when the lines do not fit in what a button sends back.
+ */
+export function addCardButtons(nickname: string, last4: string, product: string | undefined): Button[][] | null {
+  const line = (window: string) => ['/addcard', nickname, last4, window, ...(product ? [product] : [])].join(' ')
+  // The line of a day of two digits is the longest.
+  if (!fits(line('statement 31'))) return null
+  const button = (text: string, window: string): Button => ({ text, data: `do:${line(window)}` })
+  const days = Array.from({ length: 31 }, (_, at) => button(String(at + 1), `statement ${at + 1}`))
+  const rows = Array.from({ length: Math.ceil(days.length / 7) }, (_, row) => days.slice(row * 7, row * 7 + 7))
+  return [[button('Calendar month', 'calendar')], ...rows]
+}
+
+/** Whether a button can send back the command of the line to be run: Telegram takes 64 bytes, counted as UTF-8. */
+function fits(line: string): boolean {
+  return new TextEncoder().encode(`do:${line}`).byteLength <= MAX_DATA_BYTES
 }
 
 /**
