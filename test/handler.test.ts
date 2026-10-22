@@ -379,6 +379,31 @@ describe('/renamecard', () => {
   })
 })
 
+describe('/cycle', () => {
+  it('gives a card a statement cycle, and back to calendar months', async () => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+
+    expect(await chat.say('/cycle visa statement 1')).toContain('runs from 2 Oct and resets 2 Nov.')
+    expect(await chat.lines('/cards')).toContain('visa | ••••1234 | statement closes on the 1st of the month | - | -')
+
+    await chat.say('/cycle visa calendar')
+    expect(await chat.lines('/cards')).toContain('visa | ••••1234 | calendar month | - | -')
+  })
+
+  it.each<[what: string, message: string, said: string]>([
+    ['a card that there is not', '/cycle evol statement 1', 'You have no card called evol.'],
+    ['a day out of range', '/cycle visa statement 32', 'The statement day must be a number from 1 to 31.'],
+  ])('changes nothing when it is given %s, and says so', async (_, message, said) => {
+    const chat = openChat()
+    await chat.say('/addcard visa 1234 calendar')
+
+    expect(await chat.say(message)).toBe(said)
+
+    expect(await chat.lines('/cards')).toContain('visa | ••••1234 | calendar month | - | -')
+  })
+})
+
 describe('/spend', () => {
   it("shows each card's total per currency, purchase count and reset date", async () => {
     const chat = openChat()
@@ -757,7 +782,7 @@ describe('what the log has of an update', () => {
     // The names at the start of the lines of the list, each of them once: /spend is there with and without a card.
     const lines = (await chat.say('/help')).split('\n')
     const listed = [...new Set(lines.flatMap((line) => /^\/([a-z]+)/.exec(line)?.[1] ?? []))]
-    expect(listed).toHaveLength(20)
+    expect(listed).toHaveLength(21)
     const logged = catchConsole()
 
     for (const name of listed) await chat.reply(`/${name}`)

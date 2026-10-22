@@ -132,8 +132,9 @@ describe('a photo with a caption that names the card', () => {
 
     // The file of one size is fetched: the largest, by the id that Telegram gave it, and no more of it than 400 KB.
     expect(file.mock.calls).toEqual([['made-up-file-id-large', 400_000]])
-    // The reading is given the bytes that came, what they are, the caption, and each card: its nickname, the
-    // categories that a purchase on it can be put in by hand, and what its product says of the sorting.
+    // The reading is given the bytes that came, what they are, the caption, and each card: its nickname, its
+    // product's name, the categories that a purchase on it can be put in by hand, and what its product says of the
+    // sorting.
     expect(reader).toHaveBeenCalledTimes(1)
     const [given, provider, input] = reader.mock.calls[0]
     expect(given).toBe(deps)
@@ -147,6 +148,7 @@ describe('a photo with a caption that names the card', () => {
         { nickname: 'visa', categories: [], note: undefined },
         {
           nickname: 'evol',
+          product: 'UOB EVOL Card',
           categories: [
             { key: 'online', label: ONLINE },
             { key: 'selected', label: 'Selected Gym, Telco and Streaming Spend' },

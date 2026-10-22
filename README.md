@@ -34,6 +34,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/cards` | Lists your cards. |
 | `/removecard <nickname>` | Stops tracking a card. |
 | `/renamecard <nickname> <new nickname>` | Gives a card another nickname. Nothing else of the card changes. |
+| `/cycle <nickname> statement <day>` | Changes a card to a statement cycle that closes on `<day>`, or with `calendar` in place of `statement <day>` to calendar months. Its purchases stay, and are counted by the new window from then on. |
 | `/spend` | Shows what you have spent on each card in its current window. |
 | `/spend <nickname>` | Lists every purchase on one card in its current window, with what they come to. Where some are in another currency, the total has what each of those comes to in the card's own beside it, and the sum, at the European Central Bank's reference rates of the day from frankfurter.dev. |
 | `/best <merchant>` | Says which of your cards to pay with at a merchant: by whether it earns the card's bonus there and what is left of the cap, not by earn rates, which the bot does not know. |

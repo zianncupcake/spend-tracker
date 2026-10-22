@@ -1,11 +1,11 @@
 // What a user types after a command, and the reading of it: the patterns that the words are held to, the card
-// that /addcard's words describe, the purchase that /add's describe, what /pattern's and /remind's ask for, and the
-// name of a time zone.
+// that /addcard's words describe, the purchase that /add's describe, what /cycle's, /pattern's and /remind's ask
+// for, and the name of a time zone.
 
 import { productOf } from '../catalogue'
 import { lettersOf } from '../catalogue/merchants'
 import { CURRENCY, dayStart, isRealDay, ISO_DATE, noonOf } from '../domain/by-hand'
-import { countedIn, currentWindow, dayOf } from '../domain/window'
+import { countedIn, currentWindow, dayOf, type WindowRule } from '../domain/window'
 import { hundredths, MAX_MERCHANT_LENGTH } from '../parsers/shared'
 import {
   MAX_PATTERN_MERCHANT,
@@ -14,7 +14,7 @@ import {
   type Card,
   type Pattern,
 } from '../store'
-import { ADD_CARD_USAGE, ADD_USAGE } from './texts'
+import { ADD_CARD_USAGE, ADD_USAGE, CYCLE_USAGE } from './texts'
 
 /** What /add is told of a purchase, after the card that it was made with. */
 export interface Entry {
@@ -71,13 +71,35 @@ export function parseCard(args: string[]): Card | string {
   if (key !== undefined && !product) return noSuchProduct(key)
   const linked = product ? { product: product.key } : {}
 
-  if (type.toLowerCase() === 'calendar') return { nickname, last4, windowType: 'calendar', ...linked }
-  if (type.toLowerCase() === 'statement' && args.length >= 4) {
-    const statementDay = DAY.test(day) ? Number(day) : 0
-    if (statementDay < 1 || statementDay > 31) return 'The statement day must be a number from 1 to 31.'
-    return { nickname, last4, windowType: 'statement', statementDay, ...linked }
-  }
-  return usage
+  const window = windowOf(type, day)
+  if (window === null) return usage
+  return typeof window === 'string' ? window : { nickname, last4, ...window, ...linked }
+}
+
+/** The card and the window that /cycle's arguments ask for, or a message saying what is wrong with them. */
+export function parseCycle(args: string[]): ({ nickname: string } & WindowRule) | string {
+  const [nickname = '', type = '', day = ''] = args
+  const words = type.toLowerCase() === 'statement' ? 3 : 2
+  const window = NICKNAME.test(nickname) && args.length === words ? windowOf(type, day) : null
+  if (window === null) return CYCLE_USAGE
+  return typeof window === 'string' ? window : { nickname, ...window }
+}
+
+/**
+ * The window that "calendar", or "statement" and its day, describe, as /addcard and /cycle take them: a message
+ * saying what is wrong with the day, or null for words that are neither.
+ */
+function windowOf(type: string, day: string): WindowRule | string | null {
+  if (type.toLowerCase() === 'calendar') return { windowType: 'calendar' }
+  if (type.toLowerCase() !== 'statement' || day === '') return null
+  const statementDay = DAY.test(day) ? Number(day) : 0
+  if (statementDay < 1 || statementDay > 31) return 'The statement day must be a number from 1 to 31.'
+  return { windowType: 'statement', statementDay }
+}
+
+/** A window in the words that /addcard and /cycle take for it. */
+export function windowWords(window: WindowRule): string {
+  return window.windowType === 'statement' ? `statement ${window.statementDay}` : 'calendar'
 }
 
 export function noSuchProduct(key: string): string {

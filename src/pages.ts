@@ -82,8 +82,8 @@ export function privacyPage(operator: Operator, assistant: boolean, photos: bool
 <h2>Questions that you ask the bot</h2>
 <p>A text message that you send the bot is read as a question when it is not a command, and is not the 6-digit
 code of a sign-in. To answer it, your question is sent to an AI provider chosen by ${name}, which produces the
-answer. With every question go your time zone, the day and the time that it is there, the nicknames of your cards
-and the names of the reward categories that their purchases can be sorted into, whether or not the question needs
+answer. With every question go your time zone, the day and the time that it is there, the nicknames of your cards,
+the names of their card products and of the reward categories that their purchases can be sorted into, whether or not the question needs
 them. So that the assistant can follow a conversation, your last few questions and the bot's answers to them are
 kept for 30 minutes, and go with every question that you ask in that time. They are then deleted. Other details
 are sent only as the answering calls for them, and they are of your purchases: the id, the time, the last four

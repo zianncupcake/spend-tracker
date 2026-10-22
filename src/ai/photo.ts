@@ -27,6 +27,8 @@ import { completeJson, ProviderError, type AiProvider, type ChatMessage } from '
  */
 export interface PhotoCard {
   nickname: string
+  /** The name of the card's product, when it has one, so that a card can be known by it. */
+  product?: string
   /** The categories that a user can choose for a purchase on this card. Empty for a card with no product. */
   categories: { key: string; label: string }[]
   /** What the card's product says of how its purchases are sorted, when it says anything. */
@@ -241,7 +243,7 @@ function systemMessage(cards: PhotoCard[], now: Date, timeZone: string): string 
 export function asPhotoCard(card: Card): PhotoCard {
   const product = productOf(card.product)
   const categories = product ? categoriesOf(product).map(({ key, label }) => ({ key, label })) : []
-  return { nickname: card.nickname, categories, note: product?.sortingNote }
+  return { nickname: card.nickname, product: product?.name, categories, note: product?.sortingNote }
 }
 
 /**
@@ -253,10 +255,11 @@ export function describeCards(cards: PhotoCard[]): string {
 }
 
 /** A card as the model is told of it. What its product says of the sorting is said after its categories. */
-function described({ nickname, categories, note }: PhotoCard): string {
-  if (categories.length === 0) return `${nickname}: it has no categories.`
+function described({ nickname, product, categories, note }: PhotoCard): string {
+  const named = product ? `${nickname} (${product})` : nickname
+  if (categories.length === 0) return `${named}: it has no categories.`
   const listed = categories.map(({ key, label }) => `${key} = ${label}`).join(', ')
-  const sorted = `${nickname}: its purchases are sorted into one of these categories: ${listed}.`
+  const sorted = `${named}: its purchases are sorted into one of these categories: ${listed}.`
   return note ? `${sorted} ${note}` : sorted
 }
 

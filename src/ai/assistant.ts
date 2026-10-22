@@ -596,6 +596,7 @@ function acts(name: string): boolean {
  */
 function systemMessage(now: Date, timeZone: string, cards: PhotoCard[]): string {
   const { day, weekday, time } = localTime(now, timeZone)
+  const productKeys = products.map(({ key, name }) => `${key} = ${name}`).join(', ')
   return [
     'You are the assistant of Spend Tracker, a Telegram bot that keeps a running total of what its user spends on ' +
       "each of their credit cards. Answer what the user asks about their card spending, or about what earns a card's " +
@@ -608,6 +609,8 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[]): string 
     'Messages of the last 30 minutes come before the question, for what the user refers to. Figures in them may be ' +
       'out of date: take figures from the tools.',
     describeCards(cards),
+    'In every command but /addcard a card is named by its nickname: never ask for the last four digits of a card ' +
+      'that the user has, and when they name one loosely, by a nickname, its bank or its product, use that card.',
     'When the user asks for something to be done, call the tool for it and write nothing else. Only a tool does ' +
       'anything: never say that something was done.',
     ONE_AT_A_TIME,
@@ -618,12 +621,14 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[]): string 
     'To sort purchases into a category, call set_category.',
     'To do anything else, call run_command with one of these lines: /addcard <nickname> <last4> statement <day> ' +
       '[product key], /addcard <nickname> <last4> calendar [product key], /removecard <nickname>, /renamecard ' +
-      '<nickname> <new nickname>, /product <nickname> <product key>|none, /remove <purchase id>, /pattern ' +
+      '<nickname> <new nickname>, /cycle <nickname> statement <day>|calendar to change when its statement closes, ' +
+      '/product <nickname> <product key>|none, /remove <purchase id>, /pattern ' +
       '<nickname> <amount a month> <merchant> [except <skipped YYYY-MM-DD> ...], /pattern <nickname> <merchant> ' +
       'none, /remind <nickname> <day of the month>|none for a bill reminder, /timezone <IANA name>, /connect or ' +
       "/disconnect for the user's Gmail, /mcp or /mcp revoke for another " +
       "assistant's access, /delete for all that is stored about the user, and these, which only show things: " +
       '/cards, /patterns, /status of the Gmail, /products, /best <merchant> for which card to pay with there.',
+    `The product keys, for /product and /addcard: ${productKeys}.`,
     'To find the id of a purchase that the user describes, call find_purchases first.',
     "To answer what earns a card's bonus, by merchant or category code (MCC), or what its caps are, call card_rules " +
       'and fill both of its arguments every time: merchant, the merchant that the user named or null, and mccs, the ' +

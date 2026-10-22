@@ -56,6 +56,8 @@ export const PRODUCT_USAGE = 'Usage:\n/product <nickname> <product key>\n/produc
 
 export const RENAME_CARD_USAGE = 'Usage: /renamecard <nickname> <new nickname>'
 
+export const CYCLE_USAGE = 'Usage:\n/cycle <nickname> statement <day>\n/cycle <nickname> calendar'
+
 export const PATTERN_USAGE = `Usage:
 /pattern <nickname> <amount> <merchant>
 /pattern <nickname> <amount> <merchant> except <YYYY-MM-DD> ...
@@ -79,7 +81,9 @@ export const COMMANDS = `Commands:
 /cards - list your cards
 /removecard <nickname> - stop tracking a card
 /renamecard <nickname> <new nickname> - give a card another nickname
-/spend - what you have spent on each card in its current window
+/cycle <nickname> statement <day> - change a card to a statement cycle that closes on <day>
+/cycle <nickname> calendar - change a card to calendar months
+/spend -what you have spent on each card in its current window
 /spend <nickname> - every purchase on one card in its current window
 /best <merchant> - which of your cards to pay with there, by its bonus and what is left of its cap
 /add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant
