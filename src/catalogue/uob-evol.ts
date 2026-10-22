@@ -39,6 +39,7 @@ const SELECTED_MERCHANTS = [
 
 export const uobEvol: Product = {
   key: 'uob-evol',
+  bank: 'uob',
   name: 'UOB EVOL Card',
   homeCurrency: 'SGD',
   // Where the bank publishes the terms that the limits are from:

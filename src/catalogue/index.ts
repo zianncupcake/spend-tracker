@@ -14,6 +14,12 @@ export function productOf(key: string | undefined): Product | undefined {
   return products.find((product) => product.key === key)
 }
 
+/** The one product of the bank whose parser has the name. Undefined when the bank has none, or more than one. */
+export function productOfBank(bank: string): Product | undefined {
+  const [only, ...more] = products.filter((product) => product.bank === bank)
+  return more.length === 0 ? only : undefined
+}
+
 /** Every category of the product, in the order of its groups. */
 export function categoriesOf(product: Product): Category[] {
   return product.groups.flatMap((group) => group.categories)

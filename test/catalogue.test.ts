@@ -331,6 +331,7 @@ describe('a product with other rules', () => {
   // no category that a purchase is in by default.
   const other: Product = {
     key: 'made-up-card',
+    bank: 'example-bank',
     name: 'Made-up Card',
     homeCurrency: 'USD',
     termsAsOf: '1 January 2026',

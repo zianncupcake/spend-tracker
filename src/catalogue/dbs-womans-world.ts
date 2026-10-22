@@ -38,6 +38,7 @@ const NOT_ONLINE = [
 
 export const dbsWomansWorld: Product = {
   key: 'dbs-womans-world',
+  bank: 'dbs',
   name: "DBS Woman's World Card",
   homeCurrency: 'SGD',
   termsAsOf: '27 July 2026',

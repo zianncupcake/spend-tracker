@@ -1,7 +1,11 @@
+import type { Parser } from '../parsers/types'
+
 /** A card product whose reward rules are known: what its purchases are sorted into, and what the bank pays on them. */
 export interface Product {
   /** What a user types to link a card to the product. */
   key: string
+  /** The parser of the bank whose alerts tell of the product's purchases. */
+  bank: Parser['name']
   name: string
   /** The currency that the card is billed in. The limits and the minimum spend are in hundredths of its unit. */
   homeCurrency: string
