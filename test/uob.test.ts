@@ -59,6 +59,7 @@ describe('UOB card alerts', () => {
     ['SGD 999,999,999,999.99', 'SGD', 99999999999999],
     ['SGD 1234.56', 'SGD', 123456],
     ['SGD 7.5', 'SGD', 750],
+    ['SGD .75', 'SGD', 75],
     ['JPY 1,500', 'JPY', 150000],
     ['SGD45.60', 'SGD', 4560],
   ])('reads %s as %s and %i hundredths', (amount, currency, amountMinor) => {

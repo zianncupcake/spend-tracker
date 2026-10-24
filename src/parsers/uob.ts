@@ -13,10 +13,10 @@ import type { Parser } from './types'
 // Email text can be hostile. Every quantifier below is bounded and none sits inside another repetition, so a match
 // cannot backtrack heavily. The pattern begins at the currency code and ends where the merchant's name begins. The
 // bank may call a card more than "Card", so up to 40 characters are let through between "UOB" and "ending". The
-// groups are: currency, whole amount (with or without thousands separators), decimals (may be empty), last four
-// digits, day, month and year.
+// groups are: currency, whole amount (with or without thousands separators, and empty when decimals follow), decimals
+// (may be empty), last four digits, day, month and year.
 const TRANSACTION =
-  /\b([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12})(\.\d{1,2}|) was made with your UOB .{0,40}?ending (\d{4}) on (\d\d)\/(\d\d)\/(\d\d) at /
+  /\b([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12}|(?=\.\d))(\.\d{1,2}|) was made with your UOB .{0,40}?ending (\d{4}) on (\d\d)\/(\d\d)\/(\d\d) at /
 
 // What the bank puts after the sentence. It tells where the merchant's name ends. The word is spelt with an s or
 // with a z, "unauthorised" or "unauthorized", so it is matched as far as the two spellings are the same.
