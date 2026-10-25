@@ -205,6 +205,31 @@ describe('a request that fails', () => {
   })
 })
 
+describe('a request that the first key has had as many of as it takes', () => {
+  const withFallback: AiProvider = { ...provider, fallbackApiKey: 'made-up-fallback-key' }
+  const keysAsked = () => posted.mock.calls.map(([, init]) => new Headers(init?.headers).get('authorization'))
+
+  it('is asked once more with the fallback key, whose answer is the answer', async () => {
+    posted.mockImplementationOnce(refusing(429, QUESTION))
+    answering(saying(ANSWER))
+    catchConsole()
+
+    expect(await complete(withFallback, messages, tools, 20_000)).toMatchObject({ content: ANSWER })
+    expect(keysAsked()).toEqual(['Bearer made-up-ai-key', 'Bearer made-up-fallback-key'])
+  })
+
+  it('fails with what the fallback key was answered, when that is 429 too', async () => {
+    posted.mockImplementationOnce(refusing(429, QUESTION, { 'retry-after': '3' }))
+    posted.mockImplementationOnce(refusing(429, QUESTION, { 'retry-after': '9' }))
+    catchConsole()
+
+    const thrown = await complete(withFallback, messages, tools, 20_000).catch((error: unknown) => error)
+
+    expect(thrown).toEqual(new ProviderError(429, 9))
+    expect(keysAsked()).toEqual(['Bearer made-up-ai-key', 'Bearer made-up-fallback-key'])
+  })
+})
+
 describe('what a question sends', () => {
   // Written out as it was sent before a request could hold a photo, so that a change to it shows here.
   const BODY =

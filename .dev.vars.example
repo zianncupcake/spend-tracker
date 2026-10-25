@@ -19,6 +19,9 @@ OPERATOR_CONTACT=
 # answer, through a chat completions API of the kind that OpenAI has. The key is that provider's. With no key the
 # bot has no assistant, and with one it has it for every user.
 AI_API_KEY=
+# Optional. A key of a second account at the same provider. When the first key's account answers that it has had
+# as many requests or tokens as it takes, the request is sent again once with this one.
+AI_FALLBACK_API_KEY=
 # Optional. Where the provider's API is reached, with no trailing slash, and the model to ask there. Left empty,
 # they are https://api.groq.com/openai/v1 and openai/gpt-oss-120b.
 AI_BASE_URL=

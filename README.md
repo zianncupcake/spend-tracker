@@ -197,7 +197,8 @@ The rest are secrets of the Worker:
 - `TOKEN_ENCRYPTION_KEY`: base64 of 32 random bytes, for example from `openssl rand -base64 32`. The tokens that
   read the connected mailboxes are stored encrypted under it. One that was encrypted under another key cannot be
   read, so the key is not to be changed while mailboxes are connected.
-- `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` and `AI_VISION_MODEL`, which are optional: see The AI provider.
+- `AI_API_KEY`, `AI_FALLBACK_API_KEY`, `AI_BASE_URL`, `AI_MODEL` and `AI_VISION_MODEL`, which are optional: see
+  The AI provider.
 
 Set each of them in the Cloudflare dashboard, or with `npx wrangler secret put <NAME> --name spend-tracker`, which
 asks for the value. A deploy leaves the secrets as they are. It writes the plain variables anew from its config,
@@ -232,6 +233,8 @@ Google's warning that it has not verified the app, and how to go on from it.
 
 - `AI_API_KEY`: the provider's key. With a key, the assistant is on for every user: there is no switch. With none
   there is no assistant, and no photo is read.
+- `AI_FALLBACK_API_KEY`: optional. A key of a second account at the same provider. When the first key's account
+  answers that it has had as many requests or tokens as it takes, the request is sent again once with this one.
 - `AI_BASE_URL`: where the provider's API is reached, with no trailing slash. Left out, it is
   `https://api.groq.com/openai/v1`.
 - `AI_MODEL`: the model that is asked there. Left out, it is `openai/gpt-oss-120b`.
