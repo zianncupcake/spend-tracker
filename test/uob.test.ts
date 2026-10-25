@@ -205,4 +205,12 @@ describe('UOB bill payment alerts', () => {
     expect(parse(alertBody())).toEqual({ ...PURCHASE, parser: 'uob' })
     expect(parsePayment(uobEmail())).toBeNull()
   })
+
+  it('returns quickly on very long hostile strings', () => {
+    // Each start of a sentence lets up to 160 characters through before ". Bill ref" is looked for.
+    const hostile = ['bill payment(s) of SGD 1 to '.repeat(7_000), `bill payment(s) of SGD 1 to ${'. '.repeat(100_000)}`]
+    const started = performance.now()
+    for (const text of hostile) expect(uob.payment?.(uobEmail(text))).toBeNull()
+    expect(performance.now() - started).toBeLessThan(5_000)
+  })
 })
