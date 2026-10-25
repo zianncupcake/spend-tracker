@@ -19,6 +19,15 @@ export interface ParsedTransaction {
   occurredAt: number
 }
 
+/** A card's bill that was paid, as an alert tells of it. When it was paid is when the email came. */
+export interface ParsedPayment {
+  /** The last four digits of the card whose bill was paid. */
+  cardLast4: string
+  /** Hundredths of the currency unit, as for a purchase. */
+  amountMinor: number
+  currency: string
+}
+
 export interface Parser {
   /**
    * What a purchase that the parser read is stored under, and what the log knows the bank by. The name of a new
@@ -30,4 +39,6 @@ export interface Parser {
   senders: string[]
   /** Null when the email is from this parser's bank but holds no purchase it can read. */
   parse(email: AlertEmail): ParsedTransaction | null
+  /** Tried when `parse` reads nothing. Only a bank that tells of a bill paid from one of its accounts has it. */
+  payment?(email: AlertEmail): ParsedPayment | null
 }

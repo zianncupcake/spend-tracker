@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { parseAlert } from '../src/parsers'
+import { parseAlert, parsePayment } from '../src/parsers'
 import { uob } from '../src/parsers/uob'
-import { alertEmail, seconds } from './helpers'
+import { alertEmail, seconds, UOB_PAYMENT } from './helpers'
 
 /** When the email of the alert below came: on the day that the alert states, which is 9 October 2026 in Singapore. */
 const RECEIVED = seconds('2026-10-09T15:20:00+08:00')
@@ -192,6 +192,25 @@ describe('UOB card alerts', () => {
     }
 
     // Measured at about 45 ms. The bound is for a pattern that never ends, and is set well above a slow machine.
+    expect(performance.now() - started).toBeLessThan(5_000)
+  })
+})
+
+describe('UOB bill payment alerts', () => {
+  it('reads the amount, the currency and the card of a bill paid', () => {
+    expect(parsePayment(uobEmail(UOB_PAYMENT))).toEqual({ cardLast4: '4321', amountMinor: 8820, currency: 'SGD' })
+  })
+
+  it('reads a purchase alert as a purchase, and not as a payment', () => {
+    expect(parse(alertBody())).toEqual({ ...PURCHASE, parser: 'uob' })
+    expect(parsePayment(uobEmail())).toBeNull()
+  })
+
+  it('returns quickly on very long hostile strings', () => {
+    // Each start of a sentence lets up to 160 characters through before ". Bill ref" is looked for.
+    const hostile = ['bill payment(s) of SGD 1 to '.repeat(7_000), `bill payment(s) of SGD 1 to ${'. '.repeat(100_000)}`]
+    const started = performance.now()
+    for (const text of hostile) expect(uob.payment?.(uobEmail(text))).toBeNull()
     expect(performance.now() - started).toBeLessThan(5_000)
   })
 })

@@ -1,7 +1,7 @@
 import { dbs } from './dbs'
 import { hsbc } from './hsbc'
 import { ocbc } from './ocbc'
-import type { AlertEmail, ParsedTransaction, Parser } from './types'
+import type { AlertEmail, ParsedPayment, ParsedTransaction, Parser } from './types'
 import { uob } from './uob'
 
 /** Exported for the tests, which add a stand-in for a bank to it. */
@@ -25,9 +25,17 @@ export function parserOf(email: AlertEmail): Parser | undefined {
 
 /** The reading of the email by the parser of the bank it came from, or null. */
 export function parseAlert(email: AlertEmail): ParsedAlert | null {
-  const bounded = { ...email, text: email.text.slice(0, MAX_TEXT_LENGTH) }
   const parser = parserOf(email)
   if (!parser) return null
-  const transaction = parser.parse(bounded)
+  const transaction = parser.parse(bounded(email))
   return transaction && { ...transaction, parser: parser.name }
+}
+
+/** The bill payment that the parser of the bank it came from reads in the email, or null. */
+export function parsePayment(email: AlertEmail): ParsedPayment | null {
+  return parserOf(email)?.payment?.(bounded(email)) ?? null
+}
+
+function bounded(email: AlertEmail): AlertEmail {
+  return { ...email, text: email.text.slice(0, MAX_TEXT_LENGTH) }
 }

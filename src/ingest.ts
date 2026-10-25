@@ -1,11 +1,12 @@
 import { startingCategoriesOn } from './domain/sorting'
 import { log } from './log'
-import { parseAlert, parserOf } from './parsers'
-import type { AlertEmail } from './parsers/types'
+import { parseAlert, parsePayment, parserOf } from './parsers'
+import type { AlertEmail, ParsedPayment } from './parsers/types'
 import type { Card, Store, Transaction } from './store'
 
 export type IngestResult =
   | { status: 'stored'; transaction: Transaction; card: Card | undefined; remembered: boolean }
+  | { status: 'payment'; payment: ParsedPayment; card: Card | undefined }
   | { status: 'duplicate' }
   | { status: 'unparsed' }
 
@@ -14,7 +15,8 @@ export type IngestResult =
  * stores it for the store's user. The purchase is stored even when the user
  * has not registered a card with those last four digits yet. When they have,
  * the card comes back with the purchase, which starts in the category that
- * the card's product gives it.
+ * the card's product gives it. An email that holds no purchase can hold a bill
+ * payment instead, which is stored and comes back the same way.
  */
 export async function ingestAlert(store: Store, email: AlertEmail): Promise<IngestResult> {
   const result = await ingest(store, email)
@@ -26,10 +28,19 @@ export async function ingestAlert(store: Store, email: AlertEmail): Promise<Inge
 
 async function ingest(store: Store, email: AlertEmail): Promise<IngestResult> {
   const transaction = parseAlert(email)
-  if (!transaction) return { status: 'unparsed' }
+  if (!transaction) return ingestPayment(store, email)
   const card = (await store.listCards()).find((each) => each.last4 === transaction.cardLast4)
   const [{ category, remembered }] = await startingCategoriesOn(store, card, [transaction])
   const id = await store.insertTransaction({ ...transaction, sourceId: email.sourceId, category })
   if (id === null) return { status: 'duplicate' }
   return { status: 'stored', transaction: { ...transaction, id, category }, card, remembered }
+}
+
+async function ingestPayment(store: Store, email: AlertEmail): Promise<IngestResult> {
+  const payment = parsePayment(email)
+  if (!payment) return { status: 'unparsed' }
+  const stored = await store.insertPayment({ ...payment, sourceId: email.sourceId, paidAt: email.receivedAt })
+  if (!stored) return { status: 'duplicate' }
+  const card = (await store.listCards()).find((each) => each.last4 === payment.cardLast4)
+  return { status: 'payment', payment, card }
 }

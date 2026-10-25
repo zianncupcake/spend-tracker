@@ -7,7 +7,7 @@ import worker from '../src/index'
 import { storeFor } from '../src/store'
 import { heldStoreFor } from '../src/store-held'
 import { mailStoreFor } from '../src/store-mail'
-import { addCardOtherwise, NO_SIGN_IN, RENAME_ADDED, tapToAddCard } from '../src/telegram/texts'
+import { addCardOtherwise, NO_SIGN_IN, paymentScheduled, RENAME_ADDED, tapToAddCard } from '../src/telegram/texts'
 import {
   attemptOf,
   clock,
@@ -26,7 +26,7 @@ import {
   TOKEN_URL,
 } from './connect-helpers'
 import { gmailMessage, gmailResults, htmlPart, textPart, type Message, type MessageOptions } from './gmail-helpers'
-import { alertText, buy, CARDS_HEADER, marksOf, seconds } from './helpers'
+import { alertText, buy, CARDS_HEADER, marksOf, seconds, UOB_PAYMENT } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const JANE = 'jane@example.test'
@@ -316,6 +316,28 @@ describe('a new alert', () => {
   })
 })
 
+describe('a new bill payment alert', () => {
+  it('is stored, and told of once with the card that was paid: a second run neither fetches it nor tells of it', async () => {
+    const chat = await connectedChat(JANE)
+    await chat.say('/addcard rewards 4321 calendar')
+    outside.mailboxes[JANE] = [
+      gmailMessage({
+        from: 'UOB <unialerts@uobgroup.com>',
+        receivedAt: now() - 60,
+        results: [gmailResults('pass', 'uobgroup.com')],
+        content: textPart(UOB_PAYMENT),
+      }),
+    ]
+
+    await runCheck(deps)
+    await runCheck(deps)
+
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: paymentScheduled('SGD 88.20', 'rewards ••••4321') }])
+    expect(outside.fetched).toEqual(['msg-1'])
+    expect(await storeFor(env.DB, await chat.userId()).paidSince(now() - 60)).toEqual(['4321'])
+  })
+})
+
 describe('a new alert for a card that is not added', () => {
   /** A DBS card alert for the card ending 4321, as Gmail has it when it authenticated the bank. */
   const dbsAlert = () =>
@@ -358,7 +380,7 @@ describe('a new alert for a card that is not added', () => {
     const pressed = await chat.press(notice, 'Calendar month')
 
     expect(pressed.sent.map((message) => message.text)).toEqual([expect.stringMatching(/^Added dbs /), RENAME_ADDED])
-    const row = "dbs | ••••4321 | calendar month | DBS Woman's World Card | -"
+    const row = "dbs | ••••4321 | calendar month | DBS Woman's World Card | - | -"
     expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, row])
   })
 

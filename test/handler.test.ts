@@ -7,12 +7,14 @@ import { ChatBlockedError, TelegramError, type RichMessage } from '../src/telegr
 import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { handleUpdate, type Update } from '../src/telegram/handler'
 import {
+  CHECK_UOB_APP,
   COMMANDS,
   EDITED,
   FAILED,
   NO_ASSISTANT,
   NO_CARDS,
   NOT_TEXT,
+  PAID,
   RENAME_CARD_USAGE,
   STORED_NO_REPLY,
   TIMEZONE_USAGE,
@@ -76,6 +78,13 @@ function recorder() {
 }
 
 let lastMessage = 0
+let lastPaid = 0
+
+/** Stores a payment of the bill of the user's card ending 4321, as its alert would, at `at`. */
+async function pay(userId: number, at: string): Promise<void> {
+  const payment = { cardLast4: '4321', amountMinor: 8820, currency: 'SGD', paidAt: seconds(at) }
+  await storeFor(env.DB, userId).insertPayment({ ...payment, sourceId: `paid-${++lastPaid}` })
+}
 
 /** A message in a user's private chat with the bot, with an id that no message before it had. */
 function privateMessage(telegramId: number, text: string): Update {
@@ -164,8 +173,8 @@ describe('/addcard and /cards', () => {
     ])
     expect(listed).toEqual([
       CARDS_HEADER,
-      'visa | ••••1234 | statement closes on the 15th of the month | - | -',
-      'amex | ••••0005 | calendar month | - | -',
+      'visa | ••••1234 | statement closes on the 15th of the month | - | - | -',
+      'amex | ••••0005 | calendar month | - | - | -',
     ])
   })
 
@@ -178,8 +187,8 @@ describe('/addcard and /cards', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      `${longest} | ••••0000 | statement closes on the 1st of the month | - | -`,
-      'My_card-2 | ••••9999 | statement closes on the 31st of the month | - | -',
+      `${longest} | ••••0000 | statement closes on the 1st of the month | - | - | -`,
+      'My_card-2 | ••••9999 | statement closes on the 31st of the month | - | - | -',
     ])
   })
 
@@ -214,7 +223,7 @@ describe('/addcard and /cards', () => {
     expect(await chat.say('/addcard visa 5678 calendar')).toContain('You already have a card')
     expect(await chat.say('/addcard other 1234 statement 15')).toContain('You already have a card')
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | - | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | - | - | -'])
   })
 
   it('adds no more than twenty cards, which keeps /spend well inside the queries that a request may make', async () => {
@@ -271,11 +280,19 @@ describe('/cards', () => {
           type: 'table',
           is_bordered: true,
           cells: [
-            [header('Nickname'), header('Card'), header('Window'), header('Product'), header('Reminder')],
+            [
+              header('Nickname'),
+              header('Card'),
+              header('Window'),
+              header('Product'),
+              header('Reminder'),
+              header('Paid'),
+            ],
             [
               { text: 'visa' },
               { text: '••••1234' },
               { text: 'statement closes on the 5th of the month' },
+              { text: '-' },
               { text: '-' },
               { text: '-' },
             ],
@@ -285,8 +302,16 @@ describe('/cards', () => {
               { text: 'calendar month' },
               { text: 'UOB EVOL Card' },
               { text: '-' },
+              { text: CHECK_UOB_APP },
             ],
-            [{ text: 'amex' }, { text: '••••0005' }, { text: 'calendar month' }, { text: '-' }, { text: '-' }],
+            [
+              { text: 'amex' },
+              { text: '••••0005' },
+              { text: 'calendar month' },
+              { text: '-' },
+              { text: '-' },
+              { text: '-' },
+            ],
           ],
         },
       ],
@@ -300,10 +325,33 @@ describe('/cards', () => {
     expect(await chat.say('/cards')).toBe(
       [
         'visa ••••1234: statement closes on the 5th of the month',
-        'evol ••••5678: calendar month, UOB EVOL Card',
+        `evol ••••5678: calendar month, UOB EVOL Card, paid: ${CHECK_UOB_APP}`,
         'amex ••••0005: calendar month',
       ].join('\n'),
     )
+  })
+
+  // The month is October 2026 in Singapore, where NOW is.
+  it.each<[what: string, product: string, paidAt: string | null, cell: string]>([
+    ['a payment at the first moment of this month', 'ocbc-rewards', '2026-10-01T00:00:00+08:00', PAID],
+    ['a payment only at the last moment of last month', 'ocbc-rewards', '2026-09-30T23:59:59+08:00', '-'],
+    ['no payment, on a card of a UOB product', 'uob-evol', null, CHECK_UOB_APP],
+  ])('says whether the bill is paid this month, for a card with %s', async (_, product, paidAt, cell) => {
+    const chat = openChat()
+    await chat.say(`/addcard rewards 4321 calendar ${product}`)
+    if (paidAt) await pay((await chat.user()).id, paidAt)
+
+    const [, row] = await chat.lines('/cards')
+
+    expect(row.split(' | ').at(-1)).toBe(cell)
+  })
+
+  it("is not ticked by another user's payment for a card with the same digits", async () => {
+    const [chat, bystander] = [openChat(), openChat()]
+    for (const each of [chat, bystander]) await each.say('/addcard rewards 4321 calendar')
+    await pay((await bystander.user()).id, '2026-10-05T09:30:00+08:00')
+
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'rewards | ••••4321 | calendar month | - | - | -'])
   })
 })
 
@@ -315,7 +363,7 @@ describe('/removecard', () => {
 
     expect(await chat.say('/removecard visa')).toBe('Removed visa.')
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'amex | ••••0005 | calendar month | - | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'amex | ••••0005 | calendar month | - | - | -'])
     expect(await chat.say('/removecard visa')).toBe('You have no card called visa.')
   })
 
@@ -337,8 +385,8 @@ describe('/renamecard', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'travel | ••••1234 | statement closes on the 15th of the month | UOB EVOL Card | -',
-      'amex | ••••0005 | calendar month | - | -',
+      `travel | ••••1234 | statement closes on the 15th of the month | UOB EVOL Card | - | ${CHECK_UOB_APP}`,
+      'amex | ••••0005 | calendar month | - | - | -',
     ])
     // A purchase goes by the digits of its card, so the card has it still: test/actions.test.ts has it in the tables
     // of /spend with the new nickname.
@@ -359,8 +407,8 @@ describe('/renamecard', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'visa | ••••1234 | calendar month | - | -',
-      'amex | ••••0005 | calendar month | - | -',
+      'visa | ••••1234 | calendar month | - | - | -',
+      'amex | ••••0005 | calendar month | - | - | -',
     ])
   })
 
@@ -377,7 +425,7 @@ describe('/renamecard', () => {
 
     expect(await chat.say(message)).toBe(RENAME_CARD_USAGE)
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | - | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'visa | ••••1234 | calendar month | - | - | -'])
   })
 })
 
@@ -387,10 +435,12 @@ describe('/cycle', () => {
     await chat.say('/addcard visa 1234 calendar')
 
     expect(await chat.say('/cycle visa statement 1')).toContain('runs from 2 Oct and resets 2 Nov.')
-    expect(await chat.lines('/cards')).toContain('visa | ••••1234 | statement closes on the 1st of the month | - | -')
+    expect(await chat.lines('/cards')).toContain(
+      'visa | ••••1234 | statement closes on the 1st of the month | - | - | -',
+    )
 
     await chat.say('/cycle visa calendar')
-    expect(await chat.lines('/cards')).toContain('visa | ••••1234 | calendar month | - | -')
+    expect(await chat.lines('/cards')).toContain('visa | ••••1234 | calendar month | - | - | -')
   })
 
   it.each<[what: string, message: string, said: string]>([
@@ -402,7 +452,7 @@ describe('/cycle', () => {
 
     expect(await chat.say(message)).toBe(said)
 
-    expect(await chat.lines('/cards')).toContain('visa | ••••1234 | calendar month | - | -')
+    expect(await chat.lines('/cards')).toContain('visa | ••••1234 | calendar month | - | - | -')
   })
 })
 
@@ -563,6 +613,7 @@ describe('/delete', () => {
     const user = await chat.user()
     const other = await bystander.user()
     await storeFor(env.DB, user.id).remember('hsbc-revolution', 'SAMPLE EATERY', 'other')
+    await pay(user.id, '2026-10-05T09:30:00+08:00')
 
     expect(await chat.say('/delete')).toContain('Send /delete confirm')
     expect(await rowsOwnedBy(user.id)).toEqual({ users: 1, cards: 1, transactions: 1 })
@@ -570,6 +621,7 @@ describe('/delete', () => {
     expect(await chat.say('/delete confirm')).toContain('has been deleted')
     expect(await rowsOwnedBy(user.id)).toEqual({ users: 0, cards: 0, transactions: 0 })
     expect(await storeFor(env.DB, user.id).listMarks()).toEqual([])
+    expect(await storeFor(env.DB, user.id).paidSince(0)).toEqual([])
     expect(await userCount(chat.telegramId)).toBe(0)
     expect(await rowsOwnedBy(other.id)).toEqual({ users: 1, cards: 1, transactions: 1 })
   })
@@ -667,7 +719,7 @@ describe('a message that was edited', () => {
     expect(sent.map((each) => each.text)).toEqual(['Added visa ••••1234: calendar month.', EDITED])
     // The card is there still: the table of /cards has its row.
     await handleUpdate(deps, privateMessage(telegramId, '/cards'))
-    const row = 'visa | ••••1234 | calendar month | - | -'
+    const row = 'visa | ••••1234 | calendar month | - | - | -'
     expect(rich.map((each) => linesOf(each.message))).toEqual([[CARDS_HEADER, row]])
   })
 

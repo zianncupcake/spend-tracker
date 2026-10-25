@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import { ingestAlert } from '../src/ingest'
 import { findOrCreateUser, storeFor } from '../src/store'
-import { alertEmail, alertText, newTelegramId, seconds } from './helpers'
+import { alertEmail, alertText, newTelegramId, seconds, UOB_PAYMENT } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const ANY_TIME = [0, 4_000_000_000] as const
@@ -44,6 +44,21 @@ it('reports an alert it has already stored as a duplicate', async () => {
   expect(await ingestAlert(store, email)).toEqual({ status: 'duplicate' })
 
   expect(await store.sumByCurrency('1234', ...ANY_TIME)).toEqual([{ currency: 'SGD', amountMinor: 1240, count: 1 }])
+})
+
+it('stores the bill payment read from an alert, and reports the same email again as a duplicate', async () => {
+  const store = await newStore()
+  const receivedAt = seconds('2026-10-25T16:58:00+08:00')
+  const email = alertEmail({ from: 'unialerts@uobgroup.com', receivedAt, text: UOB_PAYMENT })
+
+  expect(await ingestAlert(store, email)).toEqual({
+    status: 'payment',
+    payment: { cardLast4: '4321', amountMinor: 8820, currency: 'SGD' },
+    card: undefined,
+  })
+  expect(await ingestAlert(store, email)).toEqual({ status: 'duplicate' })
+
+  expect(await store.paidSince(receivedAt)).toEqual(['4321'])
 })
 
 it('treats the same source id from two users as two purchases', async () => {

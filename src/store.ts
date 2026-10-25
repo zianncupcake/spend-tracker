@@ -4,7 +4,7 @@
 import { lettersOf } from './catalogue/merchants'
 import type { WindowRule } from './domain/window'
 import { Failure } from './log'
-import type { ParsedTransaction } from './parsers/types'
+import type { ParsedPayment, ParsedTransaction } from './parsers/types'
 
 export interface User {
   id: number
@@ -18,6 +18,9 @@ export interface User {
 export type Card = { nickname: string; last4: string; product?: string; remindDay?: number } & WindowRule
 
 export type NewTransaction = ParsedTransaction & { sourceId: string; parser: string; category?: string | null }
+
+/** `paidAt` is in unix seconds. */
+export type NewPayment = ParsedPayment & { sourceId: string; paidAt: number }
 
 /** A transaction as it is stored. */
 export interface Transaction extends ParsedTransaction {
@@ -357,6 +360,28 @@ export function storeFor(db: D1Database, ownerId: number) {
         .bind(ownerId, JSON.stringify(purchases), MANUAL, MAX_BY_HAND_PER_DAY, DAY)
         .all<{ id: number; sourceId: string }>()
       return results
+    },
+
+    /** False, with nothing stored, when the user already has a payment with that source id. */
+    async insertPayment({ sourceId, cardLast4, amountMinor, currency, paidAt }: NewPayment): Promise<boolean> {
+      const result = await db
+        .prepare(
+          `INSERT INTO payments (owner_id, source_id, card_last4, amount_minor, currency, paid_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (owner_id, source_id) DO NOTHING`,
+        )
+        .bind(ownerId, sourceId, cardLast4, amountMinor, currency, paidAt)
+        .run()
+      return result.meta.changes > 0
+    },
+
+    /** The last four digits of each card that the user has a payment for at or after `since`, in unix seconds. */
+    async paidSince(since: number): Promise<string[]> {
+      const { results } = await db
+        .prepare('SELECT DISTINCT card_last4 AS last4 FROM payments WHERE owner_id = ? AND paid_at >= ?')
+        .bind(ownerId, since)
+        .all<{ last4: string }>()
+      return results.map(({ last4 }) => last4)
     },
 
     /** Total and purchase count per currency for one card, over `start <= occurred_at < end` in unix seconds. */

@@ -95,8 +95,8 @@ export async function takeNextMailbox(db: D1Database, now: number): Promise<Mail
 export function mailStoreFor(db: D1Database, ownerId: number) {
   return {
     /**
-     * Those of the ids, in the order given, that the user has neither a
-     * transaction for nor a note of having seen.
+     * Those of the ids, in the order given, that the user has no transaction,
+     * payment or note of having seen for.
      */
     async unknownIds(ids: string[]): Promise<string[]> {
       // The ids go in as one JSON array. A statement takes 100 bound values at
@@ -106,6 +106,7 @@ export function mailStoreFor(db: D1Database, ownerId: number) {
           `SELECT listed.value AS id
            FROM json_each(?2) AS listed
            WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE owner_id = ?1 AND source_id = listed.value)
+             AND NOT EXISTS (SELECT 1 FROM payments WHERE owner_id = ?1 AND source_id = listed.value)
              AND NOT EXISTS (SELECT 1 FROM seen_alerts WHERE owner_id = ?1 AND source_id = listed.value)
            ORDER BY listed.key`,
         )

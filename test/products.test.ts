@@ -4,7 +4,7 @@ import { spendingSummary } from '../src/mcp/tools'
 import { storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
 import { BY_HAND_NOTE } from '../src/telegram/purchases'
-import { NO_CARDS, PRODUCT_USAGE, SORTED_AGAIN } from '../src/telegram/texts'
+import { CHECK_UOB_APP, NO_CARDS, PRODUCT_USAGE, SORTED_AGAIN } from '../src/telegram/texts'
 import { clock, deps, NOW, openChat } from './connect-helpers'
 import {
   BY_PURCHASE_DAY,
@@ -88,8 +88,8 @@ describe('/product', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'evol | ••••1234 | statement closes on the 5th of the month | UOB EVOL Card | -',
-      'amex | ••••0005 | calendar month | - | -',
+      `evol | ••••1234 | statement closes on the 5th of the month | UOB EVOL Card | - | ${CHECK_UOB_APP}`,
+      'amex | ••••0005 | calendar month | - | - | -',
     ])
     expect(await store.listCards()).toEqual([
       { nickname: 'evol', last4: '1234', windowType: 'statement', statementDay: 5, product: 'uob-evol' },
@@ -100,8 +100,8 @@ describe('/product', () => {
 
     expect(await chat.lines('/cards')).toEqual([
       CARDS_HEADER,
-      'evol | ••••1234 | statement closes on the 5th of the month | - | -',
-      'amex | ••••0005 | calendar month | - | -',
+      'evol | ••••1234 | statement closes on the 5th of the month | - | - | -',
+      'amex | ••••0005 | calendar month | - | - | -',
     ])
     expect((await store.listCards())[0]).toEqual({
       nickname: 'evol',
@@ -131,7 +131,7 @@ describe('/product', () => {
 
     expect(await chat.say(message)).toBe(reply)
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | - | -'])
   })
 
   it("sorts the purchases of the card's current window that the product's rules settle, and no others", async () => {

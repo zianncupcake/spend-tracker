@@ -22,11 +22,14 @@ import {
 import { ingestAlert } from './ingest'
 import { log, logFailure, type Events } from './log'
 import { alertSenders } from './parsers'
+import type { ParsedPayment } from './parsers/types'
 import { storeFor, type Card, type Transaction } from './store'
 import { mailStoreFor, removeExpiredAttempts, removeExpiredBatches, takeNextMailbox, type Mailbox } from './store-mail'
 import { ChatBlockedError, type MessageEntity } from './telegram/api'
 import { carriedNotes, describeTotals, formatMoney, formatShortDate, maskLast4 } from './telegram/format'
 import { addCardEnd, sortEnd } from './telegram/purchases'
+import { label } from './telegram/replies'
+import { paymentScheduled } from './telegram/texts'
 
 /**
  * How many alerts one run reads: the messages it fetches whole. A run that read three took 14 ms of CPU time, which
@@ -57,10 +60,10 @@ const CATCH_UP_DAYS = 35
 const MAX_MESSAGE_SIZE = '1M'
 
 /**
- * A purchase whose alert came longer ago than this is stored without a message, so that catching up on history does
- * not flood the chat. It is the time the email came that counts, and not the time of the purchase: an alert can
- * state a day and no time, and its purchase is then dated at noon of that day, which is hours before an alert that
- * comes in the evening, or after midnight.
+ * A purchase or a payment whose alert came longer ago than this is stored without a message, so that catching up
+ * on history does not flood the chat. It is the time the email came that counts, and not the time of the purchase:
+ * an alert can state a day and no time, and its purchase is then dated at noon of that day, which is hours before an
+ * alert that comes in the evening, or after midnight.
  */
 const NEWS_HOURS = 6
 
@@ -244,8 +247,8 @@ async function findUnread(deps: Deps, mailbox: Mailbox, accessToken: string, que
 }
 
 /**
- * Looks at one message and, when it is a bank's alert, reads it: stores the purchase in it, or notes why none was
- * stored. What it does is counted in `run`: a message that it fetches whole is one that the run has read.
+ * Looks at one message and, when it is a bank's alert, reads it: stores the purchase or the payment in it, or notes
+ * why none was stored. What it does is counted in `run`: a message that it fetches whole is one that the run has read.
  */
 async function readAlert(
   deps: Deps,
@@ -282,14 +285,29 @@ async function readAlert(
     await mail.markSeen(id, 'unparsed')
     run.unparsed++
   }
-  if (result.status === 'stored') {
+  if (result.status === 'stored' || result.status === 'payment') {
     run.stored++
     if (now - receivedAt < NEWS_HOURS * HOUR) {
       run.stage = 'notify'
-      await tellOfPurchase(deps, mailbox, result.transaction, result.card, result.remembered)
+      if (result.status === 'stored') {
+        await tellOfPurchase(deps, mailbox, result.transaction, result.card, result.remembered)
+      } else {
+        await tellOfPayment(deps, mailbox, result.payment, result.card)
+      }
       run.notified++
     }
   }
+}
+
+/** Tells the user of a card's bill that was paid. `card` is that card, when the user has added it. */
+function tellOfPayment(
+  deps: Deps,
+  mailbox: Mailbox,
+  { cardLast4, amountMinor, currency }: ParsedPayment,
+  card: Card | undefined,
+): Promise<void> {
+  const named = card ? label(card) : maskLast4(cardLast4)
+  return deps.messenger.send(mailbox.chatId, paymentScheduled(formatMoney(amountMinor, currency), named))
 }
 
 /**

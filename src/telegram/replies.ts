@@ -40,7 +40,7 @@ import {
 } from './purchases'
 import type { Tabled } from './sending'
 import { DEFAULT_CURRENCY } from './shared'
-import { AT_REFERENCE_RATES, HOLDS_NOTHING, STATUS_DAYS, useCard } from './texts'
+import { AT_REFERENCE_RATES, CHECK_UOB_APP, HOLDS_NOTHING, PAID, STATUS_DAYS, useCard } from './texts'
 
 /**
  * What a question is answered with when the AI provider has had as many requests as it takes for now. It says when
@@ -126,18 +126,36 @@ function paragraphOf(text: string): RichBlock {
 /**
  * A user's cards, as /cards shows them: one table, with a row for each card. A card that is linked to no product
  * has a dash where the name of its product would be, as a purchase with no merchant has one for its merchant, and
- * a card with no reminder has one for the day of its reminder. As text, it is a line for each card: see describeCard.
+ * a card with no reminder has one for the day of its reminder. `paid` are the last four digits of the cards whose
+ * bills have a payment this month: see paidCell. As text, it is a line for each card: see describeCard.
  */
-export function cardsReply(cards: Card[]): Tabled {
+export function cardsReply(cards: Card[], paid: string[]): Tabled {
   const rows = cards.map((card) => [
     card.nickname,
     maskLast4(card.last4),
     describeWindow(card),
     productOf(card.product)?.name ?? '-',
     card.remindDay === undefined ? '-' : `day ${card.remindDay}`,
+    paidCell(card, paid),
   ])
-  const header = ['Nickname', 'Card', 'Window', 'Product', 'Reminder']
-  return tabled([tableOf(header, rows)], () => cards.map(describeCard).join('\n'))
+  const header = ['Nickname', 'Card', 'Window', 'Product', 'Reminder', 'Paid']
+  return tabled([tableOf(header, rows)], () =>
+    cards
+      .map((card) => {
+        const cell = paidCell(card, paid)
+        return cell === '-' ? describeCard(card) : `${describeCard(card)}, paid: ${cell}`
+      })
+      .join('\n'),
+  )
+}
+
+/**
+ * Whether the card's bill has a payment this month, or a dash. A UOB card that has none says to look in UOB's app:
+ * the bank sends no email when one of its own cards is paid.
+ */
+function paidCell(card: Card, paid: string[]): string {
+  if (paid.includes(card.last4)) return PAID
+  return productOf(card.product)?.bank === 'uob' ? CHECK_UOB_APP : '-'
 }
 
 /**
