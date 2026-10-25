@@ -82,6 +82,7 @@ export const COMMANDS = `Commands:
 /addcard <nickname> <last4> statement <day> - track a card by statement cycle; <day> is the day of the month it closes
 /addcard <nickname> <last4> calendar - track a card by calendar month
 /cards - list your cards
+/bills - each card's bill reminder, and whether its bill has been paid this month
 /removecard <nickname> - stop tracking a card
 /renamecard <nickname> <new nickname> - give a card another nickname
 /cycle <nickname> statement <day> - change a card to a statement cycle that closes on <day>

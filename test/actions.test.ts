@@ -374,7 +374,7 @@ describe('a command that the assistant gives to be run', () => {
   it('is answered with the table that the command replies with, when it is one that shows things in a table', async () => {
     const chat = await chatWithCards()
     const userId = await chat.userId()
-    const shows = ['/cards', '/products', '/status']
+    const shows = ['/cards', '/bills', '/products', '/status']
     acting(...shows.map(command))
     const logged = catchConsole()
 
@@ -384,6 +384,7 @@ describe('a command that the assistant gives to be run', () => {
     expect(texts).toEqual([])
     expect(rich.map((message) => linesOf(message)[0])).toEqual([
       CARDS_HEADER,
+      'Nickname | Reminder | Paid',
       'The card products whose reward rules are known:',
       'Gmail | not connected',
     ])
@@ -394,8 +395,8 @@ describe('a command that the assistant gives to be run', () => {
     ])
     const done = (name: string) => ({ kind: 'command', command: name, outcome: 'done' })
     expect(logged.events()).toEqual([
-      ...loggedFor(userId, ['cards', 'products', 'status'].map(done)).slice(0, 4),
-      { ...loggedFor(userId, [{}, {}, {}])[4], sent: 'rich' },
+      ...loggedFor(userId, ['cards', 'bills', 'products', 'status'].map(done)).slice(0, 5),
+      { ...loggedFor(userId, [{}, {}, {}, {}])[5], sent: 'rich' },
     ])
     // Each is what its user is sent when they send the command themselves.
     const sentDirectly = []

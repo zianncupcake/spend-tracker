@@ -355,6 +355,17 @@ describe('/cards', () => {
   })
 })
 
+describe('/bills', () => {
+  it("is one table of each card's bill reminder and whether its bill is paid this month", async () => {
+    const chat = openChat()
+    await chat.say('/addcard alpha 4321 calendar ocbc-rewards')
+    await chat.say('/remind alpha 12')
+    await pay((await chat.user()).id, '2026-10-05T09:30:00+08:00')
+
+    expect(await chat.lines('/bills')).toEqual(['Nickname | Reminder | Paid', `alpha | day 12 | ${PAID}`])
+  })
+})
+
 describe('/removecard', () => {
   it('removes a card by nickname', async () => {
     const chat = openChat()
@@ -836,7 +847,7 @@ describe('what the log has of an update', () => {
     // The names at the start of the lines of the list, each of them once: /spend is there with and without a card.
     const lines = (await chat.say('/help')).split('\n')
     const listed = [...new Set(lines.flatMap((line) => /^\/([a-z]+)/.exec(line)?.[1] ?? []))]
-    expect(listed).toHaveLength(21)
+    expect(listed).toHaveLength(22)
     const logged = catchConsole()
 
     for (const name of listed) await chat.reply(`/${name}`)

@@ -1,5 +1,6 @@
-// What builds a reply from what it is given: the tables that /cards, /spend, /products, /patterns and /status show,
-// a card's window in full, the lines that name a card or a pattern, and what is said when the AI provider is busy.
+// What builds a reply from what it is given: the tables that /cards, /bills, /spend, /products, /patterns and /status
+// show, a card's window in full, the lines that name a card or a pattern, and what is said when the AI provider is
+// busy.
 
 import { productOf, products } from '../catalogue'
 import type { Option } from '../domain/best'
@@ -97,9 +98,9 @@ export function spendLine(each: CardTotals, timeZone: string): string {
 }
 
 // The replies that set values out in one table, so that each value is under a header, or beside a name, that says
-// what it is: those to /cards, to /spend with no card named, to /products and to /status. Each is one rich message.
-// As text, which is sent when Telegram does not take the rich message, each is the lines that the command replied
-// with before it had a table.
+// what it is: those to /cards, to /bills, to /spend with no card named, to /products and to /status. Each is one rich
+// message. As text, which is sent when Telegram does not take the rich message, each is the lines that the command
+// replied with before it had a table.
 
 /**
  * A table of a rich message, drawn with lines: the row that names its columns, when it has one, and its rows.
@@ -135,7 +136,7 @@ export function cardsReply(cards: Card[], paid: string[]): Tabled {
     maskLast4(card.last4),
     describeWindow(card),
     productOf(card.product)?.name ?? '-',
-    card.remindDay === undefined ? '-' : `day ${card.remindDay}`,
+    reminderCell(card),
     paidCell(card, paid),
   ])
   const header = ['Nickname', 'Card', 'Window', 'Product', 'Reminder', 'Paid']
@@ -147,6 +148,27 @@ export function cardsReply(cards: Card[], paid: string[]): Tabled {
       })
       .join('\n'),
   )
+}
+
+/**
+ * The bills of a user's cards, as /bills shows them: one table, with a row for each card, of the two columns of
+ * /cards that are about its bill. As text, it is a line for each card.
+ */
+export function billsReply(cards: Card[], paid: string[]): Tabled {
+  const rows = cards.map((card) => [card.nickname, reminderCell(card), paidCell(card, paid)])
+  return tabled([tableOf(['Nickname', 'Reminder', 'Paid'], rows)], () =>
+    cards
+      .map((card) => {
+        const reminder = card.remindDay === undefined ? 'no reminder' : `reminder on day ${card.remindDay}`
+        const cell = paidCell(card, paid)
+        return cell === '-' ? `${card.nickname}: ${reminder}` : `${card.nickname}: ${reminder}, paid: ${cell}`
+      })
+      .join('\n'),
+  )
+}
+
+function reminderCell(card: Card): string {
+  return card.remindDay === undefined ? '-' : `day ${card.remindDay}`
 }
 
 /**

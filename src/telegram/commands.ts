@@ -35,6 +35,7 @@ import { describeWindow, formatShortDate, formatShortDateTime, maskLast4, shortD
 import { addCardEnd, inMessages, purchaseLine, sortPrompt, whereSorted } from './purchases'
 import {
   bestReply,
+  billsReply,
   cardsReply,
   describeCard,
   heldAgainst,
@@ -127,13 +128,15 @@ export async function reply(
         : TOO_MANY_CARDS
     }
 
-    case '/cards': {
+    case '/cards':
+    case '/bills': {
       const { id, timezone } = await user()
       const store = storeFor(db, id)
       const cards = await store.listCards()
       if (cards.length === 0) return NO_CARDS
       const { year, month } = dayOf(now(), timezone)
-      return cardsReply(cards, await store.paidSince(startOfDay(year, month, 1, timezone).getTime() / 1000))
+      const paid = await store.paidSince(startOfDay(year, month, 1, timezone).getTime() / 1000)
+      return command === '/cards' ? cardsReply(cards, paid) : billsReply(cards, paid)
     }
 
     case '/products':
