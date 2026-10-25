@@ -80,6 +80,11 @@ export function alertText(amount: string, last4: string, merchant = 'COFFEE PLAC
   return `A transaction of ${amount} was made with your Example Bank card ending ${last4} at ${merchant}.`
 }
 
+/** UOB's alert of a card's bill paid from a UOB account, for the card ending 4321. Its values are made up. */
+export const UOB_PAYMENT =
+  'You made/scheduled a bill payment(s) of SGD 88.20 to SAMPLE PAYEE on your a/c ending 1111 at 4:58PM SGT, 25 Oct ' +
+  '26. Bill ref: ending 4321. If unauthorised, call UOB 24/7 Fraud Hotline.'
+
 export function alertEmail(overrides: Partial<AlertEmail> = {}): AlertEmail {
   return {
     sourceId: 'msg-1',
@@ -174,7 +179,7 @@ export function linesOf({ blocks }: RichMessage): string[] {
 // The rows that name the columns of two of the bot's tables, as `linesOf` has a row: the first line of the reply to
 // /cards, and of the reply to /spend with no card named. A test says what such a reply holds with these.
 
-export const CARDS_HEADER = 'Nickname | Card | Window | Product | Reminder'
+export const CARDS_HEADER = 'Nickname | Card | Window | Product | Reminder | Paid'
 export const SPEND_HEADER = 'Nickname | Spent | Purchases | Counted | Resets'
 
 /** What /spend with no card named says last under its table: that totals are estimates. */

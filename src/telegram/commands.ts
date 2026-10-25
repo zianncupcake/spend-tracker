@@ -8,7 +8,7 @@ import { bestFor } from '../domain/best'
 import { nextReminder, reminderIn } from '../domain/reminder'
 import { sortByRules } from '../domain/sorting'
 import { cardTotals } from '../domain/totals'
-import { currentWindow } from '../domain/window'
+import { currentWindow, dayOf, startOfDay } from '../domain/window'
 import { COMMAND_NAMES } from '../log'
 import { issueToken } from '../mcp/tokens'
 import { deleteUser, findOrCreateUser, findUser, MAX_CARDS, setTimezone, storeFor } from '../store'
@@ -128,9 +128,12 @@ export async function reply(
     }
 
     case '/cards': {
-      const cards = await storeFor(db, (await user()).id).listCards()
+      const { id, timezone } = await user()
+      const store = storeFor(db, id)
+      const cards = await store.listCards()
       if (cards.length === 0) return NO_CARDS
-      return cardsReply(cards)
+      const { year, month } = dayOf(now(), timezone)
+      return cardsReply(cards, await store.paidSince(startOfDay(year, month, 1, timezone).getTime() / 1000))
     }
 
     case '/products':

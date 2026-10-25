@@ -343,6 +343,17 @@ export const PHOTO_READ_NO_REPLY =
 
 export const NO_CARDS = `You have no cards yet. Add one with:\n${ADD_CARD_USAGE}`
 
+/** What /cards says of a card whose bill has a payment this month. */
+export const PAID = '✓'
+
+/** What it says of a UOB card that has none: see paidCell in ./replies. */
+export const CHECK_UOB_APP = 'check UOB app'
+
+/** What the bot says when an alert tells of a card's bill paid. `card` names the card. */
+export function paymentScheduled(amount: string, card: string): string {
+  return `Payment scheduled: ${amount} for ${card}`
+}
+
 /** What follows a card's total whose amounts in other currencies have what they come to in its own beside them. */
 export const AT_REFERENCE_RATES = "≈ at today's reference rates; the bank's rate and fees differ."
 

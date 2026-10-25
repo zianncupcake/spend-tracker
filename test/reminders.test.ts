@@ -70,8 +70,14 @@ describe('/remind', () => {
     const reply = await chat.say('/remind evol 12')
 
     expect(reply).toContain('12 Oct, 09:00')
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | day 12'])
-    expect(await bystander.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | -'])
+    expect(await chat.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      'evol | ••••1234 | calendar month | - | day 12 | -',
+    ])
+    expect(await bystander.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      'evol | ••••1234 | calendar month | - | - | -',
+    ])
     // As text, which is what is sent when Telegram does not take the table.
     vi.spyOn(deps.messenger, 'sendRich').mockRejectedValue(new TelegramError('sendRichMessage', 400))
     expect(await chat.say('/cards')).toContain('day 12')
@@ -82,7 +88,10 @@ describe('/remind', () => {
 
     await chat.say('/remind evol 31')
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | day 31'])
+    expect(await chat.lines('/cards')).toEqual([
+      CARDS_HEADER,
+      'evol | ••••1234 | calendar month | - | day 31 | -',
+    ])
     expect(await dueAt(chat)).toBe(seconds('2026-10-31T09:00:00+08:00'))
   })
 
@@ -100,7 +109,7 @@ describe('/remind', () => {
 
     await chat.say('/remind evol NONE')
 
-    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | -'])
+    expect(await chat.lines('/cards')).toEqual([CARDS_HEADER, 'evol | ••••1234 | calendar month | - | - | -'])
     expect(await dueAt(chat)).toBeNull()
   })
 

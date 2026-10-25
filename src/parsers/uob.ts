@@ -22,6 +22,17 @@ const TRANSACTION =
 // with a z, "unauthorised" or "unauthorized", so it is matched as far as the two spellings are the same.
 const FOLLOWING = ' If unauthori'
 
+// UOB also tells of a bill paid from one of its bank accounts, as in this made-up sentence:
+//
+//   You made/scheduled a bill payment(s) of SGD 88.20 to SAMPLE PAYEE on your a/c ending 1111 at 4:58PM SGT, 25 Oct
+//   26. Bill ref: ending 4321. If unauthorised, call UOB 24/7 Fraud Hotline.
+//
+// The bill ref is the last four digits of the card that was paid. Bounded as TRANSACTION is, with up to 160
+// characters let through for the payee, the account and the time, none of which is kept. The groups are: currency,
+// whole amount, decimals and the card's last four digits.
+const PAYMENT =
+  /\bbill payment\(s\) of ([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12}|(?=\.\d))(\.\d{1,2}|) to .{0,160}?\. Bill ref: ending (\d{4})\b/
+
 const DAY = 24 * 3600
 
 export const uob: Parser = {
@@ -42,6 +53,13 @@ export const uob: Parser = {
       merchant: merchantIn(text.slice(match.index + upToMerchant.length), FOLLOWING),
       occurredAt: purchaseTime(dayStart, email.receivedAt),
     }
+  },
+
+  payment(email) {
+    const match = PAYMENT.exec(singleSpaced(email.text))
+    if (!match) return null
+    const [, currency, whole, decimals, cardLast4] = match
+    return { cardLast4, amountMinor: hundredths(whole, decimals), currency }
   },
 }
 

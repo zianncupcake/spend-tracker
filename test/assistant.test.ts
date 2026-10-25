@@ -380,7 +380,7 @@ describe('a message that asks for several things', () => {
     expect(replies.map((message) => message.text)).toEqual(said)
     expect(sentRich).toHaveLength(before)
     // The first thing stays done, and the question is one whose things were done, as far as they were.
-    expect(await chat.lines('/cards')).toContain('travel | ••••1234 | calendar month | - | -')
+    expect(await chat.lines('/cards')).toContain('travel | ••••1234 | calendar month | - | - | -')
     expect(logged.events('question')).toMatchObject([{ outcome: 'acted', requests: 2, actions: 1 }])
   })
 })

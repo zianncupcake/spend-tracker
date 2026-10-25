@@ -621,8 +621,8 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
       'none, /remind <nickname> <day of the month>|none for a bill reminder, /timezone <IANA name>, /connect or ' +
       "/disconnect for the user's Gmail, /mcp or /mcp revoke for another " +
       "assistant's access, /delete for all that is stored about the user, and these, which only show things: " +
-      "/cards, which has each card's bill reminder, /patterns, /status of the Gmail, /products, /best <merchant> " +
-      'for which card to pay with there, and ' +
+      "/cards, which has each card's bill reminder and whether its bill has been paid this month, /patterns, " +
+      '/status of the Gmail, /products, /best <merchant> for which card to pay with there, and ' +
       '/addcard alone for the form that adds a card, as when the user asks to add one without giving its digits: it ' +
       'has buttons for each card that alerts named and that is not added.',
     `The product keys, for /product and /addcard: ${productKeys}.`,
