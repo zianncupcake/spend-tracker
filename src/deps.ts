@@ -44,6 +44,7 @@ export function depsFor(env: Env): Deps {
     ai: env.AI_API_KEY
       ? {
           apiKey: env.AI_API_KEY,
+          fallbackApiKey: env.AI_FALLBACK_API_KEY || undefined,
           baseUrl: env.AI_BASE_URL || DEFAULT_BASE_URL,
           model: env.AI_MODEL || DEFAULT_MODEL,
           // The default is a model of the default provider's, and its name means nothing to another one. So a

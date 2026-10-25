@@ -25,6 +25,8 @@ const MAX_COMPLETION_TOKENS = 1024
 /** The AI provider that the assistant's answers are asked of, as the service is set up with it. */
 export interface AiProvider {
   apiKey: string
+  /** The key of a second account at the same provider, asked once more when the first's answers 429. */
+  fallbackApiKey?: string
   /** Where its API is reached, with no trailing slash: what /chat/completions comes after. */
   baseUrl: string
   model: string
@@ -144,14 +146,32 @@ export async function completeJson(
   )
 }
 
-/** Posts the provider a request with the body, and logs it, however it ends: see `complete`. */
+/**
+ * Posts the provider a request with the body: see `complete`. When the first key's account has had as many requests
+ * as it takes (429), the same request is sent once more with the fallback key, and logged as a request of its own.
+ */
 async function request(provider: AiProvider, body: Record<string, unknown>, timeout: number): Promise<ModelReply> {
+  try {
+    return await send(provider, provider.apiKey, body, timeout)
+  } catch (error) {
+    if (!(error instanceof ProviderError && error.status === 429 && provider.fallbackApiKey)) throw error
+    return send(provider, provider.fallbackApiKey, body, timeout)
+  }
+}
+
+/** Posts the provider the request with the key, and logs it, however it ends. */
+async function send(
+  provider: AiProvider,
+  key: string,
+  body: Record<string, unknown>,
+  timeout: number,
+): Promise<ModelReply> {
   // By the Worker's own clock, which moves on while the provider is waited for.
   const began = Date.now()
   // Filled in as the request goes on, so that one that fails is logged with as much as was learnt before it did.
   const seen: Seen = {}
   try {
-    const reply = await ask(provider, body, timeout, seen)
+    const reply = await ask(provider, key, body, timeout, seen)
     log('ai_call', { ms: Date.now() - began, ...seen })
     return reply
   } catch (error) {
@@ -163,13 +183,14 @@ async function request(provider: AiProvider, body: Record<string, unknown>, time
 /** Posts the request and reads the model's message from the answer, noting in `seen` what the log is to have. */
 async function ask(
   provider: AiProvider,
+  key: string,
   body: Record<string, unknown>,
   timeout: number,
   seen: Seen,
 ): Promise<ModelReply> {
   const response = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeout),
   })

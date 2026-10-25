@@ -18,6 +18,9 @@ declare namespace Cloudflare {
     // The model that reads photos, which is asked with the same key at the same address. It has a default only
     // when AI_BASE_URL is left out.
     AI_VISION_MODEL?: string
+    // A second key, of another account at the same provider, asked when the first has had as many requests as it
+    // takes (429).
+    AI_FALLBACK_API_KEY?: string
   }
   interface GlobalProps {
     mainModule: typeof import('./index')

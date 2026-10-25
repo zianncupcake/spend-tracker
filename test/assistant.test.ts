@@ -1288,7 +1288,8 @@ describe('the AI provider that the service is set up with', () => {
   it('is at the default address, with the default models, when only a key is set', () => {
     expect(depsFor(env).ai).toEqual(GROQ)
     // A setting that is left empty counts as one that is not set.
-    expect(depsFor({ ...env, AI_BASE_URL: '', AI_MODEL: '', AI_VISION_MODEL: '' }).ai).toEqual(GROQ)
+    const empty = { AI_BASE_URL: '', AI_MODEL: '', AI_VISION_MODEL: '', AI_FALLBACK_API_KEY: '' }
+    expect(depsFor({ ...env, ...empty }).ai).toEqual(GROQ)
   })
 
   it.each([undefined, ''])('is none when the key is %j, whatever else is set', (key) => {
@@ -1310,8 +1311,10 @@ describe('the AI provider that the service is set up with', () => {
       AI_API_KEY: 'another-made-up-key',
       AI_BASE_URL: 'https://ai.example.test/v1',
       AI_MODEL: 'made-up-model',
+      AI_FALLBACK_API_KEY: 'made-up-fallback-key',
     }).ai
 
+    expect(deps.ai?.fallbackApiKey).toBe('made-up-fallback-key')
     expect(linesOf(await openChat().rich('How much have I spent?'))).toEqual(['An answer.'])
 
     expect(asked).toEqual([
