@@ -32,6 +32,7 @@ export const COMMAND_NAMES = [
   'start',
   'addcard',
   'cards',
+  'bills',
   'products',
   'product',
   'removecard',

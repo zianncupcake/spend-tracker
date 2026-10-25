@@ -32,6 +32,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/addcard <nickname> <last4> statement <day>` | Tracks a card by statement cycle. `<day>` is the day of the month on which the statement closes. |
 | `/addcard <nickname> <last4> calendar` | Tracks a card by calendar month. |
 | `/cards` | Lists your cards. |
+| `/bills` | Shows each card's bill reminder, and whether its bill has been paid this month. |
 | `/removecard <nickname>` | Stops tracking a card. |
 | `/renamecard <nickname> <new nickname>` | Gives a card another nickname. Nothing else of the card changes. |
 | `/cycle <nickname> statement <day>` | Changes a card to a statement cycle that closes on `<day>`, or with `calendar` in place of `statement <day>` to calendar months. Its purchases stay, and are counted by the new window from then on. |

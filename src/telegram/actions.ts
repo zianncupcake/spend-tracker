@@ -110,6 +110,7 @@ const RUN_AT_ONCE = [
   'cycle',
   'timezone',
   'cards',
+  'bills',
   'spend',
   'best',
   'sort',
