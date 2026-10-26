@@ -201,7 +201,7 @@ const TOOLS: Tool[] = [
         'product, the codes in `bonus`, `noBonus` and `dependsOnHowPaid`, each with its name and group, which a call ' +
         'with both gives as `codes`. `goesBy` of a group in `bonusGroups` is codes, or named merchants when only the ' +
         'merchants that the terms name count, which the group lists in `merchants`. With merchant null and mccs ' +
-        "empty: each product's groups, caps and minimum spend.",
+        "empty: each product's groups, rates, caps, cashback cap and minimum spend.",
       parameters: {
         type: 'object',
         properties: {
@@ -628,10 +628,10 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
       'has buttons for each card that alerts named and that is not added.',
     `The product keys, for /product and /addcard: ${productKeys}.`,
     'To find the id of a purchase that the user describes, call find_purchases first.',
-    "To answer what earns a card's bonus, by merchant or category code (MCC), or what its caps are, call card_rules " +
+    "To answer what earns a card's bonus, by merchant or category code (MCC), or its rates and caps, call card_rules " +
       'and fill both of its arguments every time: merchant, the merchant that the user named or null, and mccs, the ' +
       `codes that the user gave or that such a business or kind of spending usually has, up to ${MAX_CODES}, or an ` +
-      'empty list for caps alone.',
+      'empty list for rates and caps alone.',
     "A bonus group whose goesBy is named merchants counts only the merchants in its merchants list, which the card's " +
       'terms name: when asked which merchants count, list them, and for any other merchant say that it is not one of ' +
       'them.',

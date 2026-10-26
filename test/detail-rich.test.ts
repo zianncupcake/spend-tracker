@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
+import { uobEvol } from '../src/catalogue/uob-evol'
 import { WINDOW_LIMIT } from '../src/domain/sorting'
 import { clock, openChat } from './connect-helpers'
 import { bareRow, bold, buy, headerRow, linesOf, plain, purchaseRow, sumRow, tableOf } from './helpers'
@@ -8,7 +9,7 @@ import { bareRow, bold, buy, headerRow, linesOf, plain, purchaseRow, sumRow, tab
 // card's product. test/detail.test.ts has the text that is sent in its place when Telegram does not take a rich
 // message. The clock stands at 12:00 on 9 October 2026 in Singapore.
 
-const TERMS = "Limits are from the bank's terms for the UOB EVOL Card, as of 10 June 2026."
+const TERMS = `Limits are from the bank's terms for the UOB EVOL Card, as of ${uobEvol.termsAsOf}.`
 
 /**
  * What is said under the total of a card for the calendar month, which is October: the last two days of a window

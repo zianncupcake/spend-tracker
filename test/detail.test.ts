@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { uobEvol } from '../src/catalogue/uob-evol'
 import { TelegramError } from '../src/telegram/api'
 import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { BY_HAND_NOTE } from '../src/telegram/purchases'
@@ -14,7 +15,7 @@ import { catchConsole } from './log-helpers'
 // window counts the purchases of 14 September to 13 October, and the calendar month those of 29 September to 29
 // October.
 
-const TERMS = "Limits are from the bank's terms for the UOB EVOL Card, as of 10 June 2026."
+const TERMS = `Limits are from the bank's terms for the UOB EVOL Card, as of ${uobEvol.termsAsOf}.`
 
 /** What is said under the total of a card with a statement cycle: which days of purchases it counts, and why. */
 function counting(from: string, to: string): string {

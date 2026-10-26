@@ -1,9 +1,8 @@
 import type { Product } from './types'
 
 // The UOB EVOL Card, from the FAQ that the bank publishes for it. Everything is counted by the statement month. The
-// two groups with a limit earn 10% cashback, and the bank caps the cashback of each: at S$30 for online and mobile
-// contactless spend, which S$300 of spend earns, and at S$20 for the gyms, telcos and streaming services it names,
-// which S$200 earns. Neither earns the 10% in a statement month with less than S$800 of spend.
+// terms cap the cashback of a group and not its spend, so the limit of a group with one is the spend whose 10% is
+// that cap.
 //
 // The groups, and the categories that have a button, are called what the FAQ calls them.
 //
@@ -41,10 +40,12 @@ export const uobEvol: Product = {
   bank: 'uob',
   name: 'UOB EVOL Card',
   homeCurrency: 'SGD',
-  // Where the bank publishes the terms that the limits are from:
+  // Where the bank publishes the terms that the limits and rates are from:
   // https://www.uob.com.sg/web-resources/personal/pdf/personal/cards/credit-cards/rebates-cards/evol/uob-evol-faq.pdf
-  termsAsOf: '10 June 2026',
+  termsAsOf: '15 October 2026',
   minimumSpendMinor: 80000,
+  earnsBelowMinimum: '0.3% cashback on local spend. Overseas Foreign Currency Spend still earns its rate.',
+  cashbackCapMinor: 8000,
   // UOB's terms count spend that is "successfully charged and posted to the Card account in each Statement Month",
   // and a purchase is usually posted a day or two after it is made. So a purchase of the last days of a statement
   // month is counted in the next one. That it is two days is the owner's choice: how long a posting takes was not
@@ -54,12 +55,14 @@ export const uobEvol: Product = {
     {
       name: 'Online and Mobile Contactless Spend',
       limitMinor: 30000,
+      earns: '10% cashback, at most S$30 a statement month',
       // Websites, purchases made in an app, and Apple Pay, Google Pay or Samsung Pay in a shop.
       categories: [{ key: 'online', label: 'Online / Mobile Contactless Spend' }],
     },
     {
       name: 'Selected Gym, Telco and Streaming Spend',
       limitMinor: 20000,
+      earns: '10% cashback, at most S$20 a statement month',
       categories: [
         {
           key: 'selected',
@@ -77,9 +80,16 @@ export const uobEvol: Product = {
     },
     // All other local spend, as the bank has it, which is where a purchase made with the card itself, tapped or
     // inserted, belongs. A purchase is put here only when its user marks it.
-    { name: 'Other Spend', categories: [{ key: 'other', label: 'Other Spend' }] },
+    {
+      name: 'Other Spend',
+      earns: '0.3% cashback, at most S$30 a statement month',
+      categories: [{ key: 'other', label: 'Other Spend' }],
+    },
     {
       name: 'Overseas Foreign Currency Spend',
+      earns:
+        '1% cashback, but 0.5% in China or Europe, and in Australia from 1 January 2027. No minimum spend, no cap, ' +
+        'and outside the S$80 cap on local cashback. These rates run to 31 December 2027.',
       categories: [{ key: 'fx', label: 'Overseas Foreign Currency Spend', automatic: 'foreign-currency' }],
     },
   ],

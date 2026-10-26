@@ -148,10 +148,18 @@ function bonusGroupsOf(product: Product) {
     .map(groupTerms)
 }
 
-/** The group's name, what it goes by, and the merchants that the terms name for it, which JSON leaves out for none. */
+/**
+ * The group's name, what it earns, what it goes by, and the merchants that the terms name for it. JSON leaves out
+ * what it earns when that is not known, and the merchants when there are none.
+ */
 function groupTerms(group: Group) {
   const merchants = group.categories.flatMap(({ named }) => named ?? [])
-  return { group: group.name, goesBy: goesBy(group), merchants: merchants.length === 0 ? undefined : merchants }
+  return {
+    group: group.name,
+    earns: group.earns,
+    goesBy: goesBy(group),
+    merchants: merchants.length === 0 ? undefined : merchants,
+  }
 }
 
 /** Where each product counts a purchase of a code that is given, at the merchant when one is named. */
@@ -204,18 +212,23 @@ export function placing(product: Product, ruled: string | undefined): { group?: 
 export type Bonus = 'yes' | 'no' | 'depends'
 
 /**
- * What each product's terms set for a month, in the order of the catalogue: its minimum spend, and the limit of each
- * of its groups, what a purchase gets into the group by and the merchants that the terms name for it. Null is for a
- * limit or minimum that the terms do not set. It is what the assistant's card_rules answers when it is asked about no
- * purchase.
+ * What each product's terms set for a month, in the order of the catalogue: its minimum spend, what is earned below
+ * it, the cap on its cashback, and for each of its groups what it earns, its limit, what a purchase gets into the
+ * group by and the merchants that the terms name for it. Null is for a limit, minimum or cap that the terms do not
+ * set, and JSON leaves out what is earned when that is not known. It is what the assistant's card_rules answers when
+ * it is asked about no purchase.
  */
 export function productTerms() {
-  return products.map(({ name, termsAsOf, minimumSpendMinor, homeCurrency, groups }) => ({
-    product: name,
-    termsAsOf,
-    monthlyMinimumSpend: money(minimumSpendMinor, homeCurrency),
-    groups: groups.map((group) => ({ ...groupTerms(group), monthlyCap: money(group.limitMinor, homeCurrency) })),
-  }))
+  return products.map(
+    ({ name, termsAsOf, minimumSpendMinor, earnsBelowMinimum, cashbackCapMinor, homeCurrency, groups }) => ({
+      product: name,
+      termsAsOf,
+      monthlyMinimumSpend: money(minimumSpendMinor, homeCurrency),
+      earnsBelowMinimum,
+      monthlyCashbackCap: money(cashbackCapMinor, homeCurrency),
+      groups: groups.map((group) => ({ ...groupTerms(group), monthlyCap: money(group.limitMinor, homeCurrency) })),
+    }),
+  )
 }
 
 /**
