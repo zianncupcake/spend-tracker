@@ -7,7 +7,7 @@ export interface Product {
   /** The parser of the bank whose alerts tell of the product's purchases. */
   bank: Parser['name']
   name: string
-  /** The currency that the card is billed in. The limits and the minimum spend are in hundredths of its unit. */
+  /** The currency that the card is billed in. The amounts of the terms are in hundredths of its unit. */
   homeCurrency: string
   /** The date that the terms which the rules were taken from are as of. */
   termsAsOf: string
@@ -16,6 +16,10 @@ export interface Product {
    * when the terms set no minimum.
    */
   minimumSpendMinor?: number
+  /** What a month below the minimum spend earns, as the terms state it. Missing when they do not say. */
+  earnsBelowMinimum?: string
+  /** The most cashback that the terms pay in a month, over the caps of its groups. Missing when they set none. */
+  cashbackCapMinor?: number
   /**
    * How many days at the end of a window a card of the product counts in the next one: the day that the window
    * closes on, and as many before it as make up the number. A bank counts a purchase by the day that it is posted,
@@ -45,6 +49,8 @@ export interface Group {
    * Missing when the terms set no limit.
    */
   limitMinor?: number
+  /** What the group earns, as the terms state it, with any cap on the cashback itself. Missing when not known. */
+  earns?: string
   categories: Category[]
 }
 

@@ -6,7 +6,7 @@ import { breakDown, perCurrency } from '../src/domain/breakdown'
 import type { CategoryTotal } from '../src/store'
 import { breakdownLines } from '../src/telegram/purchases'
 
-const TERMS = "Limits are from the bank's terms for the UOB EVOL Card, as of 10 June 2026."
+const TERMS = `Limits are from the bank's terms for the UOB EVOL Card, as of ${uobEvol.termsAsOf}.`
 
 /** The same of the HSBC Revolution Credit Card. It has no minimum spend, so this is the one line that it always has. */
 const HSBC_TERMS = "Limits are from the bank's terms for the HSBC Revolution Credit Card, as of 1 April 2026."

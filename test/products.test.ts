@@ -436,7 +436,7 @@ describe('a card of a product whose terms count a purchase by the day that it wa
     expect(detail.slice(-3)).toEqual([
       'Total: SGD 100.00 in 1 purchase, resets 6 Nov',
       'Minimum spend: SGD 100.00 of SGD 800.00',
-      "Limits are from the bank's terms for the Made-up Card, as of 10 June 2026.",
+      `Limits are from the bank's terms for the Made-up Card, as of ${BY_PURCHASE_DAY.termsAsOf}.`,
     ])
     // An assistant is given the window, and nothing of a total that counts from before it.
     expect((await spendingSummary(storeFor(env.DB, userId), NOW, 'Asia/Singapore')).cards).toEqual([

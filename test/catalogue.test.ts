@@ -57,12 +57,12 @@ describe('the catalogue', () => {
 })
 
 describe('the UOB EVOL Card', () => {
-  it("is as the bank's FAQ of 10 June 2026 has it", () => {
+  it("is as the bank's FAQ of 15 October 2026 has it", () => {
     expect(uobEvol).toMatchObject({
       key: 'uob-evol',
       name: 'UOB EVOL Card',
       homeCurrency: 'SGD',
-      termsAsOf: '10 June 2026',
+      termsAsOf: '15 October 2026',
       minimumSpendMinor: 80000,
     })
     // 10% on each of the two groups with a limit: on S$300 and on S$200 of spend, which earn the S$30 and the S$20
@@ -312,11 +312,22 @@ describe("what the products' terms set for a month", () => {
       product: dbsWomansWorld.name,
       termsAsOf: dbsWomansWorld.termsAsOf,
       monthlyMinimumSpend: null,
+      monthlyCashbackCap: null,
       groups: [
         { group: 'Online Spend', monthlyCap: { amount: '1000.00', currency: 'SGD' }, goesBy: null },
         { group: 'Other Spend', monthlyCap: null, goesBy: 'codes' },
       ],
     })
+  })
+
+  it("gives what each group earns, what a month below the minimum earns, and the cap on the month's cashback", () => {
+    const [uob] = productTerms()
+    const earns = uobEvol.groups.map((group) => group.earns)
+
+    expect([...earns, uobEvol.earnsBelowMinimum]).not.toContain(undefined)
+    expect(uob.groups.map((group) => group.earns)).toEqual(earns)
+    expect(uob.earnsBelowMinimum).toBe(uobEvol.earnsBelowMinimum)
+    expect(uob.monthlyCashbackCap).toEqual({ amount: '80.00', currency: 'SGD' })
   })
 
   it('says of a group whether it goes by codes, or only by the merchants that the terms name, and names them', () => {
