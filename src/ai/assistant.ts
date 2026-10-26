@@ -200,8 +200,8 @@ const TOOLS: Tool[] = [
         `paid. By \`mccs\`, 1 to ${MAX_CODES} merchant category codes, at the merchant when one is named: for each ` +
         'product, the codes in `bonus`, `noBonus` and `dependsOnHowPaid`, each with its name and group, which a call ' +
         'with both gives as `codes`. `goesBy` of a group in `bonusGroups` is codes, or named merchants when only the ' +
-        "merchants that the terms name count. With merchant null and mccs empty: each product's groups, caps and " +
-        'minimum spend.',
+        'merchants that the terms name count, which the group lists in `merchants`. With merchant null and mccs ' +
+        "empty: each product's groups, caps and minimum spend.",
       parameters: {
         type: 'object',
         properties: {
@@ -632,8 +632,9 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
       'and fill both of its arguments every time: merchant, the merchant that the user named or null, and mccs, the ' +
       `codes that the user gave or that such a business or kind of spending usually has, up to ${MAX_CODES}, or an ` +
       'empty list for caps alone.',
-    "A bonus group whose goesBy is named merchants counts only the merchants that the card's terms name: for any " +
-      'other merchant say that the terms name the merchants that count.',
+    "A bonus group whose goesBy is named merchants counts only the merchants in its merchants list, which the card's " +
+      'terms name: when asked which merchants count, list them, and for any other merchant say that it is not one of ' +
+      'them.',
     'When card_rules looked at codes, the bot writes the answer itself: then reply with one short sentence, which it ' +
       'replaces.',
     'Name a code only by the name that card_rules gives for it, and never say what a code is otherwise.',

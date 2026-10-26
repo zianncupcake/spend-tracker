@@ -565,7 +565,7 @@ describe('a model that calls card_rules about a merchant', () => {
     const rules = await rulesAt()
 
     expect(of(rules, hsbcRevolution.name)).toMatchObject({ bonus: 'depends', by: null })
-    const gym = { group: 'Selected Gym, Telco and Streaming Spend', goesBy: 'named merchants' }
+    const gym = expect.objectContaining({ group: 'Selected Gym, Telco and Streaming Spend', goesBy: 'named merchants' })
     expect(of(rules, uobEvol.name)).toMatchObject({ bonusGroups: expect.arrayContaining([gym]) })
   })
 })
