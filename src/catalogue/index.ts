@@ -120,7 +120,8 @@ export interface Placed {
  * code that was asked about or that is known for the merchant, or null, and `name` is its name. `bonus` is 'yes' or
  * 'no' when the purchase was placed in its group: a group with a limit is one that earns the bonus, on every product
  * here. It is 'depends' when it was not: the group is then only the one that a purchase starts in, and is null on a
- * product that leaves such a purchase not sorted. `bonusGroups` are the groups with a limit, and what each goes by.
+ * product that leaves such a purchase not sorted. `bonusGroups` are the groups with a limit, what each goes by, and the
+ * merchants that the terms name for it.
  */
 export function rulesFor(mcc: number | null, placed: (Placed | undefined)[]) {
   return {
@@ -140,11 +141,17 @@ export function rulesFor(mcc: number | null, placed: (Placed | undefined)[]) {
   }
 }
 
-/** The groups of the product with a limit, which are those that earn the bonus, and what each goes by. */
+/** The groups of the product with a limit, which are those that earn the bonus, as `groupTerms` gives each. */
 function bonusGroupsOf(product: Product) {
   return product.groups
     .filter(({ limitMinor }) => limitMinor !== undefined)
-    .map((each) => ({ group: each.name, goesBy: goesBy(each) }))
+    .map(groupTerms)
+}
+
+/** The group's name, what it goes by, and the merchants that the terms name for it, which JSON leaves out for none. */
+function groupTerms(group: Group) {
+  const merchants = group.categories.flatMap(({ named }) => named ?? [])
+  return { group: group.name, goesBy: goesBy(group), merchants: merchants.length === 0 ? undefined : merchants }
 }
 
 /** Where each product counts a purchase of a code that is given, at the merchant when one is named. */
@@ -198,19 +205,16 @@ export type Bonus = 'yes' | 'no' | 'depends'
 
 /**
  * What each product's terms set for a month, in the order of the catalogue: its minimum spend, and the limit of each
- * of its groups and what a purchase gets into the group by. Null is for one that the terms do not set. It is what the
- * assistant's card_rules answers when it is asked about no purchase.
+ * of its groups, what a purchase gets into the group by and the merchants that the terms name for it. Null is for a
+ * limit or minimum that the terms do not set. It is what the assistant's card_rules answers when it is asked about no
+ * purchase.
  */
 export function productTerms() {
   return products.map(({ name, termsAsOf, minimumSpendMinor, homeCurrency, groups }) => ({
     product: name,
     termsAsOf,
     monthlyMinimumSpend: money(minimumSpendMinor, homeCurrency),
-    groups: groups.map((group) => ({
-      group: group.name,
-      monthlyCap: money(group.limitMinor, homeCurrency),
-      goesBy: goesBy(group),
-    })),
+    groups: groups.map((group) => ({ ...groupTerms(group), monthlyCap: money(group.limitMinor, homeCurrency) })),
   }))
 }
 

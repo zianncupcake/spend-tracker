@@ -58,6 +58,8 @@ export interface Category {
    * that the text of its merchant matches the pattern.
    */
   automatic?: 'foreign-currency' | RegExp
+  /** The merchants that the terms name for the category, as the terms write them. */
+  named?: string[]
   /**
    * The merchant category codes that put a purchase here, when the code of its merchant is known: those that the
    * terms list, or 'unlisted' for every code that no other category of the product lists.

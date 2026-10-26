@@ -11,8 +11,8 @@ import type { Product } from './types'
 // purchase is in unless something says otherwise: that it was made in another currency, that it was made at one of
 // the merchants named below, or that its user has marked it as other spend.
 
-// A purchase is taken to be at one of the merchants that the FAQ names when the text of its merchant holds the name,
-// in any case. Each of these is the source of a pattern.
+// The merchants that the FAQ names, as it writes them. A purchase is taken to be at one when the text of its merchant
+// holds the name, in any case.
 const SELECTED_MERCHANTS = [
   'Anytime Fitness',
   'Classpass',
@@ -26,8 +26,7 @@ const SELECTED_MERCHANTS = [
   'Revolution SG',
   'Starhub',
   'Singtel',
-  // Two characters that many other words hold, so it only counts as a word of its own.
-  '\\bM1\\b',
+  'M1',
   'Gomo',
   'MyRepublic',
   'Giga',
@@ -65,7 +64,14 @@ export const uobEvol: Product = {
         {
           key: 'selected',
           label: 'Selected Gym, Telco and Streaming Spend',
-          automatic: new RegExp(SELECTED_MERCHANTS.join('|'), 'i'),
+          named: SELECTED_MERCHANTS,
+          automatic: new RegExp(
+            SELECTED_MERCHANTS.map((name) =>
+              // Two characters that many other words hold, so it only counts as a word of its own.
+              name === 'M1' ? '\\bM1\\b' : name,
+            ).join('|'),
+            'i',
+          ),
         },
       ],
     },

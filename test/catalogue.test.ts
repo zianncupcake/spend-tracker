@@ -319,10 +319,12 @@ describe("what the products' terms set for a month", () => {
     })
   })
 
-  it('says of a group whether it goes by codes, or only by the merchants that the terms name', () => {
+  it('says of a group whether it goes by codes, or only by the merchants that the terms name, and names them', () => {
     const [uob, hsbc] = productTerms()
 
     expect([uob.groups[1].goesBy, hsbc.groups[0].goesBy]).toEqual(['named merchants', 'codes'])
+    expect(uob.groups[1].merchants).toEqual(uobEvol.groups[1].categories[0].named)
+    expect(hsbc.groups[0].merchants).toBeUndefined()
   })
 })
 
