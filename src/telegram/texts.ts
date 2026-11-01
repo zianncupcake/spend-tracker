@@ -49,6 +49,7 @@ export const ADD_USAGE = `Usage:
 /add <nickname> <amount> <merchant>
 /add <nickname> <amount> <date> <merchant>
 The amount can have a currency before it, as in USD 12.50. The date is written YYYY-MM-DD.
+A date still to come schedules the payment: it counts at once, and its bank alert takes it out.
 A day of the card's current window, up to today, can be written D/M or D/M/YY too.
 Any other D/M is read as part of the merchant.`
 
@@ -95,7 +96,7 @@ export const COMMANDS = `Commands:
 /spend -what you have spent on each card in its current window
 /spend <nickname> - every purchase on one card in its current window
 /best <merchant> - which of your cards to pay with there, by its bonus and what is left of its cap
-/add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant
+/add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant, and a date still to come schedules it
 /remove <purchase id> - take a purchase out
 /date <purchase id> <YYYY-MM-DD> - change the date of a purchase, which can be one still to come
 /products - list the card products whose reward rules are known
@@ -406,6 +407,16 @@ export const PAID = '✓'
 export const CHECK_UOB_APP = 'check UOB app'
 
 /** What the bot says when an alert tells of a card's bill paid. `card` names the card. */
+/** What the bot says of the scheduled entry that an alert took out. */
+export function scheduledCleared(id: number, date: string, amount: string): string {
+  return `Taken out, as this is its charge: scheduled ID ${id} · ${date} · ${amount}`
+}
+
+/** What /spend with a card says of a scheduled purchase whose day is over, with no alert that took it out. */
+export function scheduledNotSeen(id: number, date: string): string {
+  return `ID ${id}: scheduled for ${date}, and no charge has been seen for it. If none is coming, send /remove ${id}.`
+}
+
 export function paymentScheduled(amount: string, card: string): string {
   return `Payment scheduled: ${amount} for ${card}`
 }

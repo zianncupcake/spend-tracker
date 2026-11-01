@@ -4,7 +4,7 @@
 
 import { productOf } from '../catalogue'
 import { lettersOf } from '../catalogue/merchants'
-import { CURRENCY, dayStart, isRealDay, ISO_DATE, noonOf } from '../domain/by-hand'
+import { CURRENCY, dayStart, isRealDay, ISO_DATE, noonOf, noonOfAnyDay } from '../domain/by-hand'
 import { countedIn, currentWindow, dayOf, type WindowRule } from '../domain/window'
 import { hundredths, MAX_MERCHANT_LENGTH } from '../parsers/shared'
 import {
@@ -23,6 +23,8 @@ export interface Entry {
   merchant: string
   /** Unix seconds. */
   occurredAt: number
+  /** 1 for a day still to come. Else 0. */
+  scheduled: number
 }
 
 /** What /pattern is asked for: to save a pattern for a card's merchant or, with nothing to `save`, to remove it. */
@@ -132,8 +134,9 @@ export function parseEntry(
   if (merchant === '') return ADD_USAGE
   if (merchant.length > MAX_MERCHANT_LENGTH) return `The merchant can be ${MAX_MERCHANT_LENGTH} characters at most.`
   if (typeof dated === 'string') return dated
-  const occurredAt = dated ?? Math.floor(now.getTime() / 1000)
-  return { amountMinor, currency: currency.toUpperCase(), merchant, occurredAt }
+  const at = Math.floor(now.getTime() / 1000)
+  const occurredAt = dated ?? at
+  return { amountMinor, currency: currency.toUpperCase(), merchant, occurredAt, scheduled: occurredAt > at ? 1 : 0 }
 }
 
 /**
@@ -195,11 +198,11 @@ function isDay(text: string): boolean {
  * When a purchase with the date that is given to /add was made, in unix seconds, or a message saying what is wrong
  * with the date. Null for text that is not taken for a date, which is then the first word of the merchant.
  *
- * Text written YYYY-MM-DD is always a date. Text written D/M, or D/M and then a year or its last two digits, can as
- * well begin the name of a merchant, as "24/7" and "7/11" do. It is taken for a date when the day it names is one of
- * the card's current window and is not after today, and for a word of the merchant when it is not: see firstWritten
- * for which days those are. With no year, it names the latest day so written that is not after today: on 2
- * January, "30/12" is the 30th of the December before.
+ * Text written YYYY-MM-DD is always a date, of any day, past or still to come. Text written D/M, or D/M and then a
+ * year or its last two digits, can as well begin the name of a merchant, as "24/7" and "7/11" do. It is taken for a
+ * date when the day it names is one of the card's current window and is not after today, and for a word of the
+ * merchant when it is not: see firstWritten for which days those are. With no year, it names the latest day so
+ * written that is not after today: on 2 January, "30/12" is the 30th of the December before.
  */
 function timeNamed(text: string, card: Card, now: Date, timeZone: string): number | string | null {
   const at = Math.floor(now.getTime() / 1000)
@@ -208,7 +211,7 @@ function timeNamed(text: string, card: Card, now: Date, timeZone: string): numbe
   if (iso) {
     const start = dayStart(Number(iso[1]), Number(iso[2]), Number(iso[3]), timeZone)
     if (start === null) return NO_SUCH_DATE
-    return start > at ? 'That date is still to come.' : noonOf(start, at)
+    return noonOfAnyDay(start, at)
   }
 
   const [, day, month, year] = SHORT_DATE.exec(text) ?? []

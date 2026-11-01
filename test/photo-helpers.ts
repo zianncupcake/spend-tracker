@@ -127,7 +127,8 @@ export function markedIn({ text, entities = [] }: Posted): string[] {
 /** A user's transactions as they are stored. */
 export async function rowsOf(userId: number) {
   const { results } = await env.DB.prepare(
-    `SELECT id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category, removed_at
+    `SELECT id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category, removed_at,
+       scheduled
      FROM transactions WHERE owner_id = ? ORDER BY id`,
   )
     .bind(userId)

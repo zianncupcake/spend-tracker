@@ -24,6 +24,7 @@ const STORED = {
   currency: 'SGD',
   merchant: 'COFFEE PLACE',
   occurredAt: 1_800_000_000,
+  scheduled: 0,
 }
 
 async function newStore() {
@@ -504,7 +505,7 @@ describe('purchases that are added by hand several at once', () => {
     expect(ids['manual:7:1']).toBeLessThan(ids['manual:7:2'])
     // Each is stored as one that was added by hand, with what it was given and with nothing that it was not.
     const found = await store.findBySourceIds(['manual:7:0', 'manual:7:1', 'manual:7:2'])
-    const asStored = { parser: 'manual', category: null, removedAt: null }
+    const asStored = { parser: 'manual', category: null, removedAt: null, scheduled: 0 }
     expect(found.sort((a, b) => a.id - b.id)).toEqual([
       {
         ...STORED,

@@ -8,9 +8,9 @@ import { breakDown, perCurrency } from '../domain/breakdown'
 import { groupFor, toComeByGroup } from '../domain/patterns'
 import { WINDOW_LIMIT } from '../domain/sorting'
 import type { CardTotals } from '../domain/totals'
-import { countedIn, currentWindow } from '../domain/window'
+import { countedIn, currentWindow, dayOf, startOfDay } from '../domain/window'
 import { ratesFor, type Rates } from '../reference-rates'
-import { MANUAL, type Card, type Pattern, type Store } from '../store'
+import type { Card, Pattern, Store } from '../store'
 import type { Connection } from '../store-connect'
 import type { MailSummary } from '../store-mail'
 import type { RichBlock, RichText, TableCell } from './api'
@@ -27,7 +27,7 @@ import {
   shortDateIn,
 } from './format'
 import {
-  BY_HAND_NOTE,
+  markNotes,
   breakdownLines,
   inMessages,
   lineOf,
@@ -41,7 +41,15 @@ import {
 } from './purchases'
 import type { Tabled } from './sending'
 import { DEFAULT_CURRENCY } from './shared'
-import { AT_REFERENCE_RATES, CHECK_UOB_APP, HOLDS_NOTHING, PAID, STATUS_DAYS, useCard } from './texts'
+import {
+  AT_REFERENCE_RATES,
+  CHECK_UOB_APP,
+  HOLDS_NOTHING,
+  PAID,
+  scheduledNotSeen,
+  STATUS_DAYS,
+  useCard,
+} from './texts'
 
 /**
  * What a question is answered with when the AI provider has had as many requests as it takes for now. It says when
@@ -293,7 +301,7 @@ export async function spendDetails(
     return [home, await ratesFor(home, [...new Set(foreign)])] as const
   }
   const rates = new Map(await Promise.all(homes.map(ratesOf)))
-  return read.map((each) => spendDetail(each, patterns, rates.get(each.homeCurrency) ?? null, timeZone))
+  return read.map((each) => spendDetail(each, patterns, rates.get(each.homeCurrency) ?? null, now, timeZone))
 }
 
 type ReadWindow = Awaited<ReturnType<typeof readWindow>>
@@ -331,6 +339,7 @@ function spendDetail(
   { card, product, window, sums, latest, homeCurrency }: ReadWindow,
   patterns: Pattern[],
   rates: Rates | null,
+  now: Date,
   timeZone: string,
 ): Tabled {
   const breakdown = product && breakDown(product, sums, rates)
@@ -355,9 +364,13 @@ function spendDetail(
   // What is said around the tables: a heading, and the lines above the tables and below them, a part at a time.
   const heading = `${label(card)}: ${shortDate(window.start)} to ${shortDate(new Date(window.end.getTime() - 1))}`
   const above = count > listed.length ? [`The latest ${listed.length} of ${count} purchases:`] : []
+  const { year, month, day } = dayOf(now, timeZone)
+  const today = startOfDay(year, month, day, timeZone).getTime() / 1000
+  const notSeen = listed.filter(({ scheduled, occurredAt }) => scheduled && occurredAt < today)
   const below = [
     [
-      ...(listed.some((purchase) => purchase.parser === MANUAL) ? [BY_HAND_NOTE] : []),
+      ...markNotes(listed),
+      ...notSeen.map(({ id, date }) => scheduledNotSeen(id, date)),
       ...(toCome.some((minor) => minor > 0) ? [TO_COME_NOTE] : []),
     ],
     [

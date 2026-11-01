@@ -13,6 +13,7 @@ import {
   NO_SIGN_IN,
   paymentScheduled,
   RENAME_ADDED,
+  scheduledCleared,
   tapToAddCard,
 } from '../src/telegram/texts'
 import { refusing, saying } from './ai-helpers'
@@ -142,6 +143,22 @@ async function attemptCount(): Promise<number> {
 }
 
 describe('a new alert', () => {
+  it('names the scheduled entry that it took out, with its amount, and the total counts the charge', async () => {
+    const chat = await connectedChat(JANE)
+    await chat.say('/addcard visa 1234 calendar')
+    await chat.say('/add visa 12.00 2026-10-10 SAMPLE SHOP')
+    const store = storeFor(env.DB, await chat.userId())
+    const [entry] = await store.listTransactions('1234', 0, seconds('2027-01-01T00:00:00+08:00'), 1)
+    clock.now = new Date('2026-10-10T15:00:00+08:00')
+    outside.mailboxes[JANE] = [alert('msg-1', 5)]
+
+    await runCheck(deps)
+
+    const [message] = sent.map(({ text }) => text.split('\n'))
+    expect(message[1]).toContain('SGD 12.40 in 1 purchase')
+    expect(message).toContain(scheduledCleared(entry.id, '10 Oct', 'SGD 12.00'))
+  })
+
   it('is stored as a purchase, and the user is told of it with the running total of its card', async () => {
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
@@ -1240,10 +1257,10 @@ describe('the cost of a run', () => {
     expect(requests).toBe(5 + 1 + 5 + HEADER_CHECKS_PER_RUN + 4 * MESSAGES_PER_RUN)
     expect(requests).toBe(25)
     // The sweep and a look for each of its 5 mailboxes, the sweep of the held purchases, the turn, 5 pages, the page
-    // token, a note of each message turned away, 4 for each purchase (find its card, read the user's marks of
-    // merchants, store it, total the card), and the mark.
-    expect(queries).toBe(1 + 5 + 1 + 1 + 5 + 1 + turnedAway + 4 * MESSAGES_PER_RUN + 1)
-    expect(queries).toBe(28)
+    // token, a note of each message turned away, 5 for each purchase (find its card, read the user's marks of
+    // merchants, store it, clear a scheduled entry, total the card), and the mark.
+    expect(queries).toBe(1 + 5 + 1 + 1 + 5 + 1 + turnedAway + 5 * MESSAGES_PER_RUN + 1)
+    expect(queries).toBe(29)
     expect(Math.max(requests, queries)).toBeLessThan(50)
   })
 })

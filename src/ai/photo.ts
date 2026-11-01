@@ -14,7 +14,7 @@
 
 import { categoriesOf, productOf } from '../catalogue'
 import type { Deps } from '../deps'
-import { CURRENCY, dayStart, ISO_DATE, noonOf } from '../domain/by-hand'
+import { CURRENCY, dayStart, ISO_DATE, noonOfAnyDay } from '../domain/by-hand'
 import { dayOf, startOfDay } from '../domain/window'
 import { Failure } from '../log'
 import { hundredths, MAX_MERCHANT_LENGTH } from '../parsers/shared'
@@ -46,6 +46,8 @@ export interface ReadPurchase {
   /** Three capital letters. */
   currency: string
   merchant: string | null
+  /** 1 for a day still to come, which only `toCome` lets through. Absent otherwise. */
+  scheduled?: number
   /**
    * The purchase is not to be stored before its user is asked: the model could not read the amount or the date with
    * certainty, or the date is longer ago than one is taken on the model's word. See MAX_DAYS_AGO.
@@ -277,7 +279,8 @@ function cutTo(text: string, most: number): string {
  * Checks what a model gave as the purchases to add, and returns what that comes to: the purchases that passed, or
  * that there are none to add. `answer` is what the model wrote, as it was read from JSON, and nothing in it is
  * trusted. `cards` are the user's, and `written` is what the user wrote with the purchases: the caption of a photo,
- * or a message. `timeZone` is the user's, and `now` is the instant that no purchase is to be after.
+ * or a message. `timeZone` is the user's, and `now` is the instant that no purchase is to be after, unless `toCome`
+ * lets one be: the user's own words can tell of a payment still to come, and a photo shows what has happened.
  *
  * The answer is to be of the shape that the model was asked for: an object that holds a list of purchases. This
  * throws a Failure with the reason `bad_reading` for one that is not. Nothing else in an answer makes it throw.
@@ -302,6 +305,7 @@ export function checkPurchases(
   written: string,
   timeZone: string,
   now: Date,
+  toCome = false,
 ): Extract<PhotoReading, { status: 'read' | 'nothing' }> {
   if (!isObject(answer) || !Array.isArray(answer.purchases)) {
     throw new Failure('bad_reading', 'What the model gave is not of the shape that it was asked for')
@@ -310,11 +314,12 @@ export function checkPurchases(
   const given: unknown[] = answer.purchases.slice(0, MAX_PURCHASES_PER_PHOTO)
   if (given.length === 0) return { status: 'nothing' }
 
-  const timeOf = timesOfDays(now, timeZone)
+  const timeOf = timesOfDays(now, timeZone, toCome)
   // Where the earliest day begins that a purchase can be dated without being doubted for it.
   const { year, month, day } = dayOf(now, timeZone)
   const longAgo = startOfDay(year, month, day - MAX_DAYS_AGO, timeZone).getTime() / 1000
-  const purchases = given.flatMap((each) => purchaseIn(each, timeOf, longAgo) ?? [])
+  const at = Math.floor(now.getTime() / 1000)
+  const purchases = given.flatMap((each) => purchaseIn(each, timeOf, longAgo, at) ?? [])
   const card = cards.find(({ nickname }) => nickname === answer.card && names(written, nickname))
   const categories = card
     ? card.categories
@@ -398,8 +403,8 @@ function isObject(given: unknown): given is Record<string, unknown> {
 
 /**
  * A purchase from what the model gave as one, or null when that is nothing /add would take: when its amount is not
- * a positive amount of money, its currency is not a code of three letters, or its date is not a day that there is
- * and that has begun. See `amountIn` and `timesOfDays` for what those are.
+ * a positive amount of money, its currency is not a code of three letters, or its date is not one that `timeOf`
+ * takes. See `amountIn` and `timesOfDays` for what those are.
  *
  * The merchant and the model's doubt fail no purchase. A merchant that is not text is none. And a purchase is one
  * that the model was unsure of unless it said that it was not, in so many words: a purchase that is doubted for
@@ -408,7 +413,12 @@ function isObject(given: unknown): given is Record<string, unknown> {
  * A date that is long ago fails no purchase either, but the purchase is doubted for it, whatever the model said:
  * `longAgo` is the unix seconds before which a purchase is one of those. See MAX_DAYS_AGO.
  */
-function purchaseIn(given: unknown, timeOf: (date: string) => number | null, longAgo: number): ReadPurchase | null {
+function purchaseIn(
+  given: unknown,
+  timeOf: (date: string) => number | null,
+  longAgo: number,
+  at: number,
+): ReadPurchase | null {
   if (!isObject(given)) return null
   const { date, amount, currency, merchant, unsure } = given
   const amountMinor = amountIn(amount)
@@ -421,6 +431,7 @@ function purchaseIn(given: unknown, timeOf: (date: string) => number | null, lon
     currency: code.toUpperCase(),
     merchant: typeof merchant === 'string' ? merchantIn(merchant) : null,
     unsure: unsure !== false || occurredAt < longAgo,
+    ...(occurredAt > at && { scheduled: 1 }),
   }
 }
 
@@ -448,8 +459,8 @@ function merchantIn(text: string): string | null {
 
 /**
  * What gives the unix seconds that a purchase made on a date is stored at, for a date written YYYY-MM-DD, or null
- * for text that is no such date, for a day that no calendar has, and for one that has not begun at `now`: which are
- * the dates that /add refuses. It sets no limit on how long ago a day may be, as /add sets none.
+ * for text that is no such date, for a day that no calendar has, and, unless `toCome`, for one that has not begun at
+ * `now`. It sets no limit on how long ago a day may be, as /add sets none.
  *
  * The time is the one that /add stores, so that a purchase is stored at the same time whichever way it was added:
  * see `noonOf` in ../domain/by-hand.
@@ -457,7 +468,7 @@ function merchantIn(text: string): string | null {
  * A photo's purchases are of a few days, and to find where a day begins takes more computing than the rest of a
  * check does. So each date is worked out once.
  */
-function timesOfDays(now: Date, timeZone: string): (date: string) => number | null {
+function timesOfDays(now: Date, timeZone: string, toCome: boolean): (date: string) => number | null {
   const at = Math.floor(now.getTime() / 1000)
   const found = new Map<string, number | null>()
   return (date) => {
@@ -465,7 +476,7 @@ function timesOfDays(now: Date, timeZone: string): (date: string) => number | nu
     if (time === undefined) {
       const [, year, month, day] = ISO_DATE.exec(date) ?? []
       const start = year === undefined ? null : dayStart(Number(year), Number(month), Number(day), timeZone)
-      time = start === null || start > at ? null : noonOf(start, at)
+      time = start === null || (start > at && !toCome) ? null : noonOfAnyDay(start, at)
       found.set(date, time)
     }
     return time

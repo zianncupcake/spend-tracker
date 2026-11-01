@@ -18,6 +18,8 @@ export interface HeldPurchase {
   merchant: string | null
   /** Whether the model was not sure of its amount or of its date. */
   unsure: boolean
+  /** As a purchase's when it is stored: absent for 0, and for what was held before there was any. */
+  scheduled?: number
 }
 
 /** The purchases of one message that wait for their user's answer. */

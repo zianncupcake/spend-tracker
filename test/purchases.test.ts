@@ -36,6 +36,7 @@ function purchase(overrides: Partial<Transaction> = {}): Transaction {
     occurredAt: 1_800_000_000,
     parser: 'example-bank',
     category: null,
+    scheduled: 0,
     ...overrides,
   }
 }

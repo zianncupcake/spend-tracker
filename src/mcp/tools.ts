@@ -63,7 +63,8 @@ export async function listTransactions(store: Store, args: ListArguments, now: D
   const products = new Map(cards.map((each) => [each.last4, productOf(each.product)]))
   return {
     timeZone,
-    transactions: transactions.map(({ id, occurredAt, cardLast4, amountMinor, currency, merchant, category }) => {
+    transactions: transactions.map((transaction) => {
+      const { id, occurredAt, cardLast4, amountMinor, currency, merchant, category, scheduled } = transaction
       // The category that a purchase is in is what its card's product makes of the one that is stored for it.
       const product = products.get(cardLast4)
       return {
@@ -75,6 +76,7 @@ export async function listTransactions(store: Store, args: ListArguments, now: D
         currency,
         merchant,
         category: product ? categoryOf(product, category) : category,
+        ...(scheduled ? { scheduled: true } : {}),
       }
     }),
   }

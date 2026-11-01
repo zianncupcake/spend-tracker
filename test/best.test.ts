@@ -43,6 +43,15 @@ describe('the cards to pay with at a merchant', () => {
     expect(second).toMatchObject({ card: { nickname: 'ocbc' }, bonus: 'no' })
   })
 
+  it('takes a scheduled purchase off what is left of the cap', async () => {
+    const chat = await chatWith(HSBC)
+
+    await chat.say('/add hsbc 30 2026-10-20 SAMPLE EATERY')
+
+    const [only] = await bestAt(chat)
+    expect(only).toMatchObject({ leftMinor: 100000 - 3000 })
+  })
+
   it.each<[what: string, useUp: (chat: Chat) => Promise<unknown>]>([
     ['purchases', async (chat) => buy(await chat.userId(), { cardLast4: '4321', amountMinor: 100000 })],
     ['a pattern', (chat) => chat.say('/pattern hsbc 1000.00 SAMPLE GYM')],

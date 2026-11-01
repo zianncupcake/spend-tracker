@@ -26,3 +26,8 @@ export function dayStart(year: number, month: number, day: number, timeZone: str
 export function noonOf(start: number, now: number): number {
   return Math.min(start + 12 * 3600, now)
 }
+
+/** The same for a purchase whose day can still be to come, which it is stored at noon of. It is later than `now`. */
+export function noonOfAnyDay(start: number, now: number): number {
+  return start > now ? start + 12 * 3600 : noonOf(start, now)
+}

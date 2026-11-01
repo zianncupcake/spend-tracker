@@ -30,7 +30,7 @@ import { ChatBlockedError, type MessageEntity } from './telegram/api'
 import { carriedNotes, describeTotals, formatMoney, formatShortDate, maskLast4 } from './telegram/format'
 import { addCardEnd, sortEnd } from './telegram/purchases'
 import { label } from './telegram/replies'
-import { alertNotRead, paymentScheduled } from './telegram/texts'
+import { alertNotRead, paymentScheduled, scheduledCleared } from './telegram/texts'
 
 /**
  * How many alerts one run reads: the messages it fetches whole. A run that read three took 14 ms of CPU time, which
@@ -282,7 +282,7 @@ async function readAlert(
   const { from, receivedAt } = message
   const store = storeFor(deps.db, mailbox.ownerId)
   const email = { sourceId: id, from, receivedAt, text: message.text() }
-  const result = await ingestAlert(store, email)
+  const result = await ingestAlert(store, email, mailbox.timezone)
   const isNews = now - receivedAt < NEWS_HOURS * HOUR
   if (result.status === 'unparsed') {
     await mail.markSeen(id, 'unparsed')
@@ -298,7 +298,7 @@ async function readAlert(
     if (isNews) {
       run.stage = 'notify'
       if (result.status === 'stored') {
-        await tellOfPurchase(deps, mailbox, result.transaction, result.card, result.remembered)
+        await tellOfPurchase(deps, mailbox, result.transaction, result.card, result.remembered, result.cleared)
       } else {
         await tellOfPayment(deps, mailbox, result.payment, result.card)
       }
@@ -336,7 +336,8 @@ function isFromBank({ from, authenticatedDomain }: MessageHeaders): boolean {
 
 /**
  * Tells the user of a purchase that has just been stored, and of where it leaves the card it was made with. `card`
- * is that card, when the user has added it. `remembered` is whether the user's mark of the merchant placed it.
+ * is that card, when the user has added it. `remembered` is whether the user's mark of the merchant placed it, and
+ * `cleared` is the scheduled entry that it took out, when there was one.
  */
 async function tellOfPurchase(
   deps: Deps,
@@ -344,6 +345,7 @@ async function tellOfPurchase(
   purchase: Transaction,
   card: Card | undefined,
   remembered: boolean,
+  cleared: Transaction | null,
 ): Promise<void> {
   const { cardLast4, amountMinor, currency, merchant } = purchase
   const store = storeFor(deps.db, mailbox.ownerId)
@@ -367,7 +369,17 @@ async function tellOfPurchase(
   // replaces the last line.
   const shortDate = (date: Date) => formatShortDate(date, mailbox.timezone)
   const notes = carriedNotes([{ card, purchases: [purchase] }], deps.now(), mailbox.timezone, shortDate)
-  const text = [spent, `Running total: ${describeTotals(totals, mailbox.timezone)}`, ...notes].join('\n')
+  const clearedLines = cleared
+    ? [
+        scheduledCleared(
+          cleared.id,
+          shortDate(new Date(cleared.occurredAt * 1000)),
+          formatMoney(cleared.amountMinor, cleared.currency),
+        ),
+      ]
+    : []
+  const running = `Running total: ${describeTotals(totals, mailbox.timezone)}`
+  const text = [spent, running, ...notes, ...clearedLines].join('\n')
   const product = productOf(card.product)
   if (!product) return deps.messenger.send(mailbox.chatId, text, marked)
   // On a card with a product, the message ends with where the purchase is sorted, and has the buttons that move it.

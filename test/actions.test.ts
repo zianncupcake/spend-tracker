@@ -237,6 +237,20 @@ describe('what was spent, when the assistant makes out that it is to be shown', 
 })
 
 describe('purchases that the assistant makes out in a message', () => {
+  it('are stored scheduled when they are so, whether at once or held for a button', async () => {
+    const chat = await chatWithCards()
+    const scheduled = { scheduled: 1 }
+    acting({
+      kind: 'add',
+      reading: read([bought(520, 'SAMPLE SHOP', scheduled), unsure(300, 'SAMPLE CAFE', scheduled)], { card: 'evol' }),
+    })
+
+    const { texts } = await told(chat, MESSAGE)
+    await chat.press(texts[0], 'Add this one')
+
+    expect(await rowsOf(await chat.userId())).toMatchObject([{ scheduled: 1 }, { scheduled: 1 }])
+  })
+
   it('are added as those of a photo are: stored under the id of the message, and told of in a table with their ids', async () => {
     const chat = await chatWithCards()
     const userId = await chat.userId()
