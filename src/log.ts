@@ -42,6 +42,7 @@ export const COMMAND_NAMES = [
   'best',
   'add',
   'remove',
+  'date',
   'sort',
   'patterns',
   'pattern',

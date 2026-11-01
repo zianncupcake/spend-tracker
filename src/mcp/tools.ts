@@ -52,10 +52,11 @@ export async function spendingSummary(store: Store, now: Date, timeZone: string)
 /** The user's purchases over a stretch of time, newest first: those of one card, or of every card. */
 export async function listTransactions(store: Store, args: ListArguments, now: Date, timeZone: string) {
   const { card, from, to, limit = DEFAULT_LIMIT } = args
-  // Without a `to`, up to now: the second that is passing counts too.
-  const end = to === undefined ? Math.floor(now.getTime() / 1000) + 1 : boundary('to', to, timeZone)
-  const start = from === undefined ? end - DEFAULT_DAYS * DAY : boundary('from', from, timeZone)
-  if (start >= end) throw new ToolError('`from` must be earlier than `to`, or than now when no `to` is given.')
+  // Without a `to`, no end: /date can put a purchase after now.
+  const end = to === undefined ? Number.MAX_SAFE_INTEGER : boundary('to', to, timeZone)
+  const back = to === undefined ? Math.floor(now.getTime() / 1000) : end
+  const start = from === undefined ? back - DEFAULT_DAYS * DAY : boundary('from', from, timeZone)
+  if (start >= end) throw new ToolError('`from` must be earlier than `to`.')
 
   const cards = await store.listCards()
   const transactions = await store.listTransactions(last4Of(cards, card), start, end, limit)

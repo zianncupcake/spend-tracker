@@ -535,6 +535,18 @@ export function storeFor(db: D1Database, ownerId: number) {
         .bind(ownerId, id)
         .first<Transaction>()
     },
+
+    /** Moves a purchase to another time, and returns it as it then is. Null as for `removeTransaction`. */
+    async setOccurredAt(id: number, occurredAt: number): Promise<Transaction | null> {
+      return db
+        .prepare(
+          `UPDATE transactions SET occurred_at = ?
+           WHERE owner_id = ? AND id = ? AND removed_at IS NULL
+           RETURNING ${TRANSACTION}`,
+        )
+        .bind(occurredAt, ownerId, id)
+        .first<Transaction>()
+    },
   }
 }
 

@@ -52,6 +52,10 @@ The amount can have a currency before it, as in USD 12.50. The date is written Y
 A day of the card's current window, up to today, can be written D/M or D/M/YY too.
 Any other D/M is read as part of the merchant.`
 
+export const DATE_USAGE = 'Usage: /date <purchase id> <YYYY-MM-DD>'
+
+export const NO_SUCH_DATE = 'There is no such date.'
+
 export const BEST_USAGE = 'Usage: /best <merchant>'
 
 export const SORT_USAGE = 'Usage:\n/sort <nickname>\n/sort <purchase id>'
@@ -93,6 +97,7 @@ export const COMMANDS = `Commands:
 /best <merchant> - which of your cards to pay with there, by its bonus and what is left of its cap
 /add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant
 /remove <purchase id> - take a purchase out
+/date <purchase id> <YYYY-MM-DD> - change the date of a purchase, which can be one still to come
 /products - list the card products whose reward rules are known
 /product <nickname> <product key> - link a card to a product, or to none
 /sort <nickname> - how a card's purchases are sorted into the reward categories of its product

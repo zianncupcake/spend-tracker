@@ -619,7 +619,8 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
     'To do anything else, call run_command with one of these lines: /addcard <nickname> <last4> statement <day> ' +
       '[product key], /addcard <nickname> <last4> calendar [product key], /removecard <nickname>, /renamecard ' +
       '<nickname> <new nickname>, /cycle <nickname> statement <day>|calendar to change when its statement closes, ' +
-      '/product <nickname> <product key>|none, /remove <purchase id>, /pattern ' +
+      '/product <nickname> <product key>|none, /remove <purchase id>, /date <purchase id> <YYYY-MM-DD> to change a ' +
+      "purchase's date, /pattern " +
       '<nickname> <amount a month> <merchant> [except <skipped YYYY-MM-DD> ...], /pattern <nickname> <merchant> ' +
       'none, /remind <nickname> <day of the month>|none for a bill reminder, /timezone <IANA name>, /connect or ' +
       "/disconnect for the user's Gmail, /mcp or /mcp revoke for another " +

@@ -14,7 +14,7 @@ import {
   type Card,
   type Pattern,
 } from '../store'
-import { ADD_CARD_USAGE, ADD_USAGE, CYCLE_USAGE } from './texts'
+import { ADD_CARD_USAGE, ADD_USAGE, CYCLE_USAGE, NO_SUCH_DATE } from './texts'
 
 /** What /add is told of a purchase, after the card that it was made with. */
 export interface Entry {
@@ -207,7 +207,7 @@ function timeNamed(text: string, card: Card, now: Date, timeZone: string): numbe
   const iso = ISO_DATE.exec(text)
   if (iso) {
     const start = dayStart(Number(iso[1]), Number(iso[2]), Number(iso[3]), timeZone)
-    if (start === null) return 'There is no such date.'
+    if (start === null) return NO_SUCH_DATE
     return start > at ? 'That date is still to come.' : noonOf(start, at)
   }
 

@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { storeFor } from '../src/store'
-import { ADD_USAGE, TOO_MANY_BY_HAND } from '../src/telegram/texts'
+import { ADD_USAGE, DATE_USAGE, NO_SUCH_DATE, TOO_MANY_BY_HAND } from '../src/telegram/texts'
 import { clock, NOW, openChat, type Posted } from './connect-helpers'
 import { buy, linesOf, marksOf, seconds } from './helpers'
 
@@ -525,4 +525,68 @@ describe('/remove', () => {
       expect(await openChat().say(message)).toBe('Usage: /remove <purchase id>')
     },
   )
+})
+
+describe('/date', () => {
+  it("moves a purchase to noon of a later day of the window in its user's time zone, and the window still counts it", async () => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    await chat.say('/timezone Asia/Tokyo')
+    const id = await buy(userId, { merchant: 'SAMPLE SHOP' })
+
+    const reply = await ask(chat, `/date ${id} 2026-10-20`)
+
+    expect(await rowsOf(userId)).toMatchObject([{ id, occurred_at: seconds('2026-10-20T12:00:00+09:00') }])
+    const [line, total] = reply.text.split('\n')
+    expect(line).toBe(`ID ${id} · 20 Oct · SGD 12.40 · SAMPLE SHOP`)
+    expect(total).toContain('SGD 12.40 in 1 purchase')
+  })
+
+  it("leaves the current window's total when moved to a day of another month", async () => {
+    const chat = await chatWithCards()
+    const id = await buy(await chat.userId(), { merchant: 'SAMPLE SHOP' })
+
+    const reply = await ask(chat, `/date ${id} 2026-11-20`)
+
+    const [line, total] = reply.text.split('\n')
+    expect(line).toBe(`ID ${id} · 20 Nov · SGD 12.40 · SAMPLE SHOP`)
+    expect(total).not.toContain('12.40')
+  })
+
+  it("changes none of another user's purchases", async () => {
+    const [chat, other] = [await chatWithCards(), await chatWithCards()]
+    const otherId = await other.userId()
+    const theirs = await buy(otherId)
+    const [before] = await rowsOf(otherId)
+
+    expect(await chat.say(`/date ${theirs} 2026-10-20`)).toBe(`You have no purchase with ID ${theirs}.`)
+
+    expect(await rowsOf(otherId)).toEqual([before])
+  })
+
+  it('changes no purchase that was taken out', async () => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    const id = await buy(userId)
+    await chat.ask(`/remove ${id}`)
+    const [before] = await rowsOf(userId)
+
+    expect(await chat.say(`/date ${id} 2026-10-20`)).toBe(`You have no purchase with ID ${id}.`)
+
+    expect(await rowsOf(userId)).toEqual([before])
+  })
+
+  it.each([
+    ['a day that no calendar has', '2026-02-30', NO_SUCH_DATE],
+    ['a date written otherwise', '20/10', DATE_USAGE],
+  ])('refuses %s, and changes nothing', async (_, date, said) => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    const id = await buy(userId)
+    const [before] = await rowsOf(userId)
+
+    expect(await chat.say(`/date ${id} ${date}`)).toBe(said)
+
+    expect(await rowsOf(userId)).toEqual([before])
+  })
 })

@@ -5,6 +5,7 @@ import { productOf } from '../catalogue'
 import { confirmCode, disconnect, startConnect } from '../connect'
 import type { Deps } from '../deps'
 import { bestFor } from '../domain/best'
+import { dayStart, ISO_DATE } from '../domain/by-hand'
 import { nextReminder, reminderIn } from '../domain/reminder'
 import { sortByRules } from '../domain/sorting'
 import { cardTotals } from '../domain/totals'
@@ -44,6 +45,7 @@ import {
   patternsReply,
   productsReply,
   spendDetails,
+  spendLine,
   spendReply,
   statusReply,
 } from './replies'
@@ -56,11 +58,13 @@ import {
   BEST_USAGE,
   COMMANDS,
   CONNECT_HEADS_UP,
+  DATE_USAGE,
   DO,
   NO_CARDS,
   NO_PATTERNS,
   NONE_LINKED,
   NO_SIGN_IN,
+  NO_SUCH_DATE,
   NO_SUCH_PATTERN,
   PATTERN_REMOVED,
   PATTERN_SAVED,
@@ -254,6 +258,24 @@ export async function reply(
       if (!removed) return `You have no purchase with ID ${Number(purchaseId)}.`
       const date = formatShortDate(new Date(removed.occurredAt * 1000), timezone)
       return inMessages([{ text: `Removed from ${maskLast4(removed.cardLast4)}:` }, purchaseLine(removed, date)])
+    }
+
+    case '/date': {
+      const [, purchaseId] = PURCHASE_ID.exec(args[0] ?? '') ?? []
+      const [, year, month, day] = ISO_DATE.exec(args[1] ?? '') ?? []
+      if (args.length !== 2 || purchaseId === undefined || year === undefined) return DATE_USAGE
+      const { id, timezone } = await user()
+      const start = dayStart(Number(year), Number(month), Number(day), timezone)
+      if (start === null) return NO_SUCH_DATE
+      const store = storeFor(db, id)
+      // Not noonOf, which would pull a day still to come back to now.
+      const moved = await store.setOccurredAt(Number(purchaseId), start + 12 * 3600)
+      if (!moved) return `You have no purchase with ID ${Number(purchaseId)}.`
+      const date = formatShortDate(new Date(moved.occurredAt * 1000), timezone)
+      // None when its card is no longer tracked.
+      const onCard = (await store.listCards()).filter((each) => each.last4 === moved.cardLast4)
+      const totals = await cardTotals(store, onCard, now(), timezone)
+      return inMessages([purchaseLine(moved, date), ...totals.map((each) => ({ text: spendLine(each, timezone) }))])
     }
 
     case '/sort': {
