@@ -42,6 +42,21 @@ export const dbsWomansWorld: Product = {
   name: "DBS Woman's World Card",
   homeCurrency: 'SGD',
   termsAsOf: '27 July 2026',
+  termsUrl: 'https://www.dbs.com.sg/iwov-resources/media/pdf/cards/dbs-womans-card-tnc.pdf',
+  eligibility: {
+    blacklist: {
+      clause: 'Clause 11, Table 1',
+      quote: 'payments made with the following Merchant Category Codes',
+      category: 'other',
+      codes: NOT_ONLINE_MCCS,
+    },
+    byPayment: [
+      {
+        clause: 'Clause 11',
+        quote: 'made via the Internet and processed by the respective merchants/acquirers as an online transaction',
+      },
+    ],
+  },
   // Clause 19(c) counts online spend by its transaction date, which clause 14 has as the day that the merchant
   // settles it, and not by the day that it is posted.
   daysCountedInNext: 0,

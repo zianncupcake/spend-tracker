@@ -91,8 +91,9 @@ const TOOLS = [
         properties: {
           merchant: { type: ['string', 'null'] },
           mccs: { type: ['array', 'null'], items: { type: 'integer' } },
+          why: { type: ['boolean', 'null'] },
         },
-        required: ['merchant', 'mccs'],
+        required: ['merchant', 'mccs', 'why'],
       },
     },
   },
@@ -639,6 +640,22 @@ describe("the bot's own lines and table after an answer that card_rules was call
     const rows = cells!.map(() => expect.any(String))
     const none = foundLine('SAMPLE SOFT', { by: 'none' })
     expect(lines).toEqual([expect.any(String), none, ...rows, assumedCodes([5734, 7372])])
+  })
+
+  it('quote the terms of a linked card when the model says the user asked why, and do not otherwise', async () => {
+    const asked = (why: object) => [
+      calling(['call_1', 'card_rules', { merchant: null, mccs: [7832], ...why }]),
+      saying('A made-up answer.'),
+    ]
+    const { whitelist } = hsbcRevolution.eligibility
+    const quotes = (lines: string[]) => lines.some((line) => line.includes(whitelist!.clause))
+    const links = (lines: string[]) => lines.some((line) => line.includes(hsbcRevolution.termsUrl))
+
+    const why = (await replyTo(asked({ why: true }))).lines
+    expect([quotes(why), links(why)]).toEqual([true, true])
+
+    const plainly = (await replyTo(asked({}))).lines
+    expect([quotes(plainly), links(plainly)]).toEqual([false, false])
   })
 
   it("are not there, and the model's answer is, when card_rules was asked about no merchant and no code", async () => {

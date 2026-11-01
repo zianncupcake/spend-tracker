@@ -74,7 +74,9 @@ the card products below. One about what earns a card's bonus, such as "does the 
 5812?", is answered by the bot itself once the model has worked out the merchant and the codes to look at: which of
 the user's linked cards earn their bonus on which codes, what placed a merchant that was asked about (the stores that
 check-mcc.sg and heymax.ai list for it, the bot's own list, the user's mark, or nothing, so that its codes are
-inferred), and a table of each code that was looked at with how each of the user's linked cards counts it. A message
+inferred), and a table of each code that was looked at with how each of the user's linked cards counts it. One that
+asks why, or what the terms say, also gets for each linked card whether the code is on its whitelist or blacklist, with
+the words of the terms, their clause and a link. A message
 can also ask for what the commands do, as in "add 5.20 lunch to evol as other spend" or "set my time zone to Tokyo",
 and for several things at once. The model only works out what was asked for: the bot's own code does it, and the
 reply is the bot's. A message is sent with the user's last three questions of the past 30 minutes and the text of
@@ -114,7 +116,9 @@ provider, and a request that fails: a needless message is better than a missed c
 
 The bot knows the reward rules of four card products. A card that is linked to one has its purchases sorted into
 the product's groups, and `/spend <nickname>` then shows each group with its total, its cap and what is left of
-the cap. A limit below is the spend in a month that earns the bank's cap on the bonus.
+the cap. A limit below is the spend in a month that earns the bank's cap on the bonus. A code on a product's blacklist
+is answered as no bonus, though a purchase is sorted as before. The lists and the quoted words are in each product's
+file in `src/catalogue`, to be changed there when the bank changes its terms.
 
 | Key | Product | Groups, with the limit of each | Counted by | Minimum spend |
 | --- | --- | --- | --- | --- |

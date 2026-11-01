@@ -71,9 +71,11 @@ export const ocbcRewards: Product = {
   bank: 'ocbc',
   name: 'OCBC Rewards Card',
   homeCurrency: 'SGD',
-  // Where the bank publishes the terms that the limits are from:
-  // https://www.ocbc.com/iwov-resources/sg/ocbc/personal/pdf/cards/tnc-ocbc-rewards-card-and-titanium-rewards-creditcard-programme-wef-1nov23.pdf
   termsAsOf: '5 October 2026',
+  termsUrl:
+    'https://www.ocbc.com/iwov-resources/sg/ocbc/personal/pdf/cards/tnc-ocbc-rewards-card-and-titanium-rewards-creditcard-programme-wef-1nov23.pdf',
+  // No blacklist: the general exclusion list is a separate document, which has not been read.
+  eligibility: { whitelist: { clause: 'Clause 2(b)', quote: 'must fall within any of the following MCCs' } },
   // Clause 3(c) of the terms says that "Spend will be computed based on transaction posted date", and a purchase is
   // usually posted a day or two after it is made. So a purchase of the last days of a month is counted in the next
   // one. That it is two days is the owner's choice: how long a posting takes was not measured.
