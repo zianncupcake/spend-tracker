@@ -430,6 +430,7 @@ describe('the address that a file is downloaded from, which holds the token of t
     baseUrl: 'https://ai.example.test/v1',
     model: 'made-up-model',
     visionModel: 'made-up-vision-model',
+    decisionModel: 'made-up-decision-model',
   }
   const deps = { ...depsFor(env), messenger, now: () => new Date('2026-10-09T12:00:00+08:00') }
   const cards = [{ nickname: 'evol', categories: [] }]

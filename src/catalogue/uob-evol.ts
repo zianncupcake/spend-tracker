@@ -1,3 +1,4 @@
+import { TRANSIT_MERCHANT } from '../parsers/uob'
 import type { Product } from './types'
 
 // The UOB EVOL Card, from the FAQ that the bank publishes for it. Everything is counted by the statement month. The
@@ -8,7 +9,7 @@ import type { Product } from './types'
 //
 // Online spend and a phone's tap in a shop share the one limit, so they are one category. It is the one that a
 // purchase is in unless something says otherwise: that it was made in another currency, that it was made at one of
-// the merchants named below, or that its user has marked it as other spend.
+// the merchants named below, that it is the bank's accumulated transit, or that its user has marked it as other spend.
 
 // The merchants that the FAQ names, as it writes them. A purchase is taken to be at one when the text of its merchant
 // holds the name, in any case.
@@ -79,11 +80,12 @@ export const uobEvol: Product = {
       ],
     },
     // All other local spend, as the bank has it, which is where a purchase made with the card itself, tapped or
-    // inserted, belongs. A purchase is put here only when its user marks it.
+    // inserted, belongs. A purchase is put here when its user marks it, and when it is accumulated transit, which is
+    // billed only for taps of the card itself. Anchored, as a merchant with "transit" in its name can be paid by phone.
     {
       name: 'Other Spend',
       earns: '0.3% cashback, at most S$30 a statement month',
-      categories: [{ key: 'other', label: 'Other Spend' }],
+      categories: [{ key: 'other', label: 'Other Spend', automatic: new RegExp(`^${TRANSIT_MERCHANT}$`) }],
     },
     {
       name: 'Overseas Foreign Currency Spend',

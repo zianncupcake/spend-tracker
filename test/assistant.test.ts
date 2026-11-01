@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai/provider'
+import { DEFAULT_BASE_URL, DEFAULT_DECISION_MODEL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai/provider'
 import { hsbcRevolution } from '../src/catalogue/hsbc-revolution'
 import { mccName } from '../src/catalogue/mcc-names'
 import { uobEvol } from '../src/catalogue/uob-evol'
@@ -1283,6 +1283,7 @@ describe('the AI provider that the service is set up with', () => {
     baseUrl: DEFAULT_BASE_URL,
     model: DEFAULT_MODEL,
     visionModel: DEFAULT_VISION_MODEL,
+    decisionModel: DEFAULT_DECISION_MODEL,
   }
 
   it('is at the default address, with the default models, when only a key is set', () => {

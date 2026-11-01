@@ -237,7 +237,7 @@ export function productTerms() {
  */
 function goesBy({ categories }: Group): 'codes' | 'named merchants' | null {
   if (categories.some(({ mccs }) => mccs !== undefined)) return 'codes'
-  return categories.some(({ automatic }) => automatic instanceof RegExp) ? 'named merchants' : null
+  return categories.some(({ named }) => named !== undefined) ? 'named merchants' : null
 }
 
 /** Hundredths as a decimal number in a string, which is how find_purchases gives the model an amount. Null for none. */

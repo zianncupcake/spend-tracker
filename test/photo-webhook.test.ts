@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import * as photo from '../src/ai/photo'
 import type { PhotoReading, ReadPurchase } from '../src/ai/photo'
-import { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai/provider'
+import { DEFAULT_BASE_URL, DEFAULT_DECISION_MODEL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai/provider'
 import worker from '../src/index'
 import { findUser } from '../src/store'
 import * as api from '../src/telegram/api'
@@ -183,6 +183,7 @@ describe('POST /telegram with a photo', () => {
       baseUrl: DEFAULT_BASE_URL,
       model: DEFAULT_MODEL,
       visionModel: DEFAULT_VISION_MODEL,
+      decisionModel: DEFAULT_DECISION_MODEL,
     })
     expect(input).toEqual({
       image: BYTES,

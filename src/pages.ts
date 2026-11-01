@@ -56,7 +56,9 @@ card's current statement cycle or calendar month.</p>
 <p>It learns of a purchase from the transaction alert email that your bank sends you. For that, you connect your
 Gmail through Google sign-in, which gives Spend Tracker read-only access. The access is used to learn the address
 of the mailbox you connected, and after that only to find alerts from a fixed list of bank senders and to take the
-amount, currency, merchant, last four card digits and time from each one. The text of an email is never stored.</p>
+amount, currency, merchant, last four card digits and time from each one. Where the service has an AI provider, the
+start of a bank alert email that could not be read, up to 1,500 characters, is sent to it to decide whether to tell
+you. The text of an email is never stored.</p>
 <p>From the bot you can disconnect your Gmail, or delete everything stored about you, at any time.</p>
 <p><a href="/privacy">Privacy policy</a></p>
 <p>Spend Tracker is run by ${name}. Contact: ${contact}</p>`,
@@ -76,8 +78,11 @@ export function privacyPage(operator: Operator, assistant: boolean, photos: bool
   const reads = assistant && photos
   // What the policy says of the assistant, each where it belongs: what is sent to the AI provider and when, what the
   // provider makes of a message that asks for something to be done, and that provider among those who handle a
-  // user's data. Where the bot reads photos, a photo is sent to the provider too.
-  const unless = reads ? 'unless you ask a question or send a photo' : 'unless you ask a question'
+  // user's data. Where the bot reads photos, a photo is sent to the provider too. So is the start of an alert that
+  // cannot be read, wherever there is a provider.
+  const unless = reads
+    ? 'unless you ask a question, you send a photo, or a bank alert comes that the bot cannot read'
+    : 'unless you ask a question, or a bank alert comes that the bot cannot read'
   const questions = `
 <h2>Questions that you ask the bot</h2>
 <p>A text message that you send the bot is read as a question when it is not a command, and is not the 6-digit
@@ -101,6 +106,14 @@ and with the nicknames and category names of your cards. The provider reads the 
 adds them. The photo is not stored. When the bot cannot tell which card the purchases were made with, or is not
 sure of an amount or a date, it asks you before it adds them.</p>
 `
+  const unreadAlerts = `
+<h2>Bank alerts that the bot cannot read</h2>
+<p>When an alert has just come from one of those banks and the bot cannot read it, the start of its email, up to 1,500
+characters, is sent to the AI provider chosen by ${name} to decide whether to tell you. That text can hold whatever
+the bank wrote in the email. It is not stored, and neither is what the provider answers, which is not shown to you.
+The bot then tells you that the alert could not be read, unless the provider's answer is that the alert tells of no
+charge to your card.</p>
+`
   const exchanges = `
 <li>Your last few questions to the bot and its answers to them, for 30 minutes, so that the assistant can follow a
 conversation. They are then deleted.</li>`
@@ -113,16 +126,18 @@ at the most, and are then deleted.</li>`
     ? `
 <li>An AI provider chosen by ${name} answers the questions that you ask the bot, and reads the photos that you send
 it. It is sent each question and the card and purchase details needed to answer it, and each photo with its
-caption, each of them with your time zone and with the nicknames and category names of your cards, and nothing
-unless you ask a question or send a photo.</li>`
+caption, each of them with your time zone and with the nicknames and category names of your cards. It is also sent
+the start of a bank alert email that could not be read, up to 1,500 characters, to decide whether to tell you, which
+is not stored. It is sent nothing ${unless}.</li>`
     : `
 <li>An AI provider chosen by ${name} answers the questions that you ask the bot. It is sent each question and the
 card and purchase details needed to answer it, with your time zone and with the nicknames and category names of your
-cards, and nothing unless you ask a question.</li>`
+cards. It is also sent the start of a bank alert email that could not be read, up to 1,500 characters, to decide
+whether to tell you, which is not stored. It is sent nothing ${unless}.</li>`
   return page(
     'Privacy policy - Spend Tracker',
     `<h1>Privacy policy</h1>
-<p>Last updated: 15 October 2026</p>
+<p>Last updated: 1 November 2026</p>
 <p>Spend Tracker is a Telegram bot that keeps a running total of what you spend on each credit card. It is run
 by ${name}. For any question about this policy or about your data, contact: ${contact}</p>
 
@@ -130,7 +145,7 @@ by ${name}. For any question about this policy or about your data, contact: ${co
 <p>When you connect your Gmail, Spend Tracker gets read-only access to it through Google sign-in. That access is
 used to learn the address of the mailbox you connected, and after that only to find transaction alert emails from
 a fixed list of bank senders and to take from each alert the amount, the currency, the merchant, the last four
-digits of the card and the time.</p>
+digits of the card and the time.${assistant ? ' What the AI provider is sent of an alert that cannot be read is set out below.' : ''}</p>
 
 <h2>What is stored</h2>
 <ul>
@@ -169,7 +184,7 @@ few days.</p>
 comes from you, which is a page that you open in a browser, such as the sign-in link, or a request from an AI
 assistant that you connect, that record holds the address that was asked for, your IP address, the rough location
 and the network that Cloudflare works out from it, and what your browser or assistant sends about itself.</p>
-${assistant ? questions : ''}${reads ? reading : ''}
+${assistant ? questions : ''}${reads ? reading : ''}${assistant ? unreadAlerts : ''}
 <h2>Who else handles your data</h2>
 <ul>
 <li>Cloudflare hosts the service and its database.</li>

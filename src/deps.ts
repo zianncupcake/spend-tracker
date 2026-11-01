@@ -1,4 +1,10 @@
-import { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_VISION_MODEL, type AiProvider } from './ai/provider'
+import {
+  DEFAULT_BASE_URL,
+  DEFAULT_DECISION_MODEL,
+  DEFAULT_MODEL,
+  DEFAULT_VISION_MODEL,
+  type AiProvider,
+} from './ai/provider'
 import type { GoogleClient } from './google/oauth'
 import { telegramMessenger, type Messenger } from './telegram/api'
 
@@ -50,6 +56,8 @@ export function depsFor(env: Env): Deps {
           // The default is a model of the default provider's, and its name means nothing to another one. So a
           // service that names its own provider reads photos only when it names the model for that too.
           visionModel: env.AI_VISION_MODEL || (env.AI_BASE_URL ? undefined : DEFAULT_VISION_MODEL),
+          // Another provider may not know the settings of this request either. It then fails open: see ai/alert-check.
+          decisionModel: env.AI_BASE_URL ? env.AI_MODEL || DEFAULT_MODEL : DEFAULT_DECISION_MODEL,
         }
       : undefined,
   }
