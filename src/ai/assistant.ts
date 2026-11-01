@@ -151,7 +151,7 @@ const MORE_TO_COME = {
  *   - A listing is of MAX_LISTED purchases at the most.
  *
  * The arguments of card_rules may be null for the same reason, and what is wrong with a call of it is found by
- * `rulesArguments`. All are required, as a model that may leave one out was seen to leave out the codes, or the
+ * `rulesArguments`. Both are required, as a model that may leave one out was seen to leave out the codes, or the
  * merchant. It gives what `rulesFor` or `rulesForCodes` in ../catalogue gives, with the stores that ../mcc-lookup
  * reports for a merchant. That says outright whether a purchase earns the bonus: a model takes a group with no cap
  * for one whose bonus has no limit. With neither it gives what `productTerms` gives there.
@@ -203,21 +203,14 @@ const TOOLS: Tool[] = [
         'product, the codes in `bonus`, `noBonus` and `dependsOnHowPaid`, each with its name and group, which a call ' +
         'with both gives as `codes`. `goesBy` of a group in `bonusGroups` is codes, or named merchants when only the ' +
         'merchants that the terms name count, which the group lists in `merchants`. With merchant null and mccs ' +
-        "empty: each product's groups, rates, caps, cashback cap and minimum spend. With `why` true, the bot adds " +
-        'to its answer, for each card, what the terms say of each code, with their words and a link.',
+        "empty: each product's groups, rates, caps, cashback cap and minimum spend.",
       parameters: {
         type: 'object',
         properties: {
           merchant: { type: ['string', 'null'], description: 'The merchant that the user named, or null.' },
           mccs: { type: ['array', 'null'], items: { type: 'integer' }, description: 'Empty when not needed.' },
-          why: {
-            type: ['boolean', 'null'],
-            description:
-              'True when the user asks why a card does or does not earn on a code or merchant, asks whether a code ' +
-              'is on a whitelist or blacklist, or asks what the terms say.',
-          },
         },
-        required: ['merchant', 'mccs', 'why'],
+        required: ['merchant', 'mccs'],
       },
     },
   },
@@ -364,14 +357,12 @@ export type Answer =
  * only the best card and none of the sources: each merchant that it was asked about, with the stores that the lookup
  * reports, and a row for each code that it looked at, in that order, with how each of `cards` counts it. `cards` are
  * the nicknames of the user's cards that are linked to a product, and `products` are those products, in that order.
- * `why` is whether the user asked what the terms say.
  */
 export interface Checked {
   merchants: { merchant: string; found: Found }[]
   cards: string[]
   products: Product[]
   rows: { mcc: number; name?: string; on: { bonus: Bonus; group?: string; why: Why }[] }[]
-  why: boolean
 }
 
 /**
@@ -641,10 +632,9 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
     `The product keys, for /product and /addcard: ${productKeys}.`,
     'To find the id of a purchase that the user describes, call find_purchases first.',
     "To answer what earns a card's bonus, by merchant or category code (MCC), or its rates and caps, call card_rules " +
-      'and fill all of its arguments every time: merchant, the merchant that the user named or null, mccs, the ' +
+      'and fill both of its arguments every time: merchant, the merchant that the user named or null, and mccs, the ' +
       `codes that the user gave or that such a business or kind of spending usually has, up to ${MAX_CODES}, or an ` +
-      'empty list for rates and caps alone, and why, true when the user asks why a card does or does not earn on a ' +
-      'code or merchant, asks whether a code is on a whitelist or blacklist, or asks what the terms say, or else null.',
+      'empty list for rates and caps alone.',
     "A bonus group whose goesBy is named merchants counts only the merchants in its merchants list, which the card's " +
       'terms name: when asked which merchants count, list them, and for any other merchant say that it is not one of ' +
       'them.',
@@ -698,7 +688,6 @@ function toolsFor(deps: Deps, user: User, store: Store, asked: Asked, taken: Tak
   const merchants: Checked['merchants'] = []
   // Each code that card_rules looked at, with the merchant that it was looked at for, when there was one.
   const codes = new Map<number, string | undefined>()
-  let why = false
 
   async function run({ name, arguments: written }: ToolCall['function']): Promise<string> {
     if (++calls > MAX_TOOL_CALLS) throw new ToolError('Too many tools have been called. Answer from what you have.')
@@ -718,7 +707,6 @@ function toolsFor(deps: Deps, user: User, store: Store, asked: Asked, taken: Tak
    */
   async function cardRules(written: string) {
     const rules = rulesArguments(written)
-    why ||= rules.why
     if (rules.merchant === undefined) {
       return rules.mccs === undefined ? productTerms() : codesRules(rules.mccs, undefined)
     }
@@ -796,7 +784,7 @@ function toolsFor(deps: Deps, user: User, store: Store, asked: Asked, taken: Tak
         }),
       }))
       const cards = asked.linked.map(({ nickname }) => nickname)
-      return { merchants, cards, products: asked.linked.map(({ product }) => product), rows, why }
+      return { merchants, cards, products: asked.linked.map(({ product }) => product), rows }
     },
   }
 }
@@ -956,8 +944,7 @@ function listArguments(written: string): ListArguments & { limit: number } {
 /**
  * What card_rules is asked about, from the JSON that the model wrote: codes, a merchant's name, or both. Neither
  * asks what the products' terms are. Null is taken for an argument that is left out, as `listArguments` takes it, and
- * so is an empty list of codes. Anything else that does not fit is a ToolError, but for `why`: anything but true is
- * no. An argument that the tool has not got is passed over: what the tool gives does not go by it.
+ * so is an empty list of codes. Anything else that does not fit is a ToolError. An argument that the tool has not got is passed over: what the tool gives does not go by it.
  */
 function rulesArguments(written: string): RulesAsked {
   const given = argumentsIn(written)
@@ -969,13 +956,12 @@ function rulesArguments(written: string): RulesAsked {
     throw new ToolError(`\`mccs\` must be a list of up to ${MAX_CODES} whole numbers from 0 to 9999.`)
   }
   if (merchant !== undefined && typeof merchant !== 'string') throw new ToolError('`merchant` must be a string.')
-  return { mccs: codes ? mccs : undefined, merchant, why: given.why === true }
+  return { mccs: codes ? mccs : undefined, merchant }
 }
 
 interface RulesAsked {
   mccs?: number[]
   merchant?: string
-  why: boolean
 }
 
 /**
