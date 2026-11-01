@@ -44,7 +44,7 @@ export interface Product {
   sortingNote?: string
 }
 
-/** What the terms say makes a purchase eligible for the bonus or not, as the bot quotes them when asked why. */
+/** What the terms say makes a purchase eligible for the bonus or not, as the bot quotes them with its table of codes. */
 export interface Eligibility {
   /** The product's bonus goes by the array `mccs` of the category in its bonus group, as a whitelist. */
   whitelist?: Quoted
