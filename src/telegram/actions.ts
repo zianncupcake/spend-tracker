@@ -37,6 +37,7 @@ import {
   REST_NOT_DONE,
   TOOK_TOO_LONG,
   verdictLine,
+  whyParagraphs,
   WORKING,
 } from './texts'
 
@@ -639,16 +640,18 @@ async function keepExchange(
  * a model was seen to contradict what it was given: see `verdictLine`. Then come the bot's own lines of what
  * card_rules looked at: a line for each merchant, and a table with a row for each code and a column for each card
  * that is linked to a product. As text, a row of the table is a line. Then comes the line of the codes that were
- * assumed.
+ * assumed. When the user asked why, a paragraph for each card of what its terms say comes before the table: as text
+ * it comes last, so that the limit on a message of text cuts it and not the table or the codes that were assumed.
  */
 function answered({ text, assumed, checked }: Extract<Answer, { status: 'answered' }>): Tabled {
   const lines = (checked?.merchants ?? []).map(({ merchant, found }) => foundLine(merchant, found))
   const table = checked && codeTable(checked)
   const said = checked && table ? verdictLine(checked) : text
   const end = assumed.length > 0 ? [assumedCodes(assumed)] : []
+  const why = checked?.why && table ? whyParagraphs(checked) : []
   const paragraphs = (texts: string[]) => texts.map((line): RichBlock => ({ type: 'paragraph', text: line }))
-  const blocks = [...paragraphs([...cutToFit(said).split('\n'), ...lines]), ...(table ? [table.block] : [])]
-  const whole = cutToFit([said, ...lines, ...(table ? table.asLines : []), ...end].join('\n'))
+  const blocks = [...paragraphs([...cutToFit(said).split('\n'), ...lines, ...why]), ...(table ? [table.block] : [])]
+  const whole = cutToFit([said, ...lines, ...(table ? table.asLines : []), ...end, ...why].join('\n'))
   return {
     rich: { blocks: [...blocks, ...paragraphs(end)], skip_entity_detection: true },
     asText: () => [{ text: whole, entities: [{ type: 'code', offset: 0, length: whole.length }] }],

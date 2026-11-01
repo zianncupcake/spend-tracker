@@ -11,6 +11,9 @@ export interface Product {
   homeCurrency: string
   /** The date that the terms which the rules were taken from are as of. */
   termsAsOf: string
+  /** Where the bank publishes the terms that `eligibility` quotes. */
+  termsUrl: string
+  eligibility: Eligibility
   /**
    * What has to be spent in a month, as the terms count one, before the groups with a limit earn their rate. Missing
    * when the terms set no minimum.
@@ -39,6 +42,22 @@ export interface Product {
    * for what the names of the categories do not say.
    */
   sortingNote?: string
+}
+
+/** What the terms say makes a purchase eligible for the bonus or not, as the bot quotes them when asked why. */
+export interface Eligibility {
+  /** The product's bonus goes by the array `mccs` of the category in its bonus group, as a whitelist. */
+  whitelist?: Quoted
+  /** Codes that the terms take out, which are placed in `category`. */
+  blacklist?: Quoted & { codes: Mcc[]; category: string }
+  /** The bonus has no whitelist of codes and goes by how a purchase is paid. */
+  byPayment?: Quoted[]
+}
+
+/** Words of the terms, exact and short, and where they stand. */
+export interface Quoted {
+  clause: string
+  quote: string
 }
 
 /** Categories that earn at one rate and, when the rate is paid on no more than so much spend, share that limit. */

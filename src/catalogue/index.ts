@@ -3,7 +3,7 @@ import { hsbcRevolution } from './hsbc-revolution'
 import { mccName } from './mcc-names'
 import { codeOf } from './merchants'
 import { ocbcRewards } from './ocbc-rewards'
-import type { Category, Group, Mcc, Product } from './types'
+import type { Category, Group, Mcc, Product, Quoted } from './types'
 import { uobEvol } from './uob-evol'
 
 /** The card products whose reward rules are known. A user links a card to one by its key. */
@@ -63,9 +63,12 @@ export function ruledByName(product: Product, merchant: string): string | undefi
  */
 export function ruledByCode(product: Product, mcc: number): string | undefined {
   const categories = categoriesOf(product)
-  const holds = (listed: Mcc) => (typeof listed === 'number' ? listed === mcc : listed[0] <= mcc && mcc <= listed[1])
-  const listing = categories.find(({ mccs }) => Array.isArray(mccs) && mccs.some(holds))
+  const listing = categories.find(({ mccs }) => Array.isArray(mccs) && holds(mccs, mcc))
   return (listing ?? categories.find(({ mccs }) => mccs === 'unlisted'))?.key
+}
+
+function holds(codes: Mcc[], mcc: number): boolean {
+  return codes.some((listed) => (typeof listed === 'number' ? listed === mcc : listed[0] <= mcc && mcc <= listed[1]))
 }
 
 /**
@@ -169,13 +172,42 @@ export function rulesForCode(mcc: number, merchant: string | undefined) {
 
 /**
  * Where the product places a purchase of the code, at the merchant when one is named: by its rules alone, with a
- * name that the product lists before the code, as in `startingCategory`.
+ * name that the product lists before the code, as in `startingCategory`. A code that the terms take out is placed
+ * here and not in `ruledByCode`, as how real purchases are sorted does not go by it.
  */
 export function codePlaced(product: Product, mcc: number, merchant: string | undefined): Placed | undefined {
   const byName = merchant === undefined ? undefined : ruledByName(product, merchant)
   if (byName !== undefined) return { category: byName, by: 'name' }
+  const { blacklist } = product.eligibility
+  if (blacklist && holds(blacklist.codes, mcc)) return { category: blacklist.category, by: 'code' }
   const byCode = ruledByCode(product, mcc)
   return byCode === undefined ? undefined : { category: byCode, by: 'code' }
+}
+
+/** What the terms of a product make of a code: see `whyOf`. */
+export type Why =
+  | { status: 'by_name' }
+  | { status: 'blacklisted' | 'whitelisted'; quoted: Quoted }
+  | { status: 'not_whitelisted'; quoted: Quoted; hasBlacklist: boolean }
+  | { status: 'by_payment'; quoted: Quoted[]; hasBlacklist: boolean }
+
+/** Why the product counts a purchase of the code as it does, in the order that `codePlaced` goes by. */
+export function whyOf(product: Product, mcc: number, merchant: string | undefined): Why {
+  if (merchant !== undefined && ruledByName(product, merchant) !== undefined) return { status: 'by_name' }
+  const { whitelist, blacklist, byPayment } = product.eligibility
+  if (blacklist && holds(blacklist.codes, mcc)) return { status: 'blacklisted', quoted: blacklist }
+  const hasBlacklist = blacklist !== undefined
+  if (whitelist === undefined) return { status: 'by_payment', quoted: byPayment ?? [], hasBlacklist }
+  return holds(whitelistOf(product), mcc)
+    ? { status: 'whitelisted', quoted: whitelist }
+    : { status: 'not_whitelisted', quoted: whitelist, hasBlacklist }
+}
+
+function whitelistOf(product: Product): Mcc[] {
+  return product.groups
+    .filter(({ limitMinor }) => limitMinor !== undefined)
+    .flatMap(({ categories }) => categories)
+    .flatMap(({ mccs }) => (Array.isArray(mccs) ? mccs : []))
 }
 
 /**

@@ -36,6 +36,13 @@ const SELECTED_MERCHANTS = [
   'Disney plus',
 ]
 
+// The codes of item (j) of the terms' definition of Transactions, in its order.
+const NOT_TRANSACTIONS_MCCS = [
+  4829, 4900, 5199, 5960, 5965, 5993, 6012, 6050, 6051, 6211, 6300, 6513, 6529, 6530, 6534, 6540, 7349, 7511, 7523,
+  7995, 8062, 8211, 8220, 8241, 8244, 8249, 8299, 8398, 8651, 8661, 8699, 8999, 9211, 9222, 9223, 9311, 9399, 9402,
+  9405,
+]
+
 export const uobEvol: Product = {
   key: 'uob-evol',
   bank: 'uob',
@@ -44,6 +51,19 @@ export const uobEvol: Product = {
   // Where the bank publishes the terms that the limits and rates are from:
   // https://www.uob.com.sg/web-resources/personal/pdf/personal/cards/credit-cards/rebates-cards/evol/uob-evol-faq.pdf
   termsAsOf: '15 October 2026',
+  termsUrl: 'https://www.uob.com.sg/evoltncs',
+  eligibility: {
+    blacklist: {
+      clause: 'Definition of Transactions, item (j)',
+      quote: 'any transaction made with the following Merchant Category Codes (MCC)',
+      category: 'other',
+      codes: NOT_TRANSACTIONS_MCCS,
+    },
+    byPayment: [
+      { clause: 'Clause 17', quote: 'Transactions made via the internet based on system indicators' },
+      { clause: 'Clause 18', quote: 'in-store contactless Transactions made via the following mobile wallets' },
+    ],
+  },
   minimumSpendMinor: 80000,
   earnsBelowMinimum: '0.3% cashback on local spend. Overseas Foreign Currency Spend still earns its rate.',
   cashbackCapMinor: 8000,

@@ -66,14 +66,30 @@ const ELIGIBLE_MCCS: Mcc[] = [
   4121, 7997,
 ]
 
+// The codes of clause 4.2, in its order.
+const NO_POINTS_MCCS = [
+  4829, 4900, 5199, 5960, 6010, 6011, 6012, 6050, 6051, 6211, 6300, 6513, 6529, 6530, 6532, 6533, 6534, 6536, 6537,
+  6538, 6540, 6555, 7299, 7399, 7349, 7511, 7523, 7801, 7995, 8062, 8211, 8220, 8241, 8244, 8249, 8299, 8398, 8651,
+  8661, 8999, 9211, 9222, 9223, 9311, 9399, 9402, 9405, 9754,
+]
+
 export const hsbcRevolution: Product = {
   key: 'hsbc-revolution',
   bank: 'hsbc',
   name: 'HSBC Revolution Credit Card',
   homeCurrency: 'SGD',
-  // Where the bank publishes the terms that the limits are from:
-  // https://www.hsbc.com.sg/content/dam/hsbc/sg/documents/credit-cards/revolution/offers/revolution-credit-card-reward-points-terms-and-conditions.pdf
   termsAsOf: '1 April 2026',
+  termsUrl:
+    'https://www.hsbc.com.sg/content/dam/hsbc/sg/documents/credit-cards/revolution/offers/revolution-credit-card-reward-points-terms-and-conditions.pdf',
+  eligibility: {
+    whitelist: { clause: 'Clause 7', quote: 'that fall within any one of the following MCCs' },
+    blacklist: {
+      clause: 'Clause 4.2',
+      quote: 'transactions made at merchants with the following MCCs will not earn Reward Points',
+      category: 'other',
+      codes: NO_POINTS_MCCS,
+    },
+  },
   // Clause 7.2 of the terms counts "the total amount of Eligible Transactions posted into HSBC's credit card system
   // within each qualifying calendar month", and a purchase is usually posted a day or two after it is made. So a
   // purchase of the last days of a month is counted in the next one. That it is two days is the owner's choice: how

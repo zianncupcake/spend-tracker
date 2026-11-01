@@ -2,7 +2,8 @@
 // texts are made from. What a model is told is not here: see toldOf in ./actions.
 
 import type { Checked, Found, Reported } from '../ai/assistant'
-import type { Bonus } from '../catalogue'
+import type { Bonus, Why } from '../catalogue'
+import type { Quoted } from '../catalogue/types'
 import { ATTEMPT_MINUTES } from '../connect'
 import { REMINDER_HOUR } from '../domain/reminder'
 import { isDatabaseError } from '../log'
@@ -286,6 +287,50 @@ export function verdictLine({ cards, rows }: Checked): string {
     .filter(([, listed]) => listed.length > 0)
     .map(([said, listed]) => `${said}: ${ands.format(listed)}.`)
     .join(' ')
+}
+
+/**
+ * What the terms of each card make of each code that card_rules looked at, a paragraph to a card, with the codes that
+ * they say the same of together. The words are the terms', from the catalogue: no model has written them.
+ */
+export function whyParagraphs({ cards, products, rows }: Checked): string[] {
+  return cards.map((card, at) => {
+    const { name, termsUrl } = products[at]
+    const same = [...Map.groupBy(rows, ({ on }) => on[at].why.status).values()]
+    const said = same.map((held) =>
+      whySaid(
+        held[0].on[at].why,
+        held.map(({ mcc }) => String(mcc).padStart(4, '0')),
+      ),
+    )
+    return `${card} (${name}): ${said.join(' ')} ${termsUrl}`
+  })
+}
+
+function whySaid(why: Why, codes: string[]): string {
+  const one = codes.length === 1
+  const subject = `${new Intl.ListFormat('en').format(codes)} ${one ? 'is' : 'are'}`
+  switch (why.status) {
+    case 'by_name':
+      return `${subject} placed by the merchant's name, not by its code.`
+    case 'blacklisted':
+      return `${subject} on the blacklist. ${quotes([why.quoted])}`
+    case 'whitelisted':
+      return `${subject} on the whitelist. ${quotes([why.quoted])}`
+    case 'not_whitelisted': {
+      const neither = `${subject} not on the whitelist or the blacklist, so ${one ? 'it earns' : 'they earn'} no bonus.`
+      return `${why.hasBlacklist ? neither : `${subject} not on the whitelist.`} ${quotes([why.quoted])}`
+    }
+    case 'by_payment':
+      return (
+        `${subject} ${why.hasBlacklist ? 'not on the blacklist' : 'on no list'}, so the bonus goes by how ` +
+        `${one ? 'it is' : 'they are'} paid. ${quotes(why.quoted)}`
+      )
+  }
+}
+
+function quotes(quoted: Quoted[]): string {
+  return quoted.map(({ clause, quote }) => `${clause}: "${quote}".`).join(' ')
 }
 
 /** A merchant category code with its published name, when it has one: "5734 Computer Software Stores". */

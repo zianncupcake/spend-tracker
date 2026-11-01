@@ -10,6 +10,7 @@ import {
   rulesForCode,
   rulesForCodes,
   startingCategory,
+  whyOf,
 } from '../src/catalogue'
 import { dbsWomansWorld } from '../src/catalogue/dbs-womans-world'
 import { hsbcRevolution } from '../src/catalogue/hsbc-revolution'
@@ -301,6 +302,25 @@ describe('where the products count a purchase of a code that is given, at a merc
   })
 })
 
+describe('what the terms of a product make of a code', () => {
+  it.each([
+    ['a name it lists', uobEvol, 4899, 'Netflix', 'by_name'],
+    ['a code it takes out', hsbcRevolution, 6300, undefined, 'blacklisted'],
+    ['a code on its whitelist', hsbcRevolution, 5812, undefined, 'whitelisted'],
+    ['a code off its whitelist', ocbcRewards, 7832, undefined, 'not_whitelisted'],
+    ['a code on a product that goes by how it is paid', dbsWomansWorld, 7832, undefined, 'by_payment'],
+  ])('knows %s', (_, product, mcc, merchant, status) => {
+    expect(whyOf(product, mcc, merchant).status).toBe(status)
+  })
+
+  it('has a code that EVOL takes out earn no bonus, and leaves what sorts a purchase by code alone', () => {
+    const at = products.indexOf(uobEvol)
+    expect(rulesForCode(6300, undefined).products[at].bonus).toBe('no')
+    // What `startingCategory` goes by: the bot's own list holds no merchant of such a code to show it with.
+    expect(ruledByCode(uobEvol, 6300)).toBeUndefined()
+  })
+})
+
 describe('the name of a merchant category code', () => {
   it.each([
     [5734, 'Computer Software Stores'],
@@ -357,6 +377,8 @@ describe('a product with other rules', () => {
     name: 'Made-up Card',
     homeCurrency: 'USD',
     termsAsOf: '1 January 2026',
+    termsUrl: 'https://example.test/terms',
+    eligibility: {},
     minimumSpendMinor: 50000,
     groups: [
       { name: 'Dining', limitMinor: 10000, categories: [{ key: 'dining', label: 'dining', automatic: /\bcafe\b/i }] },
