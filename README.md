@@ -41,6 +41,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/best <merchant>` | Says which of your cards to pay with at a merchant: by whether it earns the card's bonus there and what is left of the cap, not by earn rates, which the bot does not know. |
 | `/add <nickname> <amount> <merchant>` | Adds a purchase by hand. Its date can go before the merchant. |
 | `/remove <purchase id>` | Takes a purchase out. |
+| `/date <purchase id> <YYYY-MM-DD>` | Changes the date of a purchase, to any day, past or still to come. It is then counted by that day. |
 | `/products` | Lists the card products whose reward rules are known. |
 | `/product <nickname> <product key>` | Links a card to a product. With `none` for the key, it links the card to none. |
 | `/sort <nickname>` | Says how a card's purchases are sorted into the reward categories of its product. |
@@ -61,7 +62,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 `/start` sends a welcome and this list, and a command that the bot does not know is answered with the list. A
 nickname is 1 to 20 letters, digits, `_` or `-`. `/addcard` takes a product key as a last word, which links the
 card as `/product` does. The amount of `/add` can have a currency before it, as in `USD 12.50`, and its date is
-written `YYYY-MM-DD`. `/remove` and `/sort` take the id of a purchase, which `/spend <nickname>` shows. The
+written `YYYY-MM-DD`. `/remove`, `/date` and `/sort` take the id of a purchase, which `/spend <nickname>` shows. The
 merchant of `/pattern` is 40 plain characters at most, 3 of them letters or digits at the least, and 12 days can
 follow `except`. The bot answers only in a user's own private chat with it.
 
@@ -88,7 +89,7 @@ card, disconnecting the Gmail, making or removing the token of `/mcp`, starting 
 a pattern or a reminder, as one that is saved takes the place of the one that there is, and linking a card to a
 product, as that forgets what was marked by hand under another. So does a change that the model asks for after it
 has looked purchases up, or after an earlier reply that it was sent showed purchases or anything else stored, as a
-merchant's name is text that somebody else wrote. `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
+merchant's name is text that somebody else wrote, though not `/date`, which is done at once and shows what it moved. `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
 
 ### Photos
 
@@ -304,8 +305,8 @@ The server has two tools, and both only read:
 - `list_transactions`: purchases, newest first, each with its id, its time, its card, its amount, its merchant and
   the reward category that it is in. It takes a card's nickname (`card`), where to start and end (`from` and `to`:
   a date, which is a day in the user's time zone, or an instant) and how many to return (`limit`: 50 unless told,
-  and 200 at most). Without `from` and `to` it covers the last 30 days. A merchant's name is text taken from an
-  email: the tool's description tells the assistant to treat it as data, and never as instructions.
+  and 200 at most). Without `from` and `to` it covers the last 30 days and any purchase dated later than now. A
+  merchant's name is text taken from an email: the tool's description tells the assistant to treat it as data, and never as instructions.
 
 ## Privacy
 

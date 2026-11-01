@@ -238,7 +238,14 @@ describe('list_transactions', () => {
     expect(await merchants(userId, { from: '2026-10-08T20:15+08:00' })).toEqual(['AN HOUR AGO', 'YESTERDAY EVENING'])
   })
 
-  it('goes up to now when given no `to`, and back 30 days from `to` when given no `from`', async () => {
+  it('has no end when given no `to`, so a purchase dated after now is listed', async () => {
+    const userId = await shopper()
+    await record(userId, [['2026-10-20T10:00:00+08:00', 100, 'SGD', '1234', 'SAMPLE SHOP']])
+
+    expect((await merchants(userId))[0]).toBe('SAMPLE SHOP')
+  })
+
+  it('goes back 30 days from `to` when given no `from`', async () => {
     const userId = await shopper()
 
     expect(await merchants(userId, { from: '2026-09-01' })).toHaveLength(PURCHASES.length)
@@ -266,12 +273,10 @@ describe('list_transactions', () => {
     expect(await call(userId, 'list_transactions', { to: value })).toEqual(refusal(`\`to\` ${BAD_DATE}`))
   })
 
-  it.each([
-    ['the same instant as the `to`', { from: '2026-10-08T00:00:00Z', to: '2026-10-08T00:00:00Z' }],
-    ['later than now, with no `to`', { from: '2026-10-10' }],
-  ])('refuses a `from` that is %s', async (_, range) => {
+  it('refuses a `from` that is the same instant as the `to`', async () => {
+    const range = { from: '2026-10-08T00:00:00Z', to: '2026-10-08T00:00:00Z' }
     expect(await call(await shopper(), 'list_transactions', range)).toEqual(
-      refusal('`from` must be earlier than `to`, or than now when no `to` is given.'),
+      refusal('`from` must be earlier than `to`.'),
     )
   })
 

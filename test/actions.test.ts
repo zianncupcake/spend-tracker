@@ -371,6 +371,17 @@ describe('a command that the assistant gives to be run', () => {
     expect(texts.map((message) => message.text)).toEqual([await chat.say('/cycle evol statement 1')])
   })
 
+  it('is run at once when it is /date, which is undone in a step, though a tool read for the model first', async () => {
+    const chat = await chatWithCard()
+    const line = `/date ${await buy(await chat.userId(), { cardLast4: '5678' })} 2026-10-20`
+    actingWith({ afterReading: true }, command(line))
+
+    const { texts } = await told(chat)
+
+    expect(texts.map((message) => message.text)).toEqual([await chat.say(line)])
+    expect(texts[0].text).toContain('20 Oct')
+  })
+
   it('is answered with the table that the command replies with, when it is one that shows things in a table', async () => {
     const chat = await chatWithCards()
     const userId = await chat.userId()

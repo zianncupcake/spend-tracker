@@ -60,13 +60,15 @@ export const LIST_SCHEMA = {
       type: 'string',
       description:
         "Where the listing starts, in ISO 8601: a date such as 2026-10-01, which is that day in the user's time " +
-        `zone, or an instant such as 2026-10-01T09:30:00+08:00. Without it, ${DEFAULT_DAYS} days before \`to\`.`,
+        `zone, or an instant such as 2026-10-01T09:30:00+08:00. Without it, ${DEFAULT_DAYS} days before \`to\`, or ` +
+        `before now when no \`to\` is given.`,
     },
     to: {
       type: 'string',
       description:
         'Where the listing ends, in the same forms. A date takes in the whole of that day. An instant is where ' +
-        'the listing stops, and is not part of it. Without it, now.',
+        'the listing stops, and is not part of it. Without it, there is no end: a purchase can be dated after ' +
+        'now.',
     },
     limit: {
       type: 'integer',
