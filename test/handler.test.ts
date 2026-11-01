@@ -484,7 +484,7 @@ describe('/spend', () => {
     ]
     for (const [index, [receivedAt, text]] of alerts.entries()) {
       const email = alertEmail({ sourceId: `msg-${index}`, receivedAt: seconds(receivedAt), text })
-      expect((await ingestAlert(store, email)).status).toBe('stored')
+      expect((await ingestAlert(store, email, 'Asia/Singapore')).status).toBe('stored')
     }
 
     // One table, with a row for each card: what its window comes to, a currency at a time, how many purchases that
@@ -619,7 +619,7 @@ describe('/delete', () => {
     const bystander = openChat()
     for (const each of [chat, bystander]) {
       await each.say('/addcard visa 1234 calendar')
-      await ingestAlert(storeFor(env.DB, (await each.user()).id), alertEmail())
+      await ingestAlert(storeFor(env.DB, (await each.user()).id), alertEmail(), 'Asia/Singapore')
     }
     const user = await chat.user()
     const other = await bystander.user()

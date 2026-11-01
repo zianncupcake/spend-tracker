@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { storeFor } from '../src/store'
-import { ADD_USAGE, DATE_USAGE, NO_SUCH_DATE, TOO_MANY_BY_HAND } from '../src/telegram/texts'
+import { ADD_USAGE, DATE_USAGE, NO_SUCH_DATE, scheduledNotSeen, TOO_MANY_BY_HAND } from '../src/telegram/texts'
 import { clock, NOW, openChat, type Posted } from './connect-helpers'
 import { buy, linesOf, marksOf, seconds } from './helpers'
 
@@ -37,7 +37,8 @@ function markedIn({ text, entities = [] }: Posted): string[] {
 /** A user's transactions as they are stored. It reads the table directly, so it sees what a store leaves out. */
 async function rowsOf(userId: number) {
   const { results } = await env.DB.prepare(
-    `SELECT id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category, removed_at
+    `SELECT id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category, removed_at,
+       scheduled
      FROM transactions WHERE owner_id = ? ORDER BY id`,
   )
     .bind(userId)
@@ -64,6 +65,7 @@ describe('/add', () => {
       parser: 'manual',
       category: null,
       removed_at: null,
+      scheduled: 0,
     })
     expect(reply.text).toBe(
       `ID ${row.id} · 9 Oct · SGD 12.50 · Lunch at the corner · by hand\n` +
@@ -105,7 +107,11 @@ describe('/add', () => {
 
       // Noon would be a time that has not come yet.
       const [row] = await rowsOf(await chat.userId())
-      expect(row).toMatchObject({ merchant: 'Breakfast', occurred_at: seconds('2026-10-09T09:15:00+08:00') })
+      expect(row).toMatchObject({
+        merchant: 'Breakfast',
+        occurred_at: seconds('2026-10-09T09:15:00+08:00'),
+        scheduled: 0,
+      })
       expect(reply.text.split('\n')[0]).toBe(`ID ${row.id} · 9 Oct · SGD 12.50 · Breakfast · by hand`)
     },
   )
@@ -127,6 +133,30 @@ describe('/add', () => {
     const [row] = await rowsOf(await chat.userId())
     expect(row).toMatchObject({ merchant: words, occurred_at: NOW_SECONDS })
     expect(reply.text.split('\n')[0]).toBe(`ID ${row.id} · 9 Oct · SGD 5.00 · ${words} · by hand`)
+  })
+
+  it('schedules a day still to come at noon of that day, and counts it in the window at once', async () => {
+    const chat = await chatWithCards()
+
+    const reply = await ask(chat, '/add visa 12.50 2026-10-20 SAMPLE SHOP')
+
+    const [row] = await rowsOf(await chat.userId())
+    expect(row).toMatchObject({ occurred_at: seconds('2026-10-20T12:00:00+08:00'), parser: 'manual', scheduled: 1 })
+    expect(reply.text.split('\n')[0]).toContain('· scheduled')
+    expect(await chat.lines('/spend')).toContain('visa | SGD 12.50 | 1 | 29 Sep to 29 Oct | 1 Nov')
+  })
+
+  it('tells in /spend with a card of a scheduled day that is over with no charge, and of no other', async () => {
+    const chat = await chatWithCards()
+    await chat.say('/add visa 5 2026-10-10 SAMPLE SHOP')
+    await chat.say('/add visa 6 2026-10-20 SAMPLE CAFE')
+    const [over, toCome] = await rowsOf(await chat.userId())
+    clock.now = new Date('2026-10-12T12:00:00+08:00')
+
+    const lines = linesOf(await chat.rich('/spend visa'))
+
+    expect(lines).toContain(scheduledNotSeen(Number(over.id), '10 Oct'))
+    expect(lines).not.toContain(scheduledNotSeen(Number(toCome.id), '20 Oct'))
   })
 
   it('looks for a date in the first word only, so a merchant that begins like one can follow a date', async () => {
@@ -231,10 +261,9 @@ describe('/add', () => {
     // What is taken for a date is a date, so a merchant has to come after it.
     ['/add visa 12.50 3/10', ADD_USAGE],
     ['/add visa 0.00 Lunch', 'The amount must be more than zero.'],
-    // With its year first it is always a date, and one that has to be a day that has come.
+    // With its year first it is always a date, and one that has to be a day that there is.
     ['/add visa 12.50 2026-02-29 Lunch', 'There is no such date.'],
     ['/add visa 12.50 0026-10-03 Lunch', 'There is no such date.'],
-    ['/add visa 12.50 2026-10-10 Lunch', 'That date is still to come.'],
     [`/add visa 12.50 ${'x'.repeat(81)}`, 'The merchant can be 80 characters at most.'],
     ['/add VISA 12.50 Lunch', 'You have no card called VISA.'],
   ])('answers "%s" with what is wrong, and records nothing', async (message, reply) => {

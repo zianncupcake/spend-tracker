@@ -17,7 +17,12 @@ export interface User {
  */
 export type Card = { nickname: string; last4: string; product?: string; remindDay?: number } & WindowRule
 
-export type NewTransaction = ParsedTransaction & { sourceId: string; parser: string; category?: string | null }
+export type NewTransaction = ParsedTransaction & {
+  sourceId: string
+  parser: string
+  category?: string | null
+  scheduled?: number
+}
 
 /** `paidAt` is in unix seconds. */
 export type NewPayment = ParsedPayment & { sourceId: string; paidAt: number }
@@ -32,6 +37,8 @@ export interface Transaction extends ParsedTransaction {
    * product's default category, if the product has one.
    */
   category: string | null
+  /** 1 for a payment that its user added before it was made: see the migration that added the column. Else 0. */
+  scheduled: number
 }
 
 /** A transaction with the source id that it is stored under, and with when its user took it out: null while not. */
@@ -93,6 +100,9 @@ export const MANUAL = 'manual'
 export const MAX_BY_HAND_PER_DAY = 100
 
 const DAY = 86_400
+
+/** A charge takes out a scheduled entry within one part in this of its amount: a final bill can differ a little. */
+const CLEARED_WITHIN_PARTS = 10
 
 export async function findOrCreateUser(db: D1Database, telegramId: number): Promise<User> {
   const find = () => db.prepare('SELECT id, timezone FROM users WHERE telegram_id = ?').bind(telegramId).first<User>()
@@ -308,15 +318,26 @@ export function storeFor(db: D1Database, ownerId: number) {
      * may. Those that they have taken out since count there too, as each of them was a row written.
      */
     async insertTransaction(transaction: NewTransaction): Promise<number | null> {
-      const { sourceId, cardLast4, amountMinor, currency, merchant, occurredAt, parser, category = null } = transaction
+      const {
+        sourceId,
+        cardLast4,
+        amountMinor,
+        currency,
+        merchant,
+        occurredAt,
+        parser,
+        category = null,
+        scheduled = 0,
+      } = transaction
       // Only what is added by hand has a limit. The count is part of the statement, so purchases added at the same
       // moment cannot go past the limit together.
       const limit = parser === MANUAL ? MAX_BY_HAND_PER_DAY : null
       return db
         .prepare(
           `INSERT INTO transactions
-             (owner_id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+             (owner_id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category,
+              scheduled)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?12
            WHERE ?10 IS NULL OR ?10 > (
              SELECT COUNT(*) FROM transactions
              WHERE owner_id = ?1 AND parser = ?8 AND created_at > unixepoch() - ?11
@@ -324,7 +345,20 @@ export function storeFor(db: D1Database, ownerId: number) {
            ON CONFLICT (owner_id, source_id) DO NOTHING
            RETURNING id`,
         )
-        .bind(ownerId, sourceId, cardLast4, amountMinor, currency, merchant, occurredAt, parser, category, limit, DAY)
+        .bind(
+          ownerId,
+          sourceId,
+          cardLast4,
+          amountMinor,
+          currency,
+          merchant,
+          occurredAt,
+          parser,
+          category,
+          limit,
+          DAY,
+          scheduled,
+        )
         .first<number>('id')
     },
 
@@ -341,10 +375,11 @@ export function storeFor(db: D1Database, ownerId: number) {
       const { results } = await db
         .prepare(
           `INSERT INTO transactions
-             (owner_id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category)
+             (owner_id, source_id, card_last4, amount_minor, currency, merchant, occurred_at, parser, category,
+              scheduled)
            SELECT ?1, given.value ->> 'sourceId', given.value ->> 'cardLast4', given.value ->> 'amountMinor',
              given.value ->> 'currency', given.value ->> 'merchant', given.value ->> 'occurredAt', ?3,
-             given.value ->> 'category'
+             given.value ->> 'category', coalesce(given.value ->> 'scheduled', 0)
            FROM json_each(?2) AS given
            WHERE NOT EXISTS (
              SELECT 1 FROM transactions WHERE owner_id = ?1 AND source_id = given.value ->> 'sourceId'
@@ -536,6 +571,33 @@ export function storeFor(db: D1Database, ownerId: number) {
         .first<Transaction>()
     },
 
+    /**
+     * Takes out the scheduled entry that a charge stands for, and returns it as it was: on the same card, in the same
+     * currency, made over `start <= occurred_at < end`, and around the same amount, the closest first. Never by its
+     * merchant, as an alert and its user seldom name one alike. Null when none matches. One statement, so that two
+     * alerts at once cannot take out the same entry.
+     */
+    async clearScheduled(
+      { cardLast4, amountMinor, currency }: Pick<Transaction, 'cardLast4' | 'amountMinor' | 'currency'>,
+      start: number,
+      end: number,
+    ): Promise<Transaction | null> {
+      return db
+        .prepare(
+          `UPDATE transactions SET removed_at = unixepoch()
+           WHERE id = (
+             SELECT id FROM transactions
+             WHERE owner_id = ?1 AND scheduled = 1 AND removed_at IS NULL AND card_last4 = ?2 AND currency = ?4
+               AND occurred_at >= ?5 AND occurred_at < ?6 AND ABS(amount_minor - ?3) * ?7 <= amount_minor
+             ORDER BY ABS(amount_minor - ?3), id
+             LIMIT 1
+           )
+           RETURNING ${TRANSACTION}`,
+        )
+        .bind(ownerId, cardLast4, amountMinor, currency, start, end, CLEARED_WITHIN_PARTS)
+        .first<Transaction>()
+    },
+
     /** Moves a purchase to another time, and returns it as it then is. Null as for `removeTransaction`. */
     async setOccurredAt(id: number, occurredAt: number): Promise<Transaction | null> {
       return db
@@ -553,7 +615,7 @@ export function storeFor(db: D1Database, ownerId: number) {
 /** The columns of a transaction, named as the fields of a `Transaction` are. */
 const TRANSACTION =
   'id, card_last4 AS cardLast4, amount_minor AS amountMinor, currency, merchant, occurred_at AS occurredAt, ' +
-  'parser, category'
+  'parser, category, scheduled'
 
 interface CardRow {
   nickname: string

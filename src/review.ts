@@ -97,7 +97,11 @@ async function candidatesFor(db: D1Database, user: User, now: Date): Promise<Can
       const names = onCard.map(({ merchant }) => lettersOf(merchant))
       const counted = (text: string | null) => names.length > 0 && text !== null && names.some(namedIn(text))
       const own = purchases.filter(
-        (each) => each.cardLast4 === card.last4 && each.currency === product.homeCurrency && !counted(each.merchant),
+        (each) =>
+          each.cardLast4 === card.last4 &&
+          each.currency === product.homeCurrency &&
+          !each.scheduled &&
+          !counted(each.merchant),
       )
       return product.groups.flatMap((group) => {
         if (group.limitMinor === undefined) return []

@@ -25,10 +25,10 @@ import type { Outgoing, RichBlock } from './api'
 import type { Entry } from './arguments'
 import { carriedNotes, formatShortDate, maskLast4 } from './format'
 import {
-  BY_HAND_NOTE,
   heldButtons,
   heldLine,
   inMessages,
+  markNotes,
   purchaseBlocks,
   purchaseLine,
   purchaseTables,
@@ -298,8 +298,8 @@ export async function addRead(
   const named = choiceOn(card, reading.category)
   // No more purchases are taken from one reading than this, whatever it holds. Each has its place from here on.
   const taken = reading.purchases.slice(0, MAX_PURCHASES_PER_PHOTO)
-  const read = taken.map(({ occurredAt, amountMinor, currency, merchant, unsure }, place): HeldPurchase => {
-    return { place, occurredAt, amountMinor, currency, merchant, unsure }
+  const read = taken.map(({ occurredAt, amountMinor, currency, merchant, unsure, scheduled }, place): HeldPurchase => {
+    return { place, occurredAt, amountMinor, currency, merchant, unsure, scheduled }
   })
   const clear = card ? read.filter((purchase) => !purchase.unsure) : []
   const unclear = card ? read.filter((purchase) => purchase.unsure) : read
@@ -398,8 +398,8 @@ async function keep(
   stored: (count: number) => void,
 ): Promise<Kept> {
   if (!card || purchases.length === 0) return NOTHING_KEPT
-  const given = purchases.map(({ place, occurredAt, amountMinor, currency, merchant }, at) => {
-    const described = { cardLast4: card.last4, amountMinor, currency, merchant, occurredAt }
+  const given = purchases.map(({ place, occurredAt, amountMinor, currency, merchant, scheduled = 0 }, at) => {
+    const described = { cardLast4: card.last4, amountMinor, currency, merchant, occurredAt, scheduled }
     return { ...described, sourceId: sourceIdOf(messageId, place), category: categories[at] }
   })
   // One statement for all of them, and their ids come back with what each is stored under.
@@ -567,8 +567,8 @@ function addedLines(on: OnCard[]): Line[] {
  */
 function addedReply(on: OnCard[], totals: CardTotals[], timeZone: string, notes: string[]): Tabled {
   const homeCurrency = (card?: Card) => productOf(card?.product)?.homeCurrency ?? DEFAULT_CURRENCY
-  // Every purchase of a reading is one that was added by hand, and is marked so in its table.
-  const below = [BY_HAND_NOTE, ...totals.map((each) => spendLine(each, timeZone)), ...notes]
+  const marks = markNotes(on.flatMap((each) => each.purchases))
+  const below = [...marks, ...totals.map((each) => spendLine(each, timeZone)), ...notes]
   return {
     rich: {
       blocks: [

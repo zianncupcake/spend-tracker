@@ -174,6 +174,17 @@ describe('a call of a tool that acts', () => {
     expect(answer).toEqual(acting([{ kind: 'add', reading: checked }]))
   })
 
+  it('has a date still to come checked as a scheduled purchase at noon of that day', async () => {
+    const user = await userWithCards()
+    const date = '2026-10-20'
+    model(calling(['call_1', 'add_purchases', { card: null, category: null, purchases: [{ ...GIVEN, date }] }]))
+
+    const { answer } = await ask(user, 'A made-up asking.')
+
+    const checked = { ...CHECKED, occurredAt: seconds('2026-10-20T12:00:00+08:00'), scheduled: 1 }
+    expect(answer).toEqual(acting([{ kind: 'add', reading: reading([checked]) }]))
+  })
+
   it.each<[what: string, category: string, key: string]>([
     ['what a category is called', 'Other Spend', 'other'],
     // A key that is no category of any card is handed on as it is: the handler looks it up.

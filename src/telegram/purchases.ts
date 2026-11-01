@@ -39,6 +39,12 @@ const BY_HAND = '*'
 /** What a message says of that mark, under its tables, when a row in them has it. */
 export const BY_HAND_NOTE = `${BY_HAND} = added by hand`
 
+/** What comes after the id in the row of a scheduled purchase, in the place of the mark of one added by hand. */
+const SCHEDULED = '~'
+
+/** What a message says of that mark, under its tables, when a row in them has it. */
+export const SCHEDULED_NOTE = `${SCHEDULED} = scheduled: counted now, and taken out by its charge on that day`
+
 /** What the row of a table is called that has what the card's patterns hold back of the cap: see `sumsOf`. */
 export const TO_COME = 'To come'
 
@@ -116,9 +122,23 @@ export interface Section {
  * its amount, its merchant when it has one, and a note of its having been added by hand.
  */
 export function purchaseLine(purchase: Transaction, date: string): Line {
-  const { id, amountMinor, currency, merchant, parser } = purchase
+  const { id, amountMinor, currency, merchant, parser, scheduled } = purchase
   const start = [`ID ${id}`, date, formatMoney(amountMinor, currency)]
-  return lineOf(start, merchant, parser === MANUAL ? ['by hand'] : [])
+  return lineOf(start, merchant, scheduled ? ['scheduled'] : parser === MANUAL ? ['by hand'] : [])
+}
+
+/** The mark that comes after the id of a purchase in a table, or nothing. */
+function markOf({ parser, scheduled }: Transaction): string {
+  return scheduled ? SCHEDULED : parser === MANUAL ? BY_HAND : ''
+}
+
+/** What a message says under its tables of the marks that the rows of these purchases have. */
+export function markNotes(purchases: Transaction[]): string[] {
+  const marks = purchases.map(markOf)
+  return [
+    ...(marks.includes(BY_HAND) ? [BY_HAND_NOTE] : []),
+    ...(marks.includes(SCHEDULED) ? [SCHEDULED_NOTE] : []),
+  ]
 }
 
 /**
@@ -376,11 +396,11 @@ export function purchaseBlocks(sections: Section[], homeCurrency: string): RichB
               { text: heading, is_header: true, align: 'right' },
               { text: 'Merchant', is_header: true },
             ],
-            ...purchases.map(({ id, parser, date, amount, merchant }): TableCell[] => [
-              { text: `${id}${parser === MANUAL ? BY_HAND : ''}`, align: 'right' },
-              { text: date },
-              { text: amount, align: 'right' },
-              { text: merchant || '-' },
+            ...purchases.map((purchase): TableCell[] => [
+              { text: `${purchase.id}${markOf(purchase)}`, align: 'right' },
+              { text: purchase.date },
+              { text: purchase.amount, align: 'right' },
+              { text: purchase.merchant || '-' },
             ]),
             // What sums a table up is named across the columns of the id and the day, and has no merchant.
             ...sums.map(({ label, amount }): TableCell[] => [
@@ -425,9 +445,10 @@ export function purchaseTables(sections: Section[], homeCurrency: string): Table
       heading === undefined
         ? undefined
         : row('ID'.padEnd(idWidth + 1), 'Date'.padEnd(dayWidth), heading, 'Merchant'),
-    rows: purchases.map(({ id, parser, date, amount, merchant }) => {
-      const mark = parser === MANUAL ? BY_HAND : ' '
-      return row(String(id).padStart(idWidth) + mark, date.padStart(dayWidth), amount, merchant || '-')
+    rows: purchases.map((purchase) => {
+      const { id, date, amount, merchant } = purchase
+      const marked = String(id).padStart(idWidth) + (markOf(purchase) || ' ')
+      return row(marked, date.padStart(dayWidth), amount, merchant || '-')
     }),
     // What sums a table up is named where a purchase has its day, with nothing where a purchase has its id.
     end: sums.map(({ label, amount }) => row(' '.repeat(idWidth + 1), label.padEnd(dayWidth), amount, '')),

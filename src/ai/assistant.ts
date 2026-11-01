@@ -615,6 +615,7 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
     'To add purchases, call add_purchases, never a command. Its card and category are null when the user named ' +
       "none, a date that was not given is today's, and unsure is true for an amount or a date that the user did " +
       'not give clearly.',
+    'A payment still to come goes to add_purchases too, with its day.',
     'To sort purchases into a category, call set_category.',
     'To do anything else, call run_command with one of these lines: /addcard <nickname> <last4> statement <day> ' +
       '[product key], /addcard <nickname> <last4> calendar [product key], /removecard <nickname>, /renamecard ' +
@@ -858,7 +859,7 @@ function actionOf(name: string, given: Record<string, unknown>, { question, card
     }
     case 'add_purchases':
       try {
-        return { kind: 'add', reading: checkPurchases(given, cards, question, timeZone, now) }
+        return { kind: 'add', reading: checkPurchases(given, cards, question, timeZone, now, true) }
       } catch (error) {
         // The checking throws for the one thing that the model can put right: arguments with no list of purchases.
         if (!(error instanceof Failure) || error.reason !== 'bad_reading') throw error

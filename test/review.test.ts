@@ -167,6 +167,7 @@ describe('a review that is due', () => {
     ],
     ['whose purchases are in another currency', { currency: 'USD' }],
     ['on a card with no product', { cardLast4: '9999' }],
+    ['whose purchases are scheduled', { scheduled: 1 }],
   ])('offers nothing of a merchant %s', async (_, purchase, before) => {
     const chat = await dueChat()
     await chat.say('/addcard hsbc 5678 calendar hsbc-revolution')

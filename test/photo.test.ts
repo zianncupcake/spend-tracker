@@ -65,6 +65,7 @@ describe('a photo with a caption that names the card', () => {
       parser: 'manual',
       category: 'other',
       removed_at: null,
+      scheduled: 0,
     }
     expect(rows).toEqual([
       { ...stored, id: rows[0].id, source_id: 'manual:7001:0', amount_minor: 210, merchant: 'BUS/MRT 4471' },

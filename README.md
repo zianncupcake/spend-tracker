@@ -39,7 +39,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/spend` | Shows what you have spent on each card in its current window. |
 | `/spend <nickname>` | Lists every purchase on one card in its current window, with what they come to. Where some are in another currency, the total has what each of those comes to in the card's own beside it, and the sum, at the European Central Bank's reference rates of the day from frankfurter.dev. |
 | `/best <merchant>` | Says which of your cards to pay with at a merchant: by whether it earns the card's bonus there and what is left of the cap, not by earn rates, which the bot does not know. |
-| `/add <nickname> <amount> <merchant>` | Adds a purchase by hand. Its date can go before the merchant. |
+| `/add <nickname> <amount> <merchant>` | Adds a purchase by hand. Its date can go before the merchant, and a `YYYY-MM-DD` still to come schedules it. |
 | `/remove <purchase id>` | Takes a purchase out. |
 | `/date <purchase id> <YYYY-MM-DD>` | Changes the date of a purchase, to any day, past or still to come. It is then counted by that day. |
 | `/products` | Lists the card products whose reward rules are known. |
@@ -62,7 +62,9 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 `/start` sends a welcome and this list, and a command that the bot does not know is answered with the list. A
 nickname is 1 to 20 letters, digits, `_` or `-`. `/addcard` takes a product key as a last word, which links the
 card as `/product` does. The amount of `/add` can have a currency before it, as in `USD 12.50`, and its date is
-written `YYYY-MM-DD`. `/remove`, `/date` and `/sort` take the id of a purchase, which `/spend <nickname>` shows. The
+written `YYYY-MM-DD`. A scheduled payment counts at once, and is taken out by a charge on its card on the same day, in
+the same currency, within 10% of its amount. `/remove`, `/date` and `/sort` take the id of a purchase, which
+`/spend <nickname>` shows. The
 merchant of `/pattern` is 40 plain characters at most, 3 of them letters or digits at the least, and 12 days can
 follow `except`. The bot answers only in a user's own private chat with it.
 

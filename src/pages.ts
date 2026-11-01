@@ -167,8 +167,9 @@ marked, so that your later purchases there start in it.</li>
 it skips.</li>
 <li>The names of the merchants that the bot has offered you as monthly patterns, each with the last four digits of
 its card, so that none is offered twice.</li>
-<li>A purchase that you take out, which stays stored and marked as taken out, so that its alert is not counted
-again. It is left out of every total and list, and is deleted with everything else.</li>
+<li>A purchase that you take out, or a scheduled one that its alert takes out, which stays stored and marked as
+taken out, so that its alert is not counted again. It is left out of every total and list, and is deleted with
+everything else.</li>
 <li>The id of any alert that was fetched but not recorded, and why it was not, kept so that it is not fetched
 again.</li>
 <li>Your Gmail address.</li>
