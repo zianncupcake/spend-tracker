@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseAlert, parsePayment } from '../src/parsers'
-import { uob } from '../src/parsers/uob'
+import { TRANSIT_MERCHANT, uob } from '../src/parsers/uob'
 import { alertEmail, seconds, UOB_PAYMENT } from './helpers'
 
 /** When the email of the alert below came: on the day that the alert states, which is 9 October 2026 in Singapore. */
@@ -193,6 +193,30 @@ describe('UOB card alerts', () => {
 
     // Measured at about 45 ms. The bound is for a pattern that never ends, and is set well above a slow machine.
     expect(performance.now() - started).toBeLessThan(5_000)
+  })
+})
+
+describe('UOB accumulated transit alerts', () => {
+  const billed = (amount: string) =>
+    `Your accumulated transit transactions of ${amount} has been billed to your UOB card ending 4321 on 09/10/26.\n\n` +
+    'UOB EMAIL DISCLAIMER: Made up.'
+
+  it('reads the card, the amount, the currency and the date, under the one merchant name', () => {
+    // It came the day after the date that it states, which is what shows the date to be read.
+    const email = uobEmail(billed('SGD 8.10'), RECEIVED + 24 * 3600)
+
+    expect(parseAlert(email)).toEqual({
+      cardLast4: '4321',
+      amountMinor: 810,
+      currency: 'SGD',
+      merchant: TRANSIT_MERCHANT,
+      occurredAt: NOON,
+      parser: 'uob',
+    })
+  })
+
+  it('reads an amount with thousands separators', () => {
+    expect(parse(billed('SGD 1,234.50'))).toMatchObject({ amountMinor: 123450 })
   })
 })
 

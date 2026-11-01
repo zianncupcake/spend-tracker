@@ -21,6 +21,7 @@ const provider: AiProvider = {
   apiKey: 'made-up-ai-key',
   baseUrl: 'https://ai.example.test/v1',
   model: 'made-up-model',
+  decisionModel: 'made-up-decision-model',
 }
 
 /** The service's clock, which a test moves by setting `now`. */

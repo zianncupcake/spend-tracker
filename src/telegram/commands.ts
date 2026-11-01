@@ -77,6 +77,7 @@ import {
   TIMEZONE_USAGE,
   TOO_MANY_CARDS,
   TOO_MANY_PATTERNS,
+  UNREAD_ALERT,
   WELCOME,
 } from './texts'
 
@@ -421,12 +422,12 @@ export async function reply(
 
 /**
  * What the bot says of what is sent to the AI provider, on the service as it is set up: of a question, in the words
- * given, where it has an assistant, then that it can be told what to do in the same way, and after that of a photo,
- * where it reads photos. Nothing where it has neither.
+ * given, where it has an assistant, then that it can be told what to do in the same way, after that of a photo, where
+ * it reads photos, and last of an alert that it cannot read. Nothing where it has neither.
  */
 function whatIsSent({ ai }: Deps, ofQuestion: string): string[] {
   if (!ai) return []
-  return ai.visionModel === undefined ? [ofQuestion, DO] : [ofQuestion, DO, PHOTO]
+  return ai.visionModel === undefined ? [ofQuestion, DO, UNREAD_ALERT] : [ofQuestion, DO, PHOTO, UNREAD_ALERT]
 }
 
 /**

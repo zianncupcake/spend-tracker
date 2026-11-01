@@ -1,5 +1,5 @@
 import { hundredths, MAX_FROM_EMAIL, merchantIn, singaporeTime, singleSpaced } from './shared'
-import type { Parser } from './types'
+import type { ParsedTransaction, Parser } from './types'
 
 // UOB (Singapore) tells of a purchase made with one of its cards in one sentence of an email. The values in this
 // one are made up:
@@ -33,6 +33,16 @@ const FOLLOWING = ' If unauthori'
 const PAYMENT =
   /\bbill payment\(s\) of ([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12}|(?=\.\d))(\.\d{1,2}|) to .{0,160}?\. Bill ref: ending (\d{4})\b/
 
+// A tap of the card itself on public transport is billed later, with others, as in this made-up sentence:
+//
+//   Your accumulated transit transactions of SGD 8.10 has been billed to your UOB card ending 4321 on 09/10/26.
+//
+// It names no merchant, so all of these go by one name. Bounded as TRANSACTION is, with the same groups.
+const TRANSIT =
+  /\baccumulated transit transactions of ([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12}|(?=\.\d))(\.\d{1,2}|) has been billed to your UOB .{0,40}?ending (\d{4}) on (\d\d)\/(\d\d)\/(\d\d)\b/
+
+export const TRANSIT_MERCHANT = 'Accumulated transit'
+
 const DAY = 24 * 3600
 
 export const uob: Parser = {
@@ -42,7 +52,7 @@ export const uob: Parser = {
   parse(email) {
     const text = singleSpaced(email.text)
     const match = TRANSACTION.exec(text)
-    if (!match) return null
+    if (!match) return transitIn(text, email.receivedAt)
     const [upToMerchant, currency, whole, decimals, cardLast4, day, month, year] = match
     const dayStart = singaporeTime(2000 + Number(year), Number(month) - 1, Number(day))
 
@@ -61,6 +71,20 @@ export const uob: Parser = {
     const [, currency, whole, decimals, cardLast4] = match
     return { cardLast4, amountMinor: hundredths(whole, decimals), currency }
   },
+}
+
+function transitIn(text: string, receivedAt: number): ParsedTransaction | null {
+  const match = TRANSIT.exec(text)
+  if (!match) return null
+  const [, currency, whole, decimals, cardLast4, day, month, year] = match
+  const dayStart = singaporeTime(2000 + Number(year), Number(month) - 1, Number(day))
+  return {
+    cardLast4,
+    amountMinor: hundredths(whole, decimals),
+    currency,
+    merchant: TRANSIT_MERCHANT,
+    occurredAt: purchaseTime(dayStart, receivedAt),
+  }
 }
 
 /**

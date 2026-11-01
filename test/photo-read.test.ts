@@ -24,6 +24,7 @@ const provider: AiProvider = {
   baseUrl: 'https://ai.example.test/v1',
   model: 'made-up-model',
   visionModel: 'made-up-vision-model',
+  decisionModel: 'made-up-decision-model',
 }
 
 /** The service's clock, which a test moves by setting `now`. */
@@ -918,7 +919,7 @@ describe('a reading that the provider does not give', () => {
 
   it('is one that failed with no request made, on a service that has no model for photos', async () => {
     const taken = { requests: 0 }
-    const textOnly: AiProvider = { apiKey: provider.apiKey, baseUrl: provider.baseUrl, model: provider.model }
+    const { visionModel: _, ...textOnly } = provider
     const input = { image: IMAGE, mime: 'image/jpeg', caption: CAPTION, cards: CARDS, timeZone: 'Asia/Singapore' }
 
     const reading = await readPhoto(deps, textOnly, input, taken)

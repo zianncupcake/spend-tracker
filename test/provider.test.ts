@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { tellsOfCharge } from '../src/ai/alert-check'
 import { complete, completeJson, ProviderError, type AiProvider, type ChatMessage, type Tool } from '../src/ai/provider'
 import { depsFor } from '../src/deps'
 import { Failure } from '../src/log'
@@ -9,7 +10,12 @@ import { catchConsole } from './log-helpers'
 // What the log has of a request to the AI provider. How a question is answered with what the model writes is
 // tested in test/assistant.test.ts. Every key, question, answer and merchant here is made up.
 
-const provider: AiProvider = { apiKey: 'made-up-ai-key', baseUrl: 'https://ai.example.test/v1', model: 'made-up-model' }
+const provider: AiProvider = {
+  apiKey: 'made-up-ai-key',
+  baseUrl: 'https://ai.example.test/v1',
+  model: 'made-up-model',
+  decisionModel: 'made-up-decision-model',
+}
 
 const QUESTION = 'How much did I spend at COFFEE PLACE?'
 const ANSWER = 'You spent SGD 12.40 at COFFEE PLACE.'
@@ -312,9 +318,27 @@ describe('a request for JSON, which can hold an image', () => {
   })
 })
 
+describe('the check of an alert that cannot be read', () => {
+  it('asks the decision model for a strict yes or no about the first 1,500 characters', async () => {
+    answering(saying(JSON.stringify({ should_parse: false })))
+
+    expect(await tellsOfCharge(provider, 'a'.repeat(2000))).toBe(false)
+
+    const body = JSON.parse(String(posted.mock.calls[0][1]?.body))
+    expect(body.model).toBe(provider.decisionModel)
+    expect(body.response_format.json_schema).toMatchObject({ strict: true, schema: { required: ['should_parse'] } })
+    expect(body.messages.at(-1).content).toHaveLength(1500)
+  })
+})
+
 describe('the model that reads photos, as the service is set up', () => {
   // The tests are set up with a key and nothing else: see vitest.config.ts.
-  const GROQ = { apiKey: 'test-ai-key', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b' }
+  const GROQ = {
+    apiKey: 'test-ai-key',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    model: 'openai/gpt-oss-120b',
+    decisionModel: 'openai/gpt-oss-20b',
+  }
   const OWN = { ...env, AI_BASE_URL: 'https://ai.example.test/v1', AI_MODEL: 'made-up-model' }
 
   it('is the default one, at the default address, when neither is set', () => {
@@ -330,7 +354,12 @@ describe('the model that reads photos, as the service is set up', () => {
   it('is none at an address that the service names, where the name of the default one means nothing', () => {
     const { ai } = depsFor(OWN)
 
-    expect(ai).toEqual({ apiKey: 'test-ai-key', baseUrl: 'https://ai.example.test/v1', model: 'made-up-model' })
+    expect(ai).toEqual({
+      apiKey: 'test-ai-key',
+      baseUrl: 'https://ai.example.test/v1',
+      model: 'made-up-model',
+      decisionModel: 'made-up-model',
+    })
     expect(ai?.visionModel).toBeUndefined()
     expect(depsFor({ ...OWN, AI_VISION_MODEL: '' }).ai?.visionModel).toBeUndefined()
     // The default address counts as one that the service names, when it is the service that names it.
@@ -345,6 +374,7 @@ describe('the model that reads photos, as the service is set up', () => {
       baseUrl: 'https://ai.example.test/v1',
       model: 'made-up-model',
       visionModel: 'made-up-vision-model',
+      decisionModel: 'made-up-model',
     })
     expect(depsFor({ ...env, ...named }).ai).toEqual({ ...GROQ, visionModel: 'made-up-vision-model' })
   })

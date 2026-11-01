@@ -125,7 +125,8 @@ export const WELCOME =
 // What the bot says of its assistant, where it has one. Nobody is asked before a question of theirs is sent to the
 // AI provider, so the bot says what is sent: in its welcome, and under the list of its commands when the list is
 // sent without the welcome. After what it says of a question, it says that it can be told what to do in the same
-// way. Where it reads photos, it says the same of a photo, after those.
+// way. Where it reads photos, it says the same of a photo, after those. Last, it says what is sent of an alert that it
+// cannot read.
 
 export const ASK =
   'You can also just ask a question in your own words, and it is answered by an AI service, which is sent your ' +
@@ -144,6 +145,10 @@ export const PHOTO =
   'purchases in it are added. A caption can name the card and the category, as in "add these to evol as other ' +
   'spend". The photo is read by the same AI service, which is sent the photo, its caption, your time zone, and ' +
   'the nicknames and category names of your cards.'
+
+export const UNREAD_ALERT =
+  'When a bank alert cannot be read, the start of its email, up to 1,500 characters, is sent to the same AI service ' +
+  'to decide whether to tell you. It is not stored.'
 
 export const NO_ASSISTANT =
   'The assistant, which answers questions asked in your own words, is not available on this service. ' +
@@ -353,6 +358,11 @@ export const CHECK_UOB_APP = 'check UOB app'
 /** What the bot says when an alert tells of a card's bill paid. `card` names the card. */
 export function paymentScheduled(amount: string, card: string): string {
   return `Payment scheduled: ${amount} for ${card}`
+}
+
+/** What the bot says of an alert from the bank that could not be read. It holds nothing from the email. */
+export function alertNotRead(bank: string): string {
+  return `An alert from ${bank} could not be read, so it is not in your totals. Check it in Gmail.`
 }
 
 /** What follows a card's total whose amounts in other currencies have what they come to in its own beside them. */

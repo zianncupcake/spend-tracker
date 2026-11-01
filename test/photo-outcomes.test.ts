@@ -16,6 +16,7 @@ import {
   NOT_TEXT,
   NOT_TEXT_OR_PHOTO,
   PHOTO as PHOTO_TOO,
+  UNREAD_ALERT,
   PHOTO_NOT_READ,
   PHOTO_READ_NO_REPLY,
   PHOTO_TOO_LARGE,
@@ -571,7 +572,7 @@ describe('a service that reads photos', () => {
     const [welcome, commands, ...more] = (await openChat().say('/start')).split('\n\n')
 
     // After what it says of a question and of what it can be told to do, and before the list of the commands.
-    expect(welcome).toBe(`${WELCOME} ${ASK} ${DO} ${PHOTO_TOO}`)
+    expect(welcome).toBe(`${WELCOME} ${ASK} ${DO} ${PHOTO_TOO} ${UNREAD_ALERT}`)
     expect(commands).toBe(COMMANDS)
     expect(more).toEqual([])
   })
@@ -580,7 +581,7 @@ describe('a service that reads photos', () => {
     const [commands, asking, ...more] = (await openChat().say('/help')).split('\n\n')
 
     expect(commands).toBe(COMMANDS)
-    expect(asking).toBe(`${ASK_TOO} ${DO} ${PHOTO_TOO}`)
+    expect(asking).toBe(`${ASK_TOO} ${DO} ${PHOTO_TOO} ${UNREAD_ALERT}`)
     expect(more).toEqual([])
   })
 
@@ -590,8 +591,8 @@ describe('a service that reads photos', () => {
 
     const [welcome, commands] = [await chat.say('/start'), await chat.say('/help')]
 
-    expect(welcome.split('\n\n')[0]).toBe(`${WELCOME} ${ASK} ${DO}`)
-    expect(commands.split('\n\n')[1]).toBe(`${ASK_TOO} ${DO}`)
+    expect(welcome.split('\n\n')[0]).toBe(`${WELCOME} ${ASK} ${DO} ${UNREAD_ALERT}`)
+    expect(commands.split('\n\n')[1]).toBe(`${ASK_TOO} ${DO} ${UNREAD_ALERT}`)
     for (const reply of [welcome, commands]) expect(reply).not.toMatch(/photo|caption/i)
   })
 

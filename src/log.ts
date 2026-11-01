@@ -116,6 +116,7 @@ export interface Events {
     outcome: 'stored' | 'payment' | 'duplicate' | 'unparsed'
     parser: 'example-bank' | 'ocbc' | 'uob' | 'hsbc' | 'dbs' | null
   }
+  alert_check: { outcome: 'yes' | 'no' | 'failed' | 'no_provider' }
   mcc_lookup: { source: 'check-mcc.sg' | 'heymax.ai'; outcome: 'found' | 'none' | 'failed' }
   rates_lookup: { outcome: 'found' | 'failed' }
   connect_link: { user: number }

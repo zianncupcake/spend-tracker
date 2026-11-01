@@ -7,7 +7,15 @@ import worker from '../src/index'
 import { storeFor } from '../src/store'
 import { heldStoreFor } from '../src/store-held'
 import { mailStoreFor } from '../src/store-mail'
-import { addCardOtherwise, NO_SIGN_IN, paymentScheduled, RENAME_ADDED, tapToAddCard } from '../src/telegram/texts'
+import {
+  addCardOtherwise,
+  alertNotRead,
+  NO_SIGN_IN,
+  paymentScheduled,
+  RENAME_ADDED,
+  tapToAddCard,
+} from '../src/telegram/texts'
+import { refusing, saying } from './ai-helpers'
 import {
   attemptOf,
   clock,
@@ -32,6 +40,10 @@ import { catchConsole } from './log-helpers'
 const JANE = 'jane@example.test'
 const SAM = 'sam@example.test'
 const DAY = 86_400
+/** The model's answer when it finds that an alert that cannot be read tells of no charge, and when it finds one. */
+const NO_CHARGE = saying(JSON.stringify({ should_parse: false }))
+const A_CHARGE = saying(JSON.stringify({ should_parse: true }))
+
 /** The address that OCBC sends its card alerts from. A bank's domain is public. */
 const OCBC = 'noreply@notify.ocbc.com'
 
@@ -538,10 +550,11 @@ describe('a new alert for a card that is linked to a product', () => {
 describe('an alert that is not stored', () => {
   const FAIL = gmailResults('fail', 'examplebank.test')
 
-  it('is noted as unparsed when no parser can read it, and is not fetched again', async () => {
+  it('is noted as unparsed when no parser can read it, is told of to nobody when the model finds no charge, and is not fetched again', async () => {
     const chat = await connectedChat(JANE)
     const userId = await chat.userId()
     outside.mailboxes[JANE] = [alert('msg-1', 5, 'Your statement is ready.')]
+    outside.model = [NO_CHARGE]
 
     await runCheck(deps)
 
@@ -556,6 +569,34 @@ describe('an alert that is not stored', () => {
     expect(outside.fetchedHeaders).toEqual(['msg-1'])
     expect(outside.fetched).toEqual(['msg-1'])
     expect(await seenOf(userId)).toEqual([{ source_id: 'msg-1', status: 'unparsed' }])
+    expect(outside.completions).toHaveLength(1)
+  })
+
+  it.each<[when: string, answer: object | (() => Response)]>([
+    ['the model finds a charge', A_CHARGE],
+    ['the provider fails', refusing(500)],
+  ])('is told of, with nothing from the email, when %s', async (_, answer) => {
+    const chat = await connectedChat(JANE)
+    const userId = await chat.userId()
+    outside.mailboxes[JANE] = [alert('msg-1', 5, 'A made-up charge that no parser can read.')]
+    outside.model = [answer]
+    const logged = catchConsole()
+
+    await runCheck(deps)
+
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: alertNotRead('EXAMPLE-BANK') }])
+    expect(await seenOf(userId)).toEqual([{ source_id: 'msg-1', status: 'unparsed' }])
+    expect(logged.events('check')).toMatchObject([{ unparsed: 1, notified: 1 }])
+  })
+
+  it('asks no model and tells nobody when it came too long ago', async () => {
+    await connectedChat(JANE)
+    outside.mailboxes[JANE] = [alert('msg-1', 7 * 60, 'A made-up charge that no parser can read.')]
+
+    await runCheck(deps)
+
+    expect(outside.completions).toEqual([])
+    expect(sent).toEqual([])
   })
 
   it.each<[why: string, message: MessageOptions]>([
@@ -1218,6 +1259,7 @@ describe('the line that a run logs of itself', () => {
       alert('msg-2', 7 * 60),
       alert('msg-1', 5),
     ]
+    outside.model = [NO_CHARGE]
     const logged = catchConsole()
 
     for (let run = 1; run <= 3; run++) await runCheck(deps)
@@ -1366,6 +1408,7 @@ describe('the line that a run logs of itself', () => {
       gmailMessage({ id: 'made-up-id-2', receivedAt, content: textPart('A made-up notice.') }),
       gmailMessage({ id: 'made-up-id-1', receivedAt, content: purchase }),
     ]
+    outside.model = [NO_CHARGE]
 
     await runCheck(posting)
     await runCheck(posting)

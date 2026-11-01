@@ -18,6 +18,7 @@ import { codeOf } from '../src/catalogue/merchants'
 import { ocbcRewards } from '../src/catalogue/ocbc-rewards'
 import type { Product } from '../src/catalogue/types'
 import { uobEvol } from '../src/catalogue/uob-evol'
+import { TRANSIT_MERCHANT } from '../src/parsers/uob'
 import { sortEnd } from '../src/telegram/purchases'
 
 /** The category that the product's rules give a purchase in the product's own currency. */
@@ -109,6 +110,14 @@ describe('the UOB EVOL Card', () => {
     expect(foreign('NETFLIX.COM')).toBe('fx')
     expect(foreign(null)).toBe('fx')
     expect(startingCategory(uobEvol, { currency: 'SGD', merchant: 'BOOK SHOP' })).toBeNull()
+  })
+
+  it('puts accumulated transit in other spend, and no merchant that merely has the word or the phrase', () => {
+    const start = (merchant: string) => startingCategory(uobEvol, { currency: 'SGD', merchant })
+
+    expect(start(TRANSIT_MERCHANT)).toBe('other')
+    expect(start('SAMPLE TRANSIT PTE')).toBeNull()
+    expect(start(`SAMPLE ${TRANSIT_MERCHANT} PTE`)).toBeNull()
   })
 
   it('puts a purchase at a merchant that it names under gym, telco and streaming, however the name is written', () => {

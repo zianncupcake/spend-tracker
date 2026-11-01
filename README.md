@@ -105,6 +105,11 @@ other sender is looked for. When a mailbox is connected, the alerts of the 35 da
 a purchase only when its alert came in the last six hours, so that catching up does not flood the chat. A purchase
 is stored even when its card has not been added yet: the bot then says how to add the card.
 
+An alert that its bank's parser cannot read is noted as `unparsed`, and counted in `/status`. When it came in the last
+six hours, a model is asked whether it tells of a card charge. Unless the answer is no, the bot tells the user that
+the alert could not be read, so it is not in their totals, and to check it in Gmail. That includes a service with no AI
+provider, and a request that fails: a needless message is better than a missed charge.
+
 ### Card products
 
 The bot knows the reward rules of four card products. A card that is linked to one has its purchases sorted into
@@ -129,7 +134,8 @@ until something says otherwise:
 
 - UOB EVOL Card: a purchase is Online and Mobile Contactless Spend. One in another currency is Overseas Foreign
   Currency Spend, and one at a gym, telco or streaming service that the bank names is Selected Gym, Telco and
-  Streaming Spend. One made with the physical card is for its user to mark as Other Spend.
+  Streaming Spend. One made with the physical card is for its user to mark as Other Spend, but UOB's alert of
+  accumulated transit, which only the physical card sends, starts there by itself.
 - HSBC Revolution Credit Card: a purchase is an Eligible Transaction. One at a travel agency that the product
   names, such as Trip.com, Agoda or Klook, starts in Other Transactions.
 - OCBC Rewards Card: a purchase is Shopping Spend. One with "Shopee Pay" in its merchant's name starts in Other
@@ -238,7 +244,9 @@ Google's warning that it has not verified the app, and how to go on from it.
   answers that it has had as many requests or tokens as it takes, the request is sent again once with this one.
 - `AI_BASE_URL`: where the provider's API is reached, with no trailing slash. Left out, it is
   `https://api.groq.com/openai/v1`.
-- `AI_MODEL`: the model that is asked there. Left out, it is `openai/gpt-oss-120b`.
+- `AI_MODEL`: the model that is asked there. Left out, it is `openai/gpt-oss-120b`. It also decides whether to tell
+  of an alert that cannot be read when `AI_BASE_URL` is set. Otherwise `openai/gpt-oss-20b` decides that. A provider
+  that does not take that request's `json_schema` and `reasoning_effort` has its users told of every such alert.
 - `AI_VISION_MODEL`: the model that reads photos, which is asked at the same address with the same key. Left out,
   it is `qwen/qwen3.8-27b` when `AI_BASE_URL` is left out too, and nothing otherwise: the default is a model of the
   default provider's, and its name means nothing to another. With nothing, the bot reads no photos.
@@ -301,16 +309,19 @@ The service serves a page at `<PUBLIC_BASE_URL>` that says what it is and who ru
 `<PUBLIC_BASE_URL>/privacy`. The text of both is in `src/pages.ts`, and the policy is the full account of what is
 accessed, what is stored and who else handles it. What it says of the AI provider:
 
-- Nothing is sent to the AI provider unless a user asks a question or, where the bot reads photos, sends a photo.
+- Nothing is sent to the AI provider unless a user asks a question or, where the bot reads photos, sends a photo, or
+  a bank alert comes that the bot cannot read.
 - With every question go the user's time zone, the day and the time there, the nicknames of their cards and the
   names of the reward categories that their purchases can be sorted into, and their last few questions of the past
   30 minutes with the bot's answers. Details of their purchases are sent only as the answering calls for them: the
   id, the time, the last four digits of the card, the amount, the currency, the merchant and the reward category.
 - A photo is sent with its caption, with the user's time zone and with the nicknames and category names of their
   cards. The photo is not stored.
+- Of a bank alert that cannot be read and came in the last six hours, the start of its email, up to 1,500 characters,
+  is sent to decide whether to tell the user. It is not stored, and neither is the answer.
 
-Nobody is asked before a question or a photo of theirs is sent, so the bot's welcome says what is sent too. The
-policy also says that the text of an email is never stored, and that email data is not used to train AI models:
+Nobody is asked before a question, a photo or an alert of theirs is sent, so the bot's welcome says what is sent
+too. The policy also says that the text of an email is never stored, and that email data is not used to train AI models:
 that holds only with an AI provider that does not train its models on what it is sent.
 
 ## Reading the logs
@@ -350,6 +361,7 @@ There are two places to read the log:
 | `reminder` | A reminder of a card's bill that a scheduled run had to send, before the `check` line of the same run: `sent`, `blocked` by its chat, which is passed over until the next month, or `failed`. One that could not be sent is tried again ten minutes later while it is still that day for its user. One whose next day could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. |
 | `review` | A user's monthly review, which a scheduled run made after its reminder and before its `check` line: `offered`, `nothing` when there was nothing to offer, `blocked` by its chat or `failed`. `offered` is how many patterns it offered. One that was `blocked` or `failed` is not made again that month, and what it had to offer is offered by the next, though some of its messages may have been sent. One whose next 1st could not be worked out, as with a time zone that the Worker does not know, is put off a day. A run that could not look for one has the line with no `user`. A run that only sets when a user is next due, the first time it sees them or after `/timezone`, writes no line. |
 | `alert` | An alert that was given to the parser of its bank: `stored`, `payment` (a card's bill paid, stored), `duplicate` or `unparsed`. An `unparsed` is what a bank that has changed the wording of its alerts looks like. |
+| `alert_check` | A model was asked whether an `unparsed` alert of the last six hours tells of a card charge: `yes`, `no`, `failed` (the request failed or its answer could not be read) or `no_provider`, when none was asked. The user is told on all but `no`. |
 | `mcc_lookup` | A search of one of two services for the category code of a merchant, as a purchase is added: `found` when it listed stores, `none` when it listed none, or `failed`. Both are searched at the same time, so a search writes two lines, each with its `source`: `check-mcc.sg`, which comes first, and `heymax.ai`, whose stores are used only for a merchant that the first lists no store for. One that `failed` was not answered in 2 seconds, or was answered with an error, which is a 429 when check-mcc.sg has had its 100 requests in 15 minutes: the purchase is added all the same, with no category from a code of that service. |
 | `rates_lookup` | A request to frankfurter.dev for the rates of a reply to `/spend` with a card or to `/best`, or of the assistant's showing of cards: `found`, or `failed` when it was not answered in 2 seconds, was answered with an error, or lacked a rate of one of the currencies. The total and the minimum spend are then shown without them. |
 | `connect_link` | `/connect` gave a user a sign-in link. |

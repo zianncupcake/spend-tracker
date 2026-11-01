@@ -16,6 +16,9 @@ export const DEFAULT_MODEL = 'openai/gpt-oss-120b'
  */
 export const DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b'
 
+/** The model that makes a yes or no decision, on the default provider. */
+export const DEFAULT_DECISION_MODEL = 'openai/gpt-oss-20b'
+
 /**
  * The most tokens that the model may write in one message, with those of its reasoning counted among them. A
  * message is the call of a tool or a brief answer. An answer of more would not fit a message of Telegram's anyway.
@@ -32,6 +35,8 @@ export interface AiProvider {
   model: string
   /** The model that reads photos. Undefined on a service that reads none. */
   visionModel?: string
+  /** The model that makes a yes or no decision: see `completeDecision`. */
+  decisionModel: string
 }
 
 /**
@@ -147,6 +152,18 @@ export async function completeJson(
 }
 
 /**
+ * Asks the decision model for one message, with the messages and settings of `body` as they are. It throws what
+ * `complete` throws, and the request is logged as one of `complete`'s is.
+ */
+export async function completeDecision(
+  provider: AiProvider,
+  body: Record<string, unknown>,
+  timeout: number,
+): Promise<ModelReply> {
+  return request(provider, { model: provider.decisionModel, ...body }, timeout)
+}
+
+/**
  * Posts the provider a request with the body: see `complete`. When the first key's account has had as many requests
  * as it takes (429), the same request is sent once more with the fallback key, and logged as a request of its own.
  */
@@ -195,7 +212,7 @@ async function ask(
     signal: AbortSignal.timeout(timeout),
   })
   seen.status = response.status
-  // The request holds the key and a user's question or photo, and the response can quote what it was sent, so
+  // The request holds the key and a user's question, photo or alert, and the response can quote what it was sent, so
   // neither goes into an error: only the status of the response does, and how long it says to wait, which is a number.
   if (!response.ok) {
     seen.retry_after = retryAfterOf(response)
