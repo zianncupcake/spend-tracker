@@ -160,9 +160,9 @@ function codesOf(merchant: string, [first, second]: Listed[][]): number[] {
 
 /**
  * The stores that each service lists for each of the merchants, in their order and in the order of SERVICES. A
- * service is asked for the first word of a merchant's text, as it finds nothing for the longer text of a bank. Both
- * are asked for each distinct first word, all at the same time, and for MAX_SEARCHES words at the most. A merchant
- * past those words has no stores, and neither has one whose first word is not asked for: see `wordToAsk`.
+ * service is asked for one word of a merchant's text, as it finds nothing for the longer text of a bank. Both are
+ * asked for each distinct word, all at the same time, and for MAX_SEARCHES words at the most. A merchant past those
+ * words has no stores, and neither has one whose word is not asked for: see `wordToAsk`.
  */
 async function listedFor(merchants: string[]): Promise<Listed[][][]> {
   const words = merchants.map(wordToAsk)
@@ -174,11 +174,12 @@ async function listedFor(merchants: string[]): Promise<Listed[][][]> {
 }
 
 /**
- * The word that a service is asked for a merchant: the first of its text. Empty when that is not one to send: a
- * word with no letter can be a phone number or the number of a card, and one character names no store.
+ * The word that a service is asked for a merchant: the first of its text but for "shopback", which a purchase paid
+ * with ShopBack Pay begins with and which check-mcc.sg lists as a store of its own. Empty when that is not one to
+ * send: a word with no letter can be a phone number or the number of a card, and one character names no store.
  */
 function wordToAsk(merchant: string): string {
-  const [first = ''] = wordsOf(merchant)
+  const [first = ''] = wordsOf(merchant).filter((word) => word !== 'shopback')
   return first.length >= 2 && /[a-z]/.test(first) ? first : ''
 }
 

@@ -120,6 +120,13 @@ describe('a purchase that nothing placed', () => {
     expect(rows.map((row) => row.category)).toEqual(['eligible', 'other', 'other'])
   })
 
+  it('is searched by the first word of its shop when ShopBack comes before the shop in its merchant', async () => {
+    outside.stores = [store('Sample Eatery', '5812')]
+
+    expect(await added(HSBC, 'hsbc 12.40 ShopBack SAMPLE EATERY')).toEqual(['eligible'])
+    expect(outside.searches).toEqual(['sample', 'sample'])
+  })
+
   it('is logged as a lookup of each service with what came of it, and with nothing of its merchant', async () => {
     const logged = catchConsole()
     outside.stores = [store('Sample Eatery', '5812')]

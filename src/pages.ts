@@ -194,7 +194,7 @@ card that it is of, and the messages that offer you monthly patterns at the star
 paid in the two months before, each with its card and what you spent there in a month. Telegram keeps them.</li>
 <li>Google provides the sign-in.</li>
 <li>check-mcc.sg and heymax.ai, two public services that list the category codes of merchants, are each sent the
-first word of a merchant's name to look up its code, when a purchase is added at a merchant whose code the bot does
+first word of a merchant's name, leaving out the word ShopBack, to look up its code, when a purchase is added at a merchant whose code the bot does
 not know. Nothing that is sent with the word says whose purchase it is.</li>
 <li>frankfurter.dev, a public service of the European Central Bank's exchange rates, is sent the codes of the
 currencies of a card's purchases, such as MYR, when <code>/spend</code> shows a card with purchases in another

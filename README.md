@@ -133,7 +133,7 @@ file in `src/catalogue`, to be changed there when the bank changes its terms.
 An alert says neither how a purchase was made nor the category code of its merchant. For the merchants listed in
 `src/catalogue/merchants.ts` the code is known, and a purchase there starts where the code puts it on the HSBC,
 OCBC and DBS products. For any other merchant on those products, the bot asks two public services that list the
-codes of stores, check-mcc.sg and heymax.ai, with the first word of the merchant's name as the purchase is added:
+codes of stores, check-mcc.sg and heymax.ai, with the first word of the merchant's name, leaving out the word ShopBack, as the purchase is added:
 the purchase starts where the code puts it when the merchant's name holds the name of a store that is listed, and
 the stores of that name agree. check-mcc.sg comes first: what heymax.ai lists is used only for a merchant that
 check-mcc.sg lists no such store for. Any other purchase is taken by its product for one group, which has a cap,
