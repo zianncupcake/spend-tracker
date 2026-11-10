@@ -118,5 +118,5 @@ export const uobEvol: Product = {
   defaultCategory: 'online',
   sortingNote:
     'Other Spend is where a purchase made with the physical card goes. A SISTIC payment made through AXS is not ' +
-    'eligible, so it is Other Spend too.',
+    'counted at all, for cashback or for the minimum spend, so remove it.',
 }
