@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
+import { uobEvol } from '../src/catalogue/uob-evol'
 import { storeFor } from '../src/store'
 import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
@@ -61,7 +62,7 @@ describe('/sort with a card', () => {
 
     expect(message.text).toBe(
       'Every purchase on evol ••••1234 counts as Online / Mobile Contactless Spend unless it is marked otherwise. ' +
-        'Other Spend is where a purchase made with the physical card goes. ' +
+        `${uobEvol.sortingNote} ` +
         'To mark one, send /sort <purchase id>. /spend evol shows the ids.',
     )
     // There is no purchase to go through, so nothing to press and nothing changed.
