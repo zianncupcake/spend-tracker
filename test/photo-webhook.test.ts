@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import * as photo from '../src/ai/photo'
 import type { PhotoReading, ReadPurchase } from '../src/ai/photo'
 import { DEFAULT_BASE_URL, DEFAULT_DECISION_MODEL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai/provider'
+import { uobEvol } from '../src/catalogue/uob-evol'
 import worker from '../src/index'
 import { findUser } from '../src/store'
 import * as api from '../src/telegram/api'
@@ -200,7 +201,7 @@ describe('POST /telegram with a photo', () => {
             { key: 'other', label: 'Other Spend' },
             { key: 'fx', label: 'Overseas Foreign Currency Spend' },
           ],
-          note: 'Other Spend is where a purchase made with the physical card goes.',
+          note: uobEvol.sortingNote,
         },
       ],
       timeZone: 'Asia/Singapore',

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import * as assistant from '../src/ai/assistant'
 import type { ReadPurchase } from '../src/ai/photo'
 import { DEFAULT_VISION_MODEL } from '../src/ai/provider'
+import { uobEvol } from '../src/catalogue/uob-evol'
 import { findUser, storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
 import { addRead, type Reading } from '../src/telegram/adding'
@@ -156,7 +157,7 @@ describe('a photo with a caption that names the card', () => {
             { key: 'other', label: OTHER },
             { key: 'fx', label: 'Overseas Foreign Currency Spend' },
           ],
-          note: 'Other Spend is where a purchase made with the physical card goes.',
+          note: uobEvol.sortingNote,
         },
       ],
       timeZone: 'Asia/Singapore',
