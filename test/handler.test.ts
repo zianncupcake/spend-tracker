@@ -7,6 +7,7 @@ import { ChatBlockedError, TelegramError, type RichMessage } from '../src/telegr
 import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { handleUpdate, type Update } from '../src/telegram/handler'
 import {
+  billScheduled,
   billsFor,
   CHECK_UOB_APP,
   COMMANDS,
@@ -383,6 +384,16 @@ describe('/bills', () => {
     const [, , row] = await chat.lines('/bills')
 
     expect(row).toBe('alpha | - | - | 20 Oct')
+  })
+
+  it('dates Scheduled today for a card whose payment its user says is scheduled', async () => {
+    const chat = openChat()
+    await chat.say('/addcard alpha 4321 calendar uob-evol')
+
+    expect(await chat.say('/scheduledbill alpha')).toBe(billScheduled('alpha ••••4321', '9 Oct'))
+    const [, , row] = await chat.lines('/bills')
+
+    expect(row).toBe(`alpha | - | 9 Oct | ${CHECK_UOB_APP}`)
   })
 })
 
@@ -867,7 +878,7 @@ describe('what the log has of an update', () => {
     // The names at the start of the lines of the list, each of them once: /spend is there with and without a card.
     const lines = (await chat.say('/help')).split('\n')
     const listed = [...new Set(lines.flatMap((line) => /^\/([a-z]+)/.exec(line)?.[1] ?? []))]
-    expect(listed).toHaveLength(23)
+    expect(listed).toHaveLength(24)
     const logged = catchConsole()
 
     for (const name of listed) await chat.reply(`/${name}`)
