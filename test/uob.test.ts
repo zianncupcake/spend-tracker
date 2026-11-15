@@ -221,22 +221,28 @@ describe('UOB accumulated transit alerts', () => {
 })
 
 describe('UOB bill payment alerts', () => {
-  it('reads the amount, the currency and the card of a bill paid', () => {
-    expect(parsePayment(uobEmail(UOB_PAYMENT))).toEqual({
+  it('reads the amount, the currency, the card and the time of a bill paid', () => {
+    expect(parsePayment(uobEmail(UOB_PAYMENT, seconds('2026-10-25T18:10:00+08:00')))).toEqual({
       cardLast4: '4321',
       amountMinor: 8820,
       currency: 'SGD',
       made: false,
+      paidAt: seconds('2026-10-25T16:58:00+08:00'),
     })
   })
 
-  it('reads a scheduled payment that went through as made', () => {
-    expect(parsePayment(uobEmail(UOB_PAYMENT_MADE))).toEqual({
+  it('reads a scheduled payment that went through as made, at the time it states', () => {
+    expect(parsePayment(uobEmail(UOB_PAYMENT_MADE, seconds('2026-11-03T10:30:00+08:00')))).toEqual({
       cardLast4: '4321',
       amountMinor: 5230,
       currency: 'SGD',
       made: true,
+      paidAt: seconds('2026-11-03T08:05:00+08:00'),
     })
+  })
+
+  it('dates a payment by its email when the time it states is more than two days from it', () => {
+    expect(parsePayment(uobEmail(UOB_PAYMENT, RECEIVED))?.paidAt).toBe(RECEIVED)
   })
 
   it('reads a purchase alert as a purchase, and not as a payment', () => {

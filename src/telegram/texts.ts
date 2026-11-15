@@ -400,6 +400,11 @@ export const PHOTO_READ_NO_REPLY =
 
 export const NO_CARDS = `You have no cards yet. Add one with:\n${ADD_CARD_USAGE}`
 
+/** What /bills puts above its table: the month that its reminders and ticks are of, such as "November 2026". */
+export function billsFor(month: string): string {
+  return `Bills for ${month}`
+}
+
 /** What /cards says of a card whose bill has a payment this month. */
 export const PAID = '✓'
 

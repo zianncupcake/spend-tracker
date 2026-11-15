@@ -54,7 +54,7 @@ async function ingest(store: Store, email: AlertEmail, timeZone: string): Promis
 async function ingestPayment(store: Store, email: AlertEmail): Promise<IngestResult> {
   const payment = parsePayment(email)
   if (!payment) return { status: 'unparsed' }
-  const stored = await store.insertPayment({ ...payment, sourceId: email.sourceId, paidAt: email.receivedAt })
+  const stored = await store.insertPayment({ ...payment, sourceId: email.sourceId })
   if (!stored) return { status: 'duplicate' }
   const card = (await store.listCards()).find((each) => each.last4 === payment.cardLast4)
   return { status: 'payment', payment, card }

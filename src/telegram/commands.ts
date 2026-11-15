@@ -140,8 +140,11 @@ export async function reply(
       const cards = await store.listCards()
       if (cards.length === 0) return NO_CARDS
       const { year, month } = dayOf(now(), timezone)
-      const paid = await store.paidSince(startOfDay(year, month, 1, timezone).getTime() / 1000)
-      return command === '/cards' ? cardsReply(cards, paid) : billsReply(cards, paid)
+      const monthStart = startOfDay(year, month, 1, timezone)
+      const paid = await store.paidSince(monthStart.getTime() / 1000)
+      if (command === '/cards') return cardsReply(cards, paid)
+      const monthName = new Intl.DateTimeFormat('en-US', { timeZone: timezone, month: 'long', year: 'numeric' })
+      return billsReply(cards, paid, monthName.format(monthStart))
     }
 
     case '/products':

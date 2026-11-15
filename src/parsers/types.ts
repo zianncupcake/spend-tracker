@@ -19,7 +19,7 @@ export interface ParsedTransaction {
   occurredAt: number
 }
 
-/** A card's bill that was paid, as an alert tells of it. When it was paid is when the email came. */
+/** A card's bill that was paid, as an alert tells of it. */
 export interface ParsedPayment {
   /** The last four digits of the card whose bill was paid. */
   cardLast4: string
@@ -28,6 +28,8 @@ export interface ParsedPayment {
   currency: string
   /** True when the alert tells that the payment went through, false when it tells that it was made or scheduled. */
   made: boolean
+  /** When it was paid, in unix seconds: as the alert states it, or else when the email came. */
+  paidAt: number
 }
 
 export interface Parser {

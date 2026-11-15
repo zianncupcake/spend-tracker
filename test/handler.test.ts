@@ -7,6 +7,7 @@ import { ChatBlockedError, TelegramError, type RichMessage } from '../src/telegr
 import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { handleUpdate, type Update } from '../src/telegram/handler'
 import {
+  billsFor,
   CHECK_UOB_APP,
   COMMANDS,
   EDITED,
@@ -366,6 +367,7 @@ describe('/bills', () => {
     await pay((await chat.user()).id, '2026-10-05T09:30:00+08:00')
 
     expect(await chat.lines('/bills')).toEqual([
+      billsFor('October 2026'),
       'Nickname | Reminder | Scheduled | Made',
       `alpha | day 12 | ${PAID} | -`,
     ])
@@ -376,7 +378,7 @@ describe('/bills', () => {
     await chat.say('/addcard alpha 4321 calendar ocbc-rewards')
     await pay((await chat.user()).id, '2026-10-05T09:30:00+08:00', true)
 
-    const [, row] = await chat.lines('/bills')
+    const [, , row] = await chat.lines('/bills')
 
     expect(row).toBe(`alpha | - | - | ${PAID}`)
   })

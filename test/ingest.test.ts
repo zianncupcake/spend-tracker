@@ -57,7 +57,7 @@ it('stores the bill payment read from an alert, and reports the same email again
 
   expect(await ingestAlert(store, email, ZONE)).toEqual({
     status: 'payment',
-    payment: { cardLast4: '4321', amountMinor: 8820, currency: 'SGD', made: false },
+    payment: { cardLast4: '4321', amountMinor: 8820, currency: 'SGD', made: false, paidAt: receivedAt },
     card: undefined,
   })
   expect(await ingestAlert(store, email, ZONE)).toEqual({ status: 'duplicate' })
