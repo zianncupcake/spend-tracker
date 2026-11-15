@@ -30,7 +30,7 @@ import { ChatBlockedError, type MessageEntity } from './telegram/api'
 import { carriedNotes, describeTotals, formatMoney, formatShortDate, maskLast4 } from './telegram/format'
 import { addCardEnd, sortEnd } from './telegram/purchases'
 import { label } from './telegram/replies'
-import { alertNotRead, paymentScheduled, scheduledCleared } from './telegram/texts'
+import { alertNotRead, paymentMade, paymentScheduled, scheduledCleared } from './telegram/texts'
 
 /**
  * How many alerts one run reads: the messages it fetches whole. A run that read three took 14 ms of CPU time, which
@@ -311,11 +311,12 @@ async function readAlert(
 function tellOfPayment(
   deps: Deps,
   mailbox: Mailbox,
-  { cardLast4, amountMinor, currency }: ParsedPayment,
+  { cardLast4, amountMinor, currency, made }: ParsedPayment,
   card: Card | undefined,
 ): Promise<void> {
   const named = card ? label(card) : maskLast4(cardLast4)
-  return deps.messenger.send(mailbox.chatId, paymentScheduled(formatMoney(amountMinor, currency), named))
+  const text = made ? paymentMade : paymentScheduled
+  return deps.messenger.send(mailbox.chatId, text(formatMoney(amountMinor, currency), named))
 }
 
 /**

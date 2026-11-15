@@ -85,6 +85,11 @@ export const UOB_PAYMENT =
   'You made/scheduled a bill payment(s) of SGD 88.20 to SAMPLE PAYEE on your a/c ending 1111 at 4:58PM SGT, 25 Oct ' +
   '26. Bill ref: ending 4321. If unauthorised, call UOB 24/7 Fraud Hotline.'
 
+/** UOB's alert that a scheduled payment of the bill of the card ending 4321 went through. Its values are made up. */
+export const UOB_PAYMENT_MADE =
+  'Your scheduled bill payment of SGD 52.30 to SAMPLE PAYEE on your a/c ending 1111 at 8:05AM SGT, 3 Nov 26, bill ' +
+  'ref: ending 4321, was successful. If unauthorised, call UOB 24/7 Fraud Hotline.'
+
 export function alertEmail(overrides: Partial<AlertEmail> = {}): AlertEmail {
   return {
     sourceId: 'msg-1',

@@ -157,7 +157,8 @@ digits of the card and the time.${assistant ? ' What the AI provider is sent of 
 <li>The details taken from each alert: amount, currency, merchant, last four card digits and time, with the bank
 that sent the alert and an id of the alert, so that it is not counted twice.</li>
 <li>The bill payments taken from your bank's emails: amount, currency, the last four digits of the card that was
-paid and time, with an id of the email, so that it is not counted twice.</li>
+paid, time and whether the payment was scheduled or went through, with an id of the email, so that it is not counted
+twice.</li>
 <li>The purchases that you add by hand: the amount, currency, merchant and date that you give each one, with the
 id of the Telegram message that added it, so that it is not counted twice.</li>${reads ? fromPhotos : ''}
 <li>The reward category that each purchase is sorted into.</li>
