@@ -10,7 +10,7 @@ import { WINDOW_LIMIT } from '../domain/sorting'
 import type { CardTotals } from '../domain/totals'
 import { countedIn, currentWindow, dayOf, startOfDay } from '../domain/window'
 import { ratesFor, type Rates } from '../reference-rates'
-import type { Card, Pattern, Store } from '../store'
+import type { Card, Paid, Pattern, Store } from '../store'
 import type { Connection } from '../store-connect'
 import type { MailSummary } from '../store-mail'
 import type { RichBlock, RichText, TableCell } from './api'
@@ -135,23 +135,24 @@ function paragraphOf(text: string): RichBlock {
 /**
  * A user's cards, as /cards shows them: one table, with a row for each card. A card that is linked to no product
  * has a dash where the name of its product would be, as a purchase with no merchant has one for its merchant, and
- * a card with no reminder has one for the day of its reminder. `paid` are the last four digits of the cards whose
- * bills have a payment this month: see paidCell. As text, it is a line for each card: see describeCard.
+ * a card with no reminder has one for the day of its reminder. `paid` are the cards whose bills have a payment this
+ * month, of either kind: see madeCell. As text, it is a line for each card: see describeCard.
  */
-export function cardsReply(cards: Card[], paid: string[]): Tabled {
+export function cardsReply(cards: Card[], paid: Paid): Tabled {
+  const cellOf = (card: Card) => (paid.scheduled.includes(card.last4) ? PAID : madeCell(card, paid))
   const rows = cards.map((card) => [
     card.nickname,
     maskLast4(card.last4),
     describeWindow(card),
     productOf(card.product)?.name ?? '-',
     reminderCell(card),
-    paidCell(card, paid),
+    cellOf(card),
   ])
   const header = ['Nickname', 'Card', 'Window', 'Product', 'Reminder', 'Paid']
   return tabled([tableOf(header, rows)], () =>
     cards
       .map((card) => {
-        const cell = paidCell(card, paid)
+        const cell = cellOf(card)
         return cell === '-' ? describeCard(card) : `${describeCard(card)}, paid: ${cell}`
       })
       .join('\n'),
@@ -159,17 +160,19 @@ export function cardsReply(cards: Card[], paid: string[]): Tabled {
 }
 
 /**
- * The bills of a user's cards, as /bills shows them: one table, with a row for each card, of the two columns of
- * /cards that are about its bill. As text, it is a line for each card.
+ * The bills of a user's cards, as /bills shows them: one table, with a row for each card, of its reminder and
+ * whether its bill's payment has been scheduled and made this month. As text, it is a line for each card.
  */
-export function billsReply(cards: Card[], paid: string[]): Tabled {
-  const rows = cards.map((card) => [card.nickname, reminderCell(card), paidCell(card, paid)])
-  return tabled([tableOf(['Nickname', 'Reminder', 'Paid'], rows)], () =>
+export function billsReply(cards: Card[], paid: Paid): Tabled {
+  const scheduledCell = (card: Card) => (paid.scheduled.includes(card.last4) ? PAID : '-')
+  const rows = cards.map((card) => [card.nickname, reminderCell(card), scheduledCell(card), madeCell(card, paid)])
+  return tabled([tableOf(['Nickname', 'Reminder', 'Scheduled', 'Made'], rows)], () =>
     cards
       .map((card) => {
         const reminder = card.remindDay === undefined ? 'no reminder' : `reminder on day ${card.remindDay}`
-        const cell = paidCell(card, paid)
-        return cell === '-' ? `${card.nickname}: ${reminder}` : `${card.nickname}: ${reminder}, paid: ${cell}`
+        const [scheduled, made] = [scheduledCell(card), madeCell(card, paid)]
+        const ticks = (scheduled === '-' ? '' : `, scheduled: ${scheduled}`) + (made === '-' ? '' : `, made: ${made}`)
+        return `${card.nickname}: ${reminder}${ticks}`
       })
       .join('\n'),
   )
@@ -180,11 +183,11 @@ function reminderCell(card: Card): string {
 }
 
 /**
- * Whether the card's bill has a payment this month, or a dash. A UOB card that has none says to look in UOB's app:
- * the bank sends no email when one of its own cards is paid.
+ * Whether the card's bill has a payment this month that went through, or a dash. A UOB card that has none says to
+ * look in UOB's app: the bank sends no email when one of its own cards is paid.
  */
-function paidCell(card: Card, paid: string[]): string {
-  if (paid.includes(card.last4)) return PAID
+function madeCell(card: Card, paid: Paid): string {
+  if (paid.made.includes(card.last4)) return PAID
   return productOf(card.product)?.bank === 'uob' ? CHECK_UOB_APP : '-'
 }
 

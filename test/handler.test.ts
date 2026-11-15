@@ -80,9 +80,12 @@ function recorder() {
 let lastMessage = 0
 let lastPaid = 0
 
-/** Stores a payment of the bill of the user's card ending 4321, as its alert would, at `at`. */
-async function pay(userId: number, at: string): Promise<void> {
-  const payment = { cardLast4: '4321', amountMinor: 8820, currency: 'SGD', paidAt: seconds(at) }
+/**
+ * Stores a payment of the bill of the user's card ending 4321, as its alert would, at `at`: one that was scheduled,
+ * or one that went through when `made`.
+ */
+async function pay(userId: number, at: string, made = false): Promise<void> {
+  const payment = { cardLast4: '4321', amountMinor: 8820, currency: 'SGD', made, paidAt: seconds(at) }
   await storeFor(env.DB, userId).insertPayment({ ...payment, sourceId: `paid-${++lastPaid}` })
 }
 
@@ -356,13 +359,26 @@ describe('/cards', () => {
 })
 
 describe('/bills', () => {
-  it("is one table of each card's bill reminder and whether its bill is paid this month", async () => {
+  it("is one table of each card's bill reminder and whether its payment is scheduled and made this month", async () => {
     const chat = openChat()
     await chat.say('/addcard alpha 4321 calendar ocbc-rewards')
     await chat.say('/remind alpha 12')
     await pay((await chat.user()).id, '2026-10-05T09:30:00+08:00')
 
-    expect(await chat.lines('/bills')).toEqual(['Nickname | Reminder | Paid', `alpha | day 12 | ${PAID}`])
+    expect(await chat.lines('/bills')).toEqual([
+      'Nickname | Reminder | Scheduled | Made',
+      `alpha | day 12 | ${PAID} | -`,
+    ])
+  })
+
+  it('ticks only Made for a payment that went through with no alert that scheduled it', async () => {
+    const chat = openChat()
+    await chat.say('/addcard alpha 4321 calendar ocbc-rewards')
+    await pay((await chat.user()).id, '2026-10-05T09:30:00+08:00', true)
+
+    const [, row] = await chat.lines('/bills')
+
+    expect(row).toBe(`alpha | - | - | ${PAID}`)
   })
 })
 
@@ -632,7 +648,7 @@ describe('/delete', () => {
     expect(await chat.say('/delete confirm')).toContain('has been deleted')
     expect(await rowsOwnedBy(user.id)).toEqual({ users: 0, cards: 0, transactions: 0 })
     expect(await storeFor(env.DB, user.id).listMarks()).toEqual([])
-    expect(await storeFor(env.DB, user.id).paidSince(0)).toEqual([])
+    expect(await storeFor(env.DB, user.id).paidSince(0)).toEqual({ scheduled: [], made: [] })
     expect(await userCount(chat.telegramId)).toBe(0)
     expect(await rowsOwnedBy(other.id)).toEqual({ users: 1, cards: 1, transactions: 1 })
   })

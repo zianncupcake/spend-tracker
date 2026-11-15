@@ -88,7 +88,7 @@ export const COMMANDS = `Commands:
 /addcard <nickname> <last4> statement <day> - track a card by statement cycle; <day> is the day of the month it closes
 /addcard <nickname> <last4> calendar - track a card by calendar month
 /cards - list your cards
-/bills - each card's bill reminder, and whether its bill has been paid this month
+/bills - each card's bill reminder, and whether its bill's payment has been scheduled and made this month
 /removecard <nickname> - stop tracking a card
 /renamecard <nickname> <new nickname> - give a card another nickname
 /cycle <nickname> statement <day> - change a card to a statement cycle that closes on <day>
@@ -403,10 +403,9 @@ export const NO_CARDS = `You have no cards yet. Add one with:\n${ADD_CARD_USAGE}
 /** What /cards says of a card whose bill has a payment this month. */
 export const PAID = '✓'
 
-/** What it says of a UOB card that has none: see paidCell in ./replies. */
+/** What it says of a UOB card that has none: see madeCell in ./replies. */
 export const CHECK_UOB_APP = 'check UOB app'
 
-/** What the bot says when an alert tells of a card's bill paid. `card` names the card. */
 /** What the bot says of the scheduled entry that an alert took out. */
 export function scheduledCleared(id: number, date: string, amount: string): string {
   return `Taken out, as this is its charge: scheduled ID ${id} · ${date} · ${amount}`
@@ -417,8 +416,14 @@ export function scheduledNotSeen(id: number, date: string): string {
   return `ID ${id}: scheduled for ${date}, and no charge has been seen for it. If none is coming, send /remove ${id}.`
 }
 
+/** What the bot says when an alert tells of a card's bill paid. `card` names the card. */
 export function paymentScheduled(amount: string, card: string): string {
   return `Payment scheduled: ${amount} for ${card}`
+}
+
+/** What it says when an alert tells that the payment went through. */
+export function paymentMade(amount: string, card: string): string {
+  return `Payment made: ${amount} for ${card}`
 }
 
 /** What the bot says of an alert from the bank that could not be read. It holds nothing from the email. */

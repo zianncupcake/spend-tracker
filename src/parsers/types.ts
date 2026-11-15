@@ -26,6 +26,8 @@ export interface ParsedPayment {
   /** Hundredths of the currency unit, as for a purchase. */
   amountMinor: number
   currency: string
+  /** True when the alert tells that the payment went through, false when it tells that it was made or scheduled. */
+  made: boolean
 }
 
 export interface Parser {

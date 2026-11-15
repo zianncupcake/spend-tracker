@@ -409,7 +409,7 @@ describe('a command that the assistant gives to be run', () => {
     expect(texts).toEqual([])
     expect(rich.map((message) => linesOf(message)[0])).toEqual([
       CARDS_HEADER,
-      'Nickname | Reminder | Paid',
+      'Nickname | Reminder | Scheduled | Made',
       'The card products whose reward rules are known:',
       'Gmail | not connected',
     ])

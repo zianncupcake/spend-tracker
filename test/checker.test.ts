@@ -11,6 +11,7 @@ import {
   addCardOtherwise,
   alertNotRead,
   NO_SIGN_IN,
+  paymentMade,
   paymentScheduled,
   RENAME_ADDED,
   scheduledCleared,
@@ -35,7 +36,7 @@ import {
   TOKEN_URL,
 } from './connect-helpers'
 import { gmailMessage, gmailResults, htmlPart, textPart, type Message, type MessageOptions } from './gmail-helpers'
-import { alertText, buy, CARDS_HEADER, marksOf, seconds, UOB_PAYMENT } from './helpers'
+import { alertText, buy, CARDS_HEADER, marksOf, seconds, UOB_PAYMENT, UOB_PAYMENT_MADE } from './helpers'
 import { catchConsole } from './log-helpers'
 
 const JANE = 'jane@example.test'
@@ -363,7 +364,27 @@ describe('a new bill payment alert', () => {
 
     expect(sent).toEqual([{ chatId: chat.telegramId, text: paymentScheduled('SGD 88.20', 'rewards ••••4321') }])
     expect(outside.fetched).toEqual(['msg-1'])
-    expect(await storeFor(env.DB, await chat.userId()).paidSince(now() - 60)).toEqual(['4321'])
+    expect(await storeFor(env.DB, await chat.userId()).paidSince(now() - 60)).toEqual({
+      scheduled: ['4321'],
+      made: [],
+    })
+  })
+
+  it('that tells the payment went through is told of as made', async () => {
+    const chat = await connectedChat(JANE)
+    await chat.say('/addcard rewards 4321 calendar')
+    outside.mailboxes[JANE] = [
+      gmailMessage({
+        from: 'UOB <unialerts@uobgroup.com>',
+        receivedAt: now() - 60,
+        results: [gmailResults('pass', 'uobgroup.com')],
+        content: textPart(UOB_PAYMENT_MADE),
+      }),
+    ]
+
+    await runCheck(deps)
+
+    expect(sent).toEqual([{ chatId: chat.telegramId, text: paymentMade('SGD 52.30', 'rewards ••••4321') }])
   })
 })
 

@@ -27,6 +27,12 @@ export type NewTransaction = ParsedTransaction & {
 /** `paidAt` is in unix seconds. */
 export type NewPayment = ParsedPayment & { sourceId: string; paidAt: number }
 
+/** The last four digits of the cards with a payment: see paidSince. */
+export interface Paid {
+  scheduled: string[]
+  made: string[]
+}
+
 /** A transaction as it is stored. */
 export interface Transaction extends ParsedTransaction {
   /** The id of its row, which is what its user knows the purchase by. */
@@ -398,25 +404,29 @@ export function storeFor(db: D1Database, ownerId: number) {
     },
 
     /** False, with nothing stored, when the user already has a payment with that source id. */
-    async insertPayment({ sourceId, cardLast4, amountMinor, currency, paidAt }: NewPayment): Promise<boolean> {
+    async insertPayment({ sourceId, cardLast4, amountMinor, currency, made, paidAt }: NewPayment): Promise<boolean> {
       const result = await db
         .prepare(
-          `INSERT INTO payments (owner_id, source_id, card_last4, amount_minor, currency, paid_at)
-           VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO payments (owner_id, source_id, card_last4, amount_minor, currency, made, paid_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (owner_id, source_id) DO NOTHING`,
         )
-        .bind(ownerId, sourceId, cardLast4, amountMinor, currency, paidAt)
+        .bind(ownerId, sourceId, cardLast4, amountMinor, currency, made ? 1 : 0, paidAt)
         .run()
       return result.meta.changes > 0
     },
 
-    /** The last four digits of each card that the user has a payment for at or after `since`, in unix seconds. */
-    async paidSince(since: number): Promise<string[]> {
+    /**
+     * The last four digits of each card that the user has a payment for at or after `since`, in unix seconds: of
+     * those whose alert told that it was made or scheduled, and of those whose alert told that it went through.
+     */
+    async paidSince(since: number): Promise<Paid> {
       const { results } = await db
-        .prepare('SELECT DISTINCT card_last4 AS last4 FROM payments WHERE owner_id = ? AND paid_at >= ?')
+        .prepare('SELECT DISTINCT card_last4 AS last4, made FROM payments WHERE owner_id = ? AND paid_at >= ?')
         .bind(ownerId, since)
-        .all<{ last4: string }>()
-      return results.map(({ last4 }) => last4)
+        .all<{ last4: string; made: number }>()
+      const of = (made: number) => results.filter((each) => each.made === made).map(({ last4 }) => last4)
+      return { scheduled: of(0), made: of(1) }
     },
 
     /** Total and purchase count per currency for one card, over `start <= occurred_at < end` in unix seconds. */

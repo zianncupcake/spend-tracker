@@ -57,12 +57,12 @@ it('stores the bill payment read from an alert, and reports the same email again
 
   expect(await ingestAlert(store, email, ZONE)).toEqual({
     status: 'payment',
-    payment: { cardLast4: '4321', amountMinor: 8820, currency: 'SGD' },
+    payment: { cardLast4: '4321', amountMinor: 8820, currency: 'SGD', made: false },
     card: undefined,
   })
   expect(await ingestAlert(store, email, ZONE)).toEqual({ status: 'duplicate' })
 
-  expect(await store.paidSince(receivedAt)).toEqual(['4321'])
+  expect(await store.paidSince(receivedAt)).toEqual({ scheduled: ['4321'], made: [] })
 })
 
 it('treats the same source id from two users as two purchases', async () => {

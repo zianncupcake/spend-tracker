@@ -33,6 +33,15 @@ const FOLLOWING = ' If unauthori'
 const PAYMENT =
   /\bbill payment\(s\) of ([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12}|(?=\.\d))(\.\d{1,2}|) to .{0,160}?\. Bill ref: ending (\d{4})\b/
 
+// When a scheduled payment goes through, the bank tells of it in another sentence, as in this made-up one:
+//
+//   Your scheduled bill payment of SGD 52.30 to SAMPLE PAYEE on your a/c ending 1111 at 8:05AM SGT, 3 Nov 26, bill
+//   ref: ending 4321, was successful. If unauthorised, call UOB 24/7 Fraud Hotline.
+//
+// Bounded as PAYMENT is, with the same groups.
+const MADE =
+  /\bbill payment of ([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12}|(?=\.\d))(\.\d{1,2}|) to .{0,160}?, bill ref: ending (\d{4}), was successful\b/
+
 // A tap of the card itself on public transport is billed later, with others, as in this made-up sentence:
 //
 //   Your accumulated transit transactions of SGD 8.10 has been billed to your UOB card ending 4321 on 09/10/26.
@@ -66,10 +75,12 @@ export const uob: Parser = {
   },
 
   payment(email) {
-    const match = PAYMENT.exec(singleSpaced(email.text))
+    const text = singleSpaced(email.text)
+    const scheduled = PAYMENT.exec(text)
+    const match = scheduled ?? MADE.exec(text)
     if (!match) return null
     const [, currency, whole, decimals, cardLast4] = match
-    return { cardLast4, amountMinor: hundredths(whole, decimals), currency }
+    return { cardLast4, amountMinor: hundredths(whole, decimals), currency, made: !scheduled }
   },
 }
 
