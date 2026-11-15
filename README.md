@@ -50,6 +50,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/pattern <nickname> <amount> <merchant>` | Saves what you spend with a card at a merchant in a month. `except <YYYY-MM-DD> ...` after the merchant gives the days on which a charge will not come. |
 | `/pattern <nickname> <merchant> none` | Removes a pattern. |
 | `/remind <nickname> <day>` | Reminds you of a card's bill at 09:00 on that day of every month, by your time zone, and on the last day of a month that has no such day. With `none` for the day, it removes the reminder. |
+| `/scheduledbill <nickname>` | Says that a card's bill's payment is scheduled, which `/bills` then shows for today. This is how a UOB card's is known, as UOB sends no email when one of its own cards is paid. |
 | `/timezone` | Shows the time zone that your cards' windows are counted in. |
 | `/timezone <name>` | Changes it. The name is an IANA one, such as `Asia/Tokyo`. |
 | `/connect` | Connects your Gmail, so that your bank's alerts can be read. |

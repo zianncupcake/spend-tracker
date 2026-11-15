@@ -47,6 +47,7 @@ export const COMMAND_NAMES = [
   'patterns',
   'pattern',
   'remind',
+  'scheduledbill',
   'timezone',
   'connect',
   'code',

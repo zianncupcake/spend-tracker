@@ -56,6 +56,7 @@ import {
   ASK,
   ASK_TOO,
   BEST_USAGE,
+  billScheduled,
   COMMANDS,
   CONNECT_HEADS_UP,
   DATE_USAGE,
@@ -356,6 +357,22 @@ export async function reply(
       // The store sets nothing for a card that was removed in the meantime.
       if (at === null) return `You have no card called ${nickname}.`
       return reminderSet(label(card), day, formatShortDateTime(new Date(at * 1000), timezone), timezone)
+    }
+
+    case '/scheduledbill': {
+      const [nickname = ''] = args
+      if (args.length !== 1 || !NICKNAME.test(nickname)) return 'Usage: /scheduledbill <nickname>'
+      const { id, timezone } = await user()
+      const store = storeFor(db, id)
+      const card = (await store.listCards()).find((each) => each.nickname === nickname)
+      if (!card) return `You have no card called ${nickname}.`
+      const at = now()
+      // By the message, so that Telegram's sending it again stores nothing more, and by the card, as one question
+      // for the assistant can tell of the bills of two.
+      const sourceId = `said:${messageId}:${card.last4}`
+      const paidAt = Math.floor(at.getTime() / 1000)
+      await store.insertPayment({ sourceId, cardLast4: card.last4, made: false, paidAt })
+      return billScheduled(label(card), formatShortDate(at, timezone))
     }
 
     case '/timezone': {

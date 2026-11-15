@@ -24,7 +24,9 @@ export type NewTransaction = ParsedTransaction & {
   scheduled?: number
 }
 
-export type NewPayment = ParsedPayment & { sourceId: string }
+/** A payment as an alert tells of it, or as its user tells of it, which has no amount. */
+export type NewPayment = Omit<ParsedPayment, 'amountMinor' | 'currency'> &
+  Partial<Pick<ParsedPayment, 'amountMinor' | 'currency'>> & { sourceId: string }
 
 /** The cards with a payment, by their last four digits, each with when its latest was paid: see paidSince. */
 export interface Paid {
@@ -410,7 +412,7 @@ export function storeFor(db: D1Database, ownerId: number) {
            VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (owner_id, source_id) DO NOTHING`,
         )
-        .bind(ownerId, sourceId, cardLast4, amountMinor, currency, made ? 1 : 0, paidAt)
+        .bind(ownerId, sourceId, cardLast4, amountMinor ?? null, currency ?? null, made ? 1 : 0, paidAt)
         .run()
       return result.meta.changes > 0
     },
