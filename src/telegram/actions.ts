@@ -102,7 +102,7 @@ const MAX_PARAGRAPHS = 500
 /**
  * The commands that the assistant has run at once, as if their user had sent them: the adding of a card, the
  * renaming of one, the changing of its window, of the time zone and of a purchase's date, each of which is undone in
- * one step, the saying that a card's bill is scheduled, which only /bills shows, and those that only show things. It
+ * one step, the saying that a card's bill is scheduled or paid, which only /bills shows, and those that only show things. It
  * is a list of what is run, and not of what is not: a command that the bot is given later is run for no model until
  * somebody puts it here. See runAsked for what becomes of every other line.
  */
@@ -112,7 +112,7 @@ const RUN_AT_ONCE = [
   'cycle',
   'timezone',
   'date',
-  'scheduledbill',
+  'bill',
   'cards',
   'bills',
   'spend',
