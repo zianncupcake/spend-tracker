@@ -144,7 +144,7 @@ export async function reply(
       const paid = await store.paidSince(monthStart.getTime() / 1000)
       if (command === '/cards') return cardsReply(cards, paid)
       const monthName = new Intl.DateTimeFormat('en-US', { timeZone: timezone, month: 'long', year: 'numeric' })
-      return billsReply(cards, paid, monthName.format(monthStart))
+      return billsReply(cards, paid, monthName.format(monthStart), timezone)
     }
 
     case '/products':

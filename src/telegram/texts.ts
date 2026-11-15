@@ -408,7 +408,7 @@ export function billsFor(month: string): string {
 /** What /cards says of a card whose bill has a payment this month. */
 export const PAID = '✓'
 
-/** What it says of a UOB card that has none: see madeCell in ./replies. */
+/** What it says of a UOB card that has none: see noPayment in ./replies. */
 export const CHECK_UOB_APP = 'check UOB app'
 
 /** What the bot says of the scheduled entry that an alert took out. */

@@ -26,10 +26,10 @@ export type NewTransaction = ParsedTransaction & {
 
 export type NewPayment = ParsedPayment & { sourceId: string }
 
-/** The last four digits of the cards with a payment: see paidSince. */
+/** The cards with a payment, by their last four digits, each with when its latest was paid: see paidSince. */
 export interface Paid {
-  scheduled: string[]
-  made: string[]
+  scheduled: Record<string, number>
+  made: Record<string, number>
 }
 
 /** A transaction as it is stored. */
@@ -416,16 +416,22 @@ export function storeFor(db: D1Database, ownerId: number) {
     },
 
     /**
-     * The last four digits of each card that the user has a payment for at or after `since`, in unix seconds: of
-     * those whose alert told that it was made or scheduled, and of those whose alert told that it went through.
+     * The cards that the user has a payment for at or after `since`, in unix seconds, each with when its latest was
+     * paid: of those whose alert told that it was made or scheduled, and of those whose alert told that it went
+     * through.
      */
     async paidSince(since: number): Promise<Paid> {
       const { results } = await db
-        .prepare('SELECT DISTINCT card_last4 AS last4, made FROM payments WHERE owner_id = ? AND paid_at >= ?')
+        .prepare(
+          `SELECT card_last4 AS last4, made, MAX(paid_at) AS paidAt FROM payments
+           WHERE owner_id = ? AND paid_at >= ?
+           GROUP BY card_last4, made`,
+        )
         .bind(ownerId, since)
-        .all<{ last4: string; made: number }>()
-      const of = (made: number) => results.filter((each) => each.made === made).map(({ last4 }) => last4)
-      return { scheduled: of(0), made: of(1) }
+        .all<{ last4: string; made: number; paidAt: number }>()
+      const paid: Paid = { scheduled: {}, made: {} }
+      for (const { last4, made, paidAt } of results) paid[made ? 'made' : 'scheduled'][last4] = paidAt
+      return paid
     },
 
     /** Total and purchase count per currency for one card, over `start <= occurred_at < end` in unix seconds. */

@@ -364,10 +364,8 @@ describe('a new bill payment alert', () => {
 
     expect(sent).toEqual([{ chatId: chat.telegramId, text: paymentScheduled('SGD 88.20', 'rewards ••••4321') }])
     expect(outside.fetched).toEqual(['msg-1'])
-    expect(await storeFor(env.DB, await chat.userId()).paidSince(now() - 60)).toEqual({
-      scheduled: ['4321'],
-      made: [],
-    })
+    const paid = await storeFor(env.DB, await chat.userId()).paidSince(now() - 60)
+    expect([Object.keys(paid.scheduled), Object.keys(paid.made)]).toEqual([['4321'], []])
   })
 
   it('that tells the payment went through is told of as made', async () => {
