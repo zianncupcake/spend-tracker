@@ -183,7 +183,7 @@ describe('a reminder that is due', () => {
     expect(queried).toHaveBeenCalledTimes(1)
     expect(send).not.toHaveBeenCalled()
     await runAt('2026-10-12T09:00:00+08:00')
-    expect(send.mock.calls).toEqual([[chat.telegramId, expect.stringContaining('evol ••••1234')]])
+    expect(send.mock.calls).toEqual([[chat.telegramId, billDue('evol ••••1234')]])
     await runAt('2026-10-12T09:01:00+08:00')
 
     expect(send).toHaveBeenCalledTimes(1)

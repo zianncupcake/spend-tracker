@@ -493,7 +493,7 @@ export const REVIEW =
 
 /** What a reminder says. */
 export function billDue(card: string): string {
-  return `Reminder: the bill of ${card} is due.`
+  return `REMINDER: THE BILL OF ${card.toUpperCase()} IS DUE.`
 }
 
 /** What /remind answers once a reminder is set. `next` is when the next one comes, by the clock of `timeZone`. */
