@@ -137,10 +137,11 @@ function paragraphOf(text: string): RichBlock {
  * A user's cards, as /cards shows them: one table, with a row for each card. A card that is linked to no product
  * has a dash where the name of its product would be, as a purchase with no merchant has one for its merchant, and
  * a card with no reminder has one for the day of its reminder. `paid` are the cards whose bills have a payment this
- * month, of either kind: see madeCell. As text, it is a line for each card: see describeCard.
+ * month, of either kind, which are ticked: see noPayment. As text, it is a line for each card: see describeCard.
  */
 export function cardsReply(cards: Card[], paid: Paid): Tabled {
-  const cellOf = (card: Card) => (paid.scheduled.includes(card.last4) ? PAID : madeCell(card, paid))
+  const cellOf = (card: Card) =>
+    paid.scheduled[card.last4] !== undefined || paid.made[card.last4] !== undefined ? PAID : noPayment(card)
   const rows = cards.map((card) => [
     card.nickname,
     maskLast4(card.last4),
@@ -161,20 +162,23 @@ export function cardsReply(cards: Card[], paid: Paid): Tabled {
 }
 
 /**
- * The bills of a user's cards, as /bills shows them: one table, with a row for each card, of its reminder and
- * whether its bill's payment has been scheduled and made this month, under the name of the month. As text, it is
- * that name and then a line for each card.
+ * The bills of a user's cards, as /bills shows them: one table, with a row for each card, of its reminder and the
+ * days in `timeZone` on which its bill's payment was scheduled and made this month, under the name of the month. As
+ * text, it is that name and then a line for each card.
  */
-export function billsReply(cards: Card[], paid: Paid, month: string): Tabled {
-  const scheduledCell = (card: Card) => (paid.scheduled.includes(card.last4) ? PAID : '-')
-  const rows = cards.map((card) => [card.nickname, reminderCell(card), scheduledCell(card), madeCell(card, paid)])
+export function billsReply(cards: Card[], paid: Paid, month: string, timeZone: string): Tabled {
+  const date = shortDateIn(timeZone)
+  const on = (at: number | undefined) => (at === undefined ? undefined : date(new Date(at * 1000)))
+  const scheduledCell = (card: Card) => on(paid.scheduled[card.last4]) ?? '-'
+  const madeCell = (card: Card) => on(paid.made[card.last4]) ?? noPayment(card)
+  const rows = cards.map((card) => [card.nickname, reminderCell(card), scheduledCell(card), madeCell(card)])
   const title = billsFor(month)
   return tabled([paragraphOf(title), tableOf(['Nickname', 'Reminder', 'Scheduled', 'Made'], rows)], () =>
     [
       title,
       ...cards.map((card) => {
         const reminder = card.remindDay === undefined ? 'no reminder' : `reminder on day ${card.remindDay}`
-        const [scheduled, made] = [scheduledCell(card), madeCell(card, paid)]
+        const [scheduled, made] = [scheduledCell(card), madeCell(card)]
         const ticks = (scheduled === '-' ? '' : `, scheduled: ${scheduled}`) + (made === '-' ? '' : `, made: ${made}`)
         return `${card.nickname}: ${reminder}${ticks}`
       }),
@@ -187,11 +191,10 @@ function reminderCell(card: Card): string {
 }
 
 /**
- * Whether the card's bill has a payment this month that went through, or a dash. A UOB card that has none says to
- * look in UOB's app: the bank sends no email when one of its own cards is paid.
+ * What a card says when its bill has no payment this month that went through: a dash, or for a UOB card to look in
+ * UOB's app, as the bank sends no email when one of its own cards is paid.
  */
-function madeCell(card: Card, paid: Paid): string {
-  if (paid.made.includes(card.last4)) return PAID
+function noPayment(card: Card): string {
   return productOf(card.product)?.bank === 'uob' ? CHECK_UOB_APP : '-'
 }
 
