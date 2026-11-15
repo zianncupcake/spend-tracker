@@ -43,6 +43,7 @@ import type { Tabled } from './sending'
 import { DEFAULT_CURRENCY } from './shared'
 import {
   AT_REFERENCE_RATES,
+  billsFor,
   CHECK_UOB_APP,
   HOLDS_NOTHING,
   PAID,
@@ -161,20 +162,23 @@ export function cardsReply(cards: Card[], paid: Paid): Tabled {
 
 /**
  * The bills of a user's cards, as /bills shows them: one table, with a row for each card, of its reminder and
- * whether its bill's payment has been scheduled and made this month. As text, it is a line for each card.
+ * whether its bill's payment has been scheduled and made this month, under the name of the month. As text, it is
+ * that name and then a line for each card.
  */
-export function billsReply(cards: Card[], paid: Paid): Tabled {
+export function billsReply(cards: Card[], paid: Paid, month: string): Tabled {
   const scheduledCell = (card: Card) => (paid.scheduled.includes(card.last4) ? PAID : '-')
   const rows = cards.map((card) => [card.nickname, reminderCell(card), scheduledCell(card), madeCell(card, paid)])
-  return tabled([tableOf(['Nickname', 'Reminder', 'Scheduled', 'Made'], rows)], () =>
-    cards
-      .map((card) => {
+  const title = billsFor(month)
+  return tabled([paragraphOf(title), tableOf(['Nickname', 'Reminder', 'Scheduled', 'Made'], rows)], () =>
+    [
+      title,
+      ...cards.map((card) => {
         const reminder = card.remindDay === undefined ? 'no reminder' : `reminder on day ${card.remindDay}`
         const [scheduled, made] = [scheduledCell(card), madeCell(card, paid)]
         const ticks = (scheduled === '-' ? '' : `, scheduled: ${scheduled}`) + (made === '-' ? '' : `, made: ${made}`)
         return `${card.nickname}: ${reminder}${ticks}`
-      })
-      .join('\n'),
+      }),
+    ].join('\n'),
   )
 }
 

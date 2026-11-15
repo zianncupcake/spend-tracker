@@ -24,8 +24,7 @@ export type NewTransaction = ParsedTransaction & {
   scheduled?: number
 }
 
-/** `paidAt` is in unix seconds. */
-export type NewPayment = ParsedPayment & { sourceId: string; paidAt: number }
+export type NewPayment = ParsedPayment & { sourceId: string }
 
 /** The last four digits of the cards with a payment: see paidSince. */
 export interface Paid {

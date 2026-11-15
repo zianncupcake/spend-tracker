@@ -42,6 +42,11 @@ const PAYMENT =
 const MADE =
   /\bbill payment of ([A-Z]{3}) ?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12}|(?=\.\d))(\.\d{1,2}|) to .{0,160}?, bill ref: ending (\d{4}), was successful\b/
 
+// When a payment was made, as both sentences above state it: "at 4:58PM SGT, 25 Oct 26". It is looked for only in
+// the matched sentence. The groups are: hour, minute, AM or PM, day, month and year.
+const PAID_AT = / at (\d{1,2}):(\d\d) ?([AP]M) SGT, (\d{1,2}) ([A-Z][a-z]{2}) (\d\d)\b/
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
 // A tap of the card itself on public transport is billed later, with others, as in this made-up sentence:
 //
 //   Your accumulated transit transactions of SGD 8.10 has been billed to your UOB card ending 4321 on 09/10/26.
@@ -79,9 +84,29 @@ export const uob: Parser = {
     const scheduled = PAYMENT.exec(text)
     const match = scheduled ?? MADE.exec(text)
     if (!match) return null
-    const [, currency, whole, decimals, cardLast4] = match
-    return { cardLast4, amountMinor: hundredths(whole, decimals), currency, made: !scheduled }
+    const [sentence, currency, whole, decimals, cardLast4] = match
+    return {
+      cardLast4,
+      amountMinor: hundredths(whole, decimals),
+      currency,
+      made: !scheduled,
+      paidAt: paymentTime(sentence, email.receivedAt),
+    }
   },
+}
+
+/**
+ * When the payment was made, as the sentence states it. When it states no time that can be read, or one that is
+ * more than two days from when the email came, the payment is dated by the email, as a purchase is.
+ */
+function paymentTime(sentence: string, receivedAt: number): number {
+  const match = PAID_AT.exec(sentence)
+  if (!match) return receivedAt
+  const [, hour, minute, half, day, month, year] = match
+  const hours = (Number(hour) % 12) + (half === 'PM' ? 12 : 0)
+  // An unknown month is -1, which singaporeTime finds does not exist.
+  const at = singaporeTime(2000 + Number(year), MONTHS.indexOf(month), Number(day), hours, Number(minute))
+  return at === null || Math.abs(at - receivedAt) > MAX_FROM_EMAIL ? receivedAt : at
 }
 
 function transitIn(text: string, receivedAt: number): ParsedTransaction | null {

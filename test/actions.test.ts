@@ -7,6 +7,7 @@ import { TelegramError, type RichMessage } from '../src/telegram/api'
 import { noSuchProduct } from '../src/telegram/arguments'
 import { handleUpdate } from '../src/telegram/handler'
 import {
+  billsFor,
   CANCELLED,
   CHECK_UOB_APP,
   DOING,
@@ -409,7 +410,7 @@ describe('a command that the assistant gives to be run', () => {
     expect(texts).toEqual([])
     expect(rich.map((message) => linesOf(message)[0])).toEqual([
       CARDS_HEADER,
-      'Nickname | Reminder | Scheduled | Made',
+      billsFor('October 2026'),
       'The card products whose reward rules are known:',
       'Gmail | not connected',
     ])
