@@ -106,7 +106,7 @@ export const COMMANDS = `Commands:
 /patterns - list what you spend every month at a merchant, which is held back from what is left of a cap
 /pattern <nickname> <amount> <merchant> - save such a monthly amount for a card, or remove it with none
 /remind <nickname> <day> - be reminded of a card's bill on that day of every month, or remove the reminder with none
-/scheduledbill <nickname> - say that a card's bill's payment is scheduled, which /bills then shows for today
+/bill <nickname> scheduled|made - say that a card's bill's payment is scheduled or made, which /bills then shows for today
 /timezone - show the time zone that your cards' windows are counted in
 /timezone <name> - change it, for example /timezone Asia/Tokyo
 /connect - connect your Gmail, so that your bank's alerts can be read
@@ -432,9 +432,11 @@ export function paymentMade(amount: string, card: string): string {
   return `Payment made: ${amount} for ${card}`
 }
 
-/** What /scheduledbill says, of the day on which its user said that the bill's payment was scheduled. */
-export function billScheduled(card: string, date: string): string {
-  return `Payment scheduled for ${card} on ${date}`
+export const BILL_USAGE = 'Usage: /bill <nickname> scheduled|made'
+
+/** What /bill says, of the day on which its user said that the bill's payment was scheduled or made. */
+export function billSaid(kind: 'scheduled' | 'made', card: string, date: string): string {
+  return `Payment ${kind} for ${card} on ${date}`
 }
 
 /** What the bot says of an alert from the bank that could not be read. It holds nothing from the email. */

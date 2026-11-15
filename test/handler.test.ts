@@ -7,7 +7,7 @@ import { ChatBlockedError, TelegramError, type RichMessage } from '../src/telegr
 import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { handleUpdate, type Update } from '../src/telegram/handler'
 import {
-  billScheduled,
+  billSaid,
   billsFor,
   CHECK_UOB_APP,
   COMMANDS,
@@ -386,14 +386,16 @@ describe('/bills', () => {
     expect(row).toBe('alpha | - | - | 20 Oct')
   })
 
-  it('dates Scheduled today for a card whose payment its user says is scheduled', async () => {
+  it.each<[kind: 'scheduled' | 'made', row: string]>([
+    ['scheduled', `alpha | - | 9 Oct | ${CHECK_UOB_APP}`],
+    ['made', 'alpha | - | - | 9 Oct'],
+  ])('dates today the column of a payment that its user says is %s', async (kind, row) => {
     const chat = openChat()
     await chat.say('/addcard alpha 4321 calendar uob-evol')
 
-    expect(await chat.say('/scheduledbill alpha')).toBe(billScheduled('alpha ••••4321', '9 Oct'))
-    const [, , row] = await chat.lines('/bills')
+    expect(await chat.say(`/bill alpha ${kind}`)).toBe(billSaid(kind, 'alpha ••••4321', '9 Oct'))
 
-    expect(row).toBe(`alpha | - | 9 Oct | ${CHECK_UOB_APP}`)
+    expect((await chat.lines('/bills'))[2]).toBe(row)
   })
 })
 

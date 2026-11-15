@@ -616,7 +616,7 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
       "none, a date that was not given is today's, and unsure is true for an amount or a date that the user did " +
       'not give clearly.',
     "A payment still to come goes to add_purchases too, with its day. The paying of a card's bill is no purchase: " +
-      'it goes to /scheduledbill.',
+      'it goes to /bill.',
     'To sort purchases into a category, call set_category.',
     'To do anything else, call run_command with one of these lines: /addcard <nickname> <last4> statement <day> ' +
       '[product key], /addcard <nickname> <last4> calendar [product key], /removecard <nickname>, /renamecard ' +
@@ -624,8 +624,9 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
       '/product <nickname> <product key>|none, /remove <purchase id>, /date <purchase id> <YYYY-MM-DD> to change a ' +
       "purchase's date, /pattern " +
       '<nickname> <amount a month> <merchant> [except <skipped YYYY-MM-DD> ...], /pattern <nickname> <merchant> ' +
-      'none, /remind <nickname> <day of the month>|none for a bill reminder, /scheduledbill <nickname> when the ' +
-      "user says they have scheduled or made the payment of a card's bill, /timezone <IANA name>, /connect or " +
+      'none, /remind <nickname> <day of the month>|none for a bill reminder, /bill <nickname> scheduled when the ' +
+      "user says they have scheduled the payment of a card's bill and /bill <nickname> made when they say it has " +
+      "been made or paid, /timezone <IANA name>, /connect or " +
       "/disconnect for the user's Gmail, /mcp or /mcp revoke for another " +
       "assistant's access, /delete for all that is stored about the user, and these, which only show things: " +
       '/bills for questions about bills, their reminders or whether they have been paid this month, /cards for the ' +
