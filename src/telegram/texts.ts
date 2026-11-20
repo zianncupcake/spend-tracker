@@ -57,6 +57,10 @@ export const DATE_USAGE = 'Usage: /date <purchase id> <YYYY-MM-DD>'
 
 export const NO_SUCH_DATE = 'There is no such date.'
 
+export const AMOUNT_USAGE = 'Usage: /amount <purchase id> <amount>'
+
+export const ZERO_AMOUNT = 'The amount must be more than zero.'
+
 export const BEST_USAGE = 'Usage: /best <merchant>'
 
 export const SORT_USAGE = 'Usage:\n/sort <nickname>\n/sort <purchase id>'
@@ -99,6 +103,7 @@ export const COMMANDS = `Commands:
 /add <nickname> <amount> <merchant> - add a purchase by hand; its date can go before the merchant, and a date still to come schedules it
 /remove <purchase id> - take a purchase out
 /date <purchase id> <YYYY-MM-DD> - change the date of a purchase, which can be one still to come
+/amount <purchase id> <amount> - change the amount of a purchase, in its own currency
 /products - list the card products whose reward rules are known
 /product <nickname> <product key> - link a card to a product, or to none
 /sort <nickname> - how a card's purchases are sorted into the reward categories of its product

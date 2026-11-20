@@ -1,7 +1,15 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { storeFor } from '../src/store'
-import { ADD_USAGE, DATE_USAGE, NO_SUCH_DATE, scheduledNotSeen, TOO_MANY_BY_HAND } from '../src/telegram/texts'
+import {
+  ADD_USAGE,
+  AMOUNT_USAGE,
+  DATE_USAGE,
+  NO_SUCH_DATE,
+  scheduledNotSeen,
+  TOO_MANY_BY_HAND,
+  ZERO_AMOUNT,
+} from '../src/telegram/texts'
 import { clock, NOW, openChat, type Posted } from './connect-helpers'
 import { buy, linesOf, marksOf, seconds } from './helpers'
 
@@ -260,7 +268,7 @@ describe('/add', () => {
     ['/add visa USD USD12.50 Lunch', ADD_USAGE],
     // What is taken for a date is a date, so a merchant has to come after it.
     ['/add visa 12.50 3/10', ADD_USAGE],
-    ['/add visa 0.00 Lunch', 'The amount must be more than zero.'],
+    ['/add visa 0.00 Lunch', ZERO_AMOUNT],
     // With its year first it is always a date, and one that has to be a day that there is.
     ['/add visa 12.50 2026-02-29 Lunch', 'There is no such date.'],
     ['/add visa 12.50 0026-10-03 Lunch', 'There is no such date.'],
@@ -615,6 +623,44 @@ describe('/date', () => {
     const [before] = await rowsOf(userId)
 
     expect(await chat.say(`/date ${id} ${date}`)).toBe(said)
+
+    expect(await rowsOf(userId)).toEqual([before])
+  })
+})
+
+describe('/amount', () => {
+  it('changes the amount of a purchase, which keeps its currency', async () => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    const id = await buy(userId, { currency: 'USD' })
+
+    const reply = await ask(chat, `/amount ${id} 15.60`)
+
+    expect(await rowsOf(userId)).toMatchObject([{ id, amount_minor: 1560, currency: 'USD' }])
+    expect(reply.text.split('\n')[0]).toContain('USD 15.60')
+  })
+
+  it("changes none of another user's purchases", async () => {
+    const [chat, other] = [await chatWithCards(), await chatWithCards()]
+    const otherId = await other.userId()
+    const theirs = await buy(otherId)
+    const [before] = await rowsOf(otherId)
+
+    expect(await chat.say(`/amount ${theirs} 15.60`)).toBe(`You have no purchase with ID ${theirs}.`)
+
+    expect(await rowsOf(otherId)).toEqual([before])
+  })
+
+  it.each([
+    ['an amount of zero', '0', ZERO_AMOUNT],
+    ['an amount written otherwise', '12.345', AMOUNT_USAGE],
+  ])('refuses %s, and changes nothing', async (_, amount, said) => {
+    const chat = await chatWithCards()
+    const userId = await chat.userId()
+    const id = await buy(userId)
+    const [before] = await rowsOf(userId)
+
+    expect(await chat.say(`/amount ${id} ${amount}`)).toBe(said)
 
     expect(await rowsOf(userId)).toEqual([before])
   })

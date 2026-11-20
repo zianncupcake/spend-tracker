@@ -626,6 +626,18 @@ export function storeFor(db: D1Database, ownerId: number) {
         .bind(occurredAt, ownerId, id)
         .first<Transaction>()
     },
+
+    /** Changes a purchase's amount, in its own currency, and returns it as it then is. Null as for `setOccurredAt`. */
+    async setAmount(id: number, amountMinor: number): Promise<Transaction | null> {
+      return db
+        .prepare(
+          `UPDATE transactions SET amount_minor = ?
+           WHERE owner_id = ? AND id = ? AND removed_at IS NULL
+           RETURNING ${TRANSACTION}`,
+        )
+        .bind(amountMinor, ownerId, id)
+        .first<Transaction>()
+    },
   }
 }
 

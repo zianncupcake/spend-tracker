@@ -14,7 +14,7 @@ import {
   type Card,
   type Pattern,
 } from '../store'
-import { ADD_CARD_USAGE, ADD_USAGE, CYCLE_USAGE, NO_SUCH_DATE } from './texts'
+import { ADD_CARD_USAGE, ADD_USAGE, CYCLE_USAGE, NO_SUCH_DATE, ZERO_AMOUNT } from './texts'
 
 /** What /add is told of a purchase, after the card that it was made with. */
 export interface Entry {
@@ -42,7 +42,7 @@ export const PRODUCT_KEY = /^[A-Za-z0-9-]{1,30}$/
 /** A purchase's id as its user gives it: the number that it is shown as, with or without a # before it. */
 export const PURCHASE_ID = /^#?(\d{1,15})$/
 /** An amount as the parsers of the banks' alerts read one, with or without the code of its currency before it. */
-const AMOUNT = /^([A-Za-z]{3})?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12})(\.\d{1,2}|)$/
+export const AMOUNT = /^([A-Za-z]{3})?(\d{1,3}(?:,\d\d\d){0,3}|\d{1,12})(\.\d{1,2}|)$/
 /** Day and month, and after them the year or the last two digits of it. */
 const SHORT_DATE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d\d|\d{4}))?$/
 /** What an alert is written in. A name with any other character, as "café" has, is in the merchant of no purchase. */
@@ -125,7 +125,7 @@ export function parseEntry(
   const [, currency = homeCurrency, whole, decimals] = AMOUNT.exec(apart ? args[0] + args[1] : args[0]) ?? []
   if (whole === undefined) return ADD_USAGE
   const amountMinor = hundredths(whole, decimals)
-  if (amountMinor === 0) return 'The amount must be more than zero.'
+  if (amountMinor === 0) return ZERO_AMOUNT
 
   const rest = args.slice(apart ? 2 : 1)
   const dated = timeNamed(rest[0] ?? '', card, now, timeZone)

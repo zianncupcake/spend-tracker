@@ -622,7 +622,7 @@ function systemMessage(now: Date, timeZone: string, cards: PhotoCard[], earlier:
       '[product key], /addcard <nickname> <last4> calendar [product key], /removecard <nickname>, /renamecard ' +
       '<nickname> <new nickname>, /cycle <nickname> statement <day>|calendar to change when its statement closes, ' +
       '/product <nickname> <product key>|none, /remove <purchase id>, /date <purchase id> <YYYY-MM-DD> to change a ' +
-      "purchase's date, /pattern " +
+      "purchase's date, /amount <purchase id> <amount> to change a purchase's amount, /pattern " +
       '<nickname> <amount a month> <merchant> [except <skipped YYYY-MM-DD> ...], /pattern <nickname> <merchant> ' +
       'none, /remind <nickname> <day of the month>|none for a bill reminder, /bill <nickname> scheduled when the ' +
       "user says they have scheduled the payment of a card's bill and /bill <nickname> made when they say it has " +
