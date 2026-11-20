@@ -238,85 +238,73 @@ export function assumedCodes(codes: number[]): string {
 }
 
 /**
- * What follows an answer for a merchant that card_rules was asked about: what placed it. That is what each lookup
- * service lists for it, those that list a store first, or the bot's own list, or the user's mark, or that nothing
- * did, so that a code shown for it is inferred.
+ * What placed a merchant that card_rules was asked about: what each lookup service lists for it, those that list a
+ * store first, or the bot's own list, or the user's mark, or that nothing did, so that a code shown for it is
+ * inferred. It names the merchant or its stores itself, as it follows "evidence:" and not the merchant's name.
  */
 export function foundLine(merchant: string, found: Found): string {
   const ands = new Intl.ListFormat('en')
   switch (found.by) {
     case 'reports':
-      return `${merchant}: ${reportsSaid(found.reported)}.`
+      return `${reportsSaid(merchant, found.reported)}.`
     case 'list':
-      return `${merchant}: the bot's own list gives ${codeNamed(found.mcc, found.name)}.`
+      return `The bot's own list has ${merchant} as ${codeNamed(found.mcc, found.name)}.`
     case 'mark':
       return found.products.length === 0
-        ? `${merchant}: placed as you marked it before.`
-        : `${merchant}: placed as you marked it before, on the ${ands.format(found.products)}.`
+        ? `${merchant} is placed as you marked it before.`
+        : `${merchant} is placed as you marked it before, on the ${ands.format(found.products)}.`
     case 'none':
-      return `${merchant}: no store was found for it on ${SOURCES.join(' or ')}, so any codes below are inferred.`
+      return `No store was found for ${merchant} on ${SOURCES.join(' or ')}, so any codes are inferred.`
   }
 }
 
 /** What each lookup service lists, those that list a store first. */
-function reportsSaid(reported: Reported[]): string {
+function reportsSaid(merchant: string, reported: Reported[]): string {
   const listed = (source: string) =>
     reported.filter((one) => one.source === source).map(({ store, mcc, name }) => `${store} as ${codeNamed(mcc, name)}`)
   const listing = SOURCES.filter((source) => listed(source).length > 0)
   return [
     ...listing.map((source) => `${source} lists ${new Intl.ListFormat('en').format(listed(source))}`),
-    ...SOURCES.filter((source) => !listing.includes(source)).map((source) => `${source} has nothing`),
+    ...SOURCES.filter((source) => !listing.includes(source)).map((source) => `${source} has nothing for ${merchant}`),
   ].join('; ')
 }
 
-/**
- * The bot's answer to a question that card_rules looked at codes for, in the place of the model's: each card once,
- * those that earn their bonus on some of the codes first, with them, the most first, then those that do if paid
- * online, then the rest.
- */
-export function verdictLine({ cards, rows }: Checked): string {
-  const each = cards.map((card, at) => ({
-    card,
-    codes: rows.filter(({ on }) => on[at].bonus === 'yes').map(({ mcc }) => String(mcc).padStart(4, '0')),
-    depends: rows.find(({ on }) => on[at].bonus === 'depends')?.on[at],
-  }))
-  const earning = each
-    .filter(({ codes }) => codes.length > 0)
-    .sort((one, other) => other.codes.length - one.codes.length)
-  // A card that earns on none of the codes is said as its cells say it: see `bonusCell`.
-  const others = new Map<string, string[]>()
-  const rest = each.filter(({ codes }) => codes.length === 0)
-  const dependsFirst = [...rest.filter(({ depends }) => depends), ...rest.filter(({ depends }) => !depends)]
-  for (const { card, depends } of dependsFirst) {
-    const said = depends ? `Bonus ${bonusCell(depends.bonus, depends.group).toLowerCase()}` : bonusCell('no', undefined)
-    others.set(said, [...(others.get(said) ?? []), card])
-  }
-  const ands = new Intl.ListFormat('en')
-  return [
-    ['Bonus on these codes', earning.map(({ card, codes }) => `${card} (${codes.join(', ')})`)] as const,
-    ...others,
-  ]
-    .filter(([, listed]) => listed.length > 0)
-    .map(([said, listed]) => `${said}: ${ands.format(listed)}.`)
-    .join(' ')
+/** A part of the bot's answer to a question that card_rules looked at codes for: a heading, and its lines. */
+export interface Section {
+  heading: string
+  lines: string[]
 }
 
 /**
- * What the terms of each card make of each code that card_rules looked at, a paragraph to a card, with the codes that
- * they say the same of together. The words are the terms', from the catalogue: no model has written them.
+ * The bot's answer to a question that card_rules looked at codes for, in the place of the model's, as a model was
+ * seen to contradict what it was given: the codes, with what placed them and which of them are `assumed`, then each
+ * card, with whether the codes earn its bonus and what its terms say of them. The words of the terms are the
+ * catalogue's: no model has written them.
  */
-export function whyParagraphs({ cards, products, rows }: Checked): string[] {
-  return cards.map((card, at) => {
+export function checkedSections({ merchants, cards, products, rows }: Checked, assumed: number[]): Section[] {
+  const code = ({ mcc }: { mcc: number }) => String(mcc).padStart(4, '0')
+  const evidence = [
+    ...merchants.map(({ merchant, found }) => foundLine(merchant, found)),
+    ...(assumed.length > 0 ? [assumedCodes(assumed)] : []),
+  ]
+  const mcc: Section = {
+    heading: 'MCC',
+    lines: [
+      `number: ${rows.map(({ mcc, name }) => codeNamed(mcc, name)).join(', ')}`,
+      ...evidence.map((line) => `evidence: ${line}`),
+    ],
+  }
+  const each = cards.map((card, at): Section => {
     const { name, termsUrl } = products[at]
+    // A mark alone when the card counts every code alike, else the codes that it counts alike before each mark.
+    const marks = [...Map.groupBy(rows, ({ on }) => bonusMark(on[at].bonus, on[at].group))]
+    const bonus =
+      marks.length === 1 ? marks[0][0] : marks.map(([mark, held]) => `${held.map(code).join(', ')}: ${mark}`).join('; ')
     const same = [...Map.groupBy(rows, ({ on }) => on[at].why.status).values()]
-    const said = same.map((held) =>
-      whySaid(
-        held[0].on[at].why,
-        held.map(({ mcc }) => String(mcc).padStart(4, '0')),
-      ),
-    )
-    return `${card} (${name}): ${said.join(' ')} ${termsUrl}`
+    const why = same.map((held) => whySaid(held[0].on[at].why, held.map(code)))
+    return { heading: `${card} (${name})`, lines: [`bonus: ${bonus}`, `evidence: ${why.join(' ')} ${termsUrl}`] }
   })
+  return [mcc, ...each]
 }
 
 function whySaid(why: Why, codes: string[]): string {
@@ -352,13 +340,13 @@ export function codeNamed(mcc: number, name: string | undefined): string {
 }
 
 /**
- * How a card counts a code, in the table after an answer. Where that depends on how a purchase is paid, it is said by
- * the group that the purchase would then be in: "Online Spend" as "If paid online".
+ * Whether a card's bonus is earned on a code, at a glance. Where that depends on how a purchase is paid, it is said by
+ * the group that the purchase would then be in: "Online Spend" as "🟡 if paid online".
  */
-export function bonusCell(bonus: Bonus, group: string | undefined): string {
-  if (bonus === 'yes') return 'Bonus'
-  if (bonus === 'no') return 'No bonus'
-  return group === undefined ? 'Depends' : `If paid ${group.replace(/ Spend$/, '').toLowerCase()}`
+export function bonusMark(bonus: Bonus, group: string | undefined): string {
+  if (bonus === 'yes') return '✅'
+  if (bonus === 'no') return '❌'
+  return group === undefined ? '🟡 depends' : `🟡 if paid ${group.replace(/ Spend$/, '').toLowerCase()}`
 }
 
 /** What goes before a command that is too long to ride under a button: see confirmButtons. */

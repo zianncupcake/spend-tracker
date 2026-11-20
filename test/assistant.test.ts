@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_BASE_URL, DEFAULT_DECISION_MODEL, DEFAULT_MODEL, DEFAULT_VISION_MODEL } from '../src/ai/provider'
+import { dbsWomansWorld } from '../src/catalogue/dbs-womans-world'
 import { hsbcRevolution } from '../src/catalogue/hsbc-revolution'
 import { mccName } from '../src/catalogue/mcc-names'
 import { uobEvol } from '../src/catalogue/uob-evol'
@@ -13,7 +14,7 @@ import {
   ASK,
   ASK_TOO,
   assumedCodes,
-  bonusCell,
+  bonusMark,
   codeNamed,
   COMMANDS,
   foundLine,
@@ -586,7 +587,7 @@ describe('an answer that went by a code that card_rules was given with no mercha
   })
 })
 
-describe("the bot's own lines and table after an answer that card_rules was called for", () => {
+describe("the bot's own sections after an answer that card_rules was called for", () => {
   type Chat = ReturnType<typeof openChat>
 
   /**
@@ -600,15 +601,14 @@ describe("the bot's own lines and table after an answer that card_rules was call
     await arrange(chat)
     outside.model = model
     const reply = await chat.rich('Does SAMPLE SOFT earn a bonus?')
-    const table = reply.blocks.find((block) => block.type === 'table')
-    return { lines: linesOf(reply), cells: table?.type === 'table' ? table.cells : undefined }
+    return { lines: linesOf(reply), blocks: reply.blocks }
   }
 
-  it('answers for the model, names the reports, has a row for each code, and assumes the codes', async () => {
+  it('answers for the model: the codes with the reports and those assumed, then each card with its mark', async () => {
     outside.stores = [{ Store: 'SAMPLE SOFT SG', MCC: '4816' }]
     outside.heymax = [{ name: 'SAMPLE SOFT', mcc_code: '5734' }]
 
-    const { lines, cells } = await replyTo([
+    const { lines, blocks } = await replyTo([
       calling(['call_1', 'card_rules', { merchant: 'SAMPLE SOFT', mccs: [7372, 5045] }]),
       saying('A made-up answer.'),
     ])
@@ -617,27 +617,33 @@ describe("the bot's own lines and table after an answer that card_rules was call
       { source: 'check-mcc.sg' as const, store: 'SAMPLE SOFT SG', mcc: 4816, name: mccName(4816) },
       { source: 'heymax.ai' as const, store: 'SAMPLE SOFT', mcc: 5734, name: mccName(5734) },
     ]
-    // HSBC earns on three of the codes and DBS on none but by how it is paid, so HSBC comes first.
-    expect(lines[0]).toMatch(/hsbc \(4816, 5734, 5045\).*dbs/)
-    expect(lines).not.toContain('A made-up answer.')
-    expect(lines[1]).toBe(foundLine('SAMPLE SOFT', { by: 'reports', reported }))
     const codes = [4816, 5734, 7372, 5045].map((mcc) => codeNamed(mcc, mccName(mcc)))
-    expect(cells?.map((row) => row[0].text)).toEqual(['Code', ...codes])
-    expect(cells?.[0].map(({ text }) => text)).toEqual(['Code', 'hsbc', 'dbs'])
-    expect(cells?.[2][1].text).toBe(bonusCell('yes', undefined))
-    expect(lines.at(-1)).toBe(assumedCodes([7372, 5045]))
+    expect(lines).not.toContain('A made-up answer.')
+    expect(blocks[0]).toEqual({ type: 'paragraph', text: { type: 'bold', text: 'MCC' } })
+    expect(lines.slice(0, 5)).toEqual([
+      'MCC',
+      `number: ${codes.join(', ')}`,
+      `evidence: ${foundLine('SAMPLE SOFT', { by: 'reports', reported })}`,
+      `evidence: ${assumedCodes([7372, 5045])}`,
+      `hsbc (${hsbcRevolution.name})`,
+    ])
+    // HSBC earns on three of the codes, and DBS on them by how they are paid. 7372 earns on neither.
+    const dbs = lines[lines.indexOf(`dbs (${dbsWomansWorld.name})`) + 1]
+    expect(lines[5]).toContain(`4816, 5734, 5045: ${bonusMark('yes', undefined)}; 7372: ${bonusMark('no', undefined)}`)
+    expect(dbs).toMatch(/^bonus: 4816, 5734, 5045: 🟡 .+; 7372: ❌$/)
   })
 
-  it('says that none was found, has a row for each code given after it, and then that they are assumed', async () => {
-    const { lines, cells } = await replyTo([
+  it('says that none was found, and then that the codes given after it are assumed', async () => {
+    const { lines } = await replyTo([
       calling(['call_1', 'card_rules', { merchant: 'SAMPLE SOFT' }]),
       calling(['call_2', 'card_rules', { mccs: [5734, 7372], merchant: null }]),
       saying('A made-up answer.'),
     ])
 
-    expect(cells).toHaveLength(3)
-    expect(lines[1]).toBe(foundLine('SAMPLE SOFT', { by: 'none' }))
-    expect(lines.at(-1)).toBe(assumedCodes([5734, 7372]))
+    expect(lines.slice(2, 4)).toEqual([
+      `evidence: ${foundLine('SAMPLE SOFT', { by: 'none' })}`,
+      `evidence: ${assumedCodes([5734, 7372])}`,
+    ])
   })
 
   it('quote the clause of the terms of a linked card, with its link', async () => {
