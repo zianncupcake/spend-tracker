@@ -40,7 +40,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/spend <nickname>` | Lists every purchase on one card in its current window, with what they come to. Where some are in another currency, the total has what each of those comes to in the card's own beside it, and the sum, at the European Central Bank's reference rates of the day from frankfurter.dev. |
 | `/best <merchant>` | Says which of your cards to pay with at a merchant: by whether it earns the card's bonus there and what is left of the cap, not by earn rates, which the bot does not know. |
 | `/add <nickname> <amount> <merchant>` | Adds a purchase by hand. Its date can go before the merchant, and a `YYYY-MM-DD` still to come schedules it. |
-| `/remove <purchase id>` | Takes a purchase out. |
+| `/remove <purchase id>` | Takes a purchase out, as the "Remove" button under the bot's message about it does. |
 | `/date <purchase id> <YYYY-MM-DD>` | Changes the date of a purchase, to any day, past or still to come. It is then counted by that day. |
 | `/amount <purchase id> <amount>` | Changes the amount of a purchase. It stays in the purchase's own currency. |
 | `/products` | Lists the card products whose reward rules are known. |
@@ -88,12 +88,12 @@ reply is the bot's. A message is sent with the user's last three questions of th
 the bot's replies to them, so that a follow-up such as a merchant's name alone is understood: they are kept for 30
 minutes, and then deleted.
 
-What removes or revokes something waits for a tap on "Do it" under the bot's message: taking out a purchase or a
-card, disconnecting the Gmail, making or removing the token of `/mcp`, starting a new sign-in, saving or removing
+What removes or revokes something waits for a tap on "Do it" under the bot's message: taking out a card,
+disconnecting the Gmail, making or removing the token of `/mcp`, starting a new sign-in, saving or removing
 a pattern or a reminder, as one that is saved takes the place of the one that there is, and linking a card to a
 product, as that forgets what was marked by hand under another. So does a change that the model asks for after it
 has looked purchases up, or after an earlier reply that it was sent showed purchases or anything else stored, as a
-merchant's name is text that somebody else wrote, though not `/date` or `/amount`, which are done at once and show what they changed. `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
+merchant's name is text that somebody else wrote, though not `/date`, `/amount` or `/remove`, which are done at once and show what they changed. `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
 
 ### Photos
 
@@ -384,7 +384,7 @@ There are two places to read the log:
 | `question` | A message for the assistant, as its answering ends: what came of it, how the reply was sent, and how many requests it took. |
 | `assistant_tool` | One call of a tool by the assistant's model. |
 | `action` | One thing that the assistant made out to do, with what came of it. |
-| `confirm_press` | A press of "Do it" or "Cancel" under a message that asked before a command was run. |
+| `confirm_press` | A press of "Do it" or "Cancel" under a message that asked before a command was run, or of "Remove" under a purchase. |
 | `photo` | A photo, as its reading ends: what came of it, and how many purchases were read, stored and held. |
 | `held_press` | A press of a button under purchases that the bot asked about before adding them. |
 | `exchange_failed` | A question and its reply that could not be kept for the assistant once the reply was sent (`keep`), or a scheduled run that could not delete those older than 30 minutes (`forget`), before its `check` line. |

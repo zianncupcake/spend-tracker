@@ -102,9 +102,10 @@ const MAX_PARAGRAPHS = 500
 /**
  * The commands that the assistant has run at once, as if their user had sent them: the adding of a card, the
  * renaming of one, the changing of its window, of the time zone and of a purchase's date or amount, each of which is
- * undone in one step, the saying that a card's bill is scheduled or paid, which only /bills shows, and those that only
- * show things. It is a list of what is run, and not of what is not: a command that the bot is given later is run for
- * no model until somebody puts it here. See runAsked for what becomes of every other line.
+ * undone in one step, the taking out of a purchase, whose reply shows what was taken out, the saying that a card's
+ * bill is scheduled or paid, which only /bills shows, and those that only show things. It is a list of what is run,
+ * and not of what is not: a command that the bot is given later is run for no model until somebody puts it here. See
+ * runAsked for what becomes of every other line.
  */
 const RUN_AT_ONCE = [
   'addcard',
@@ -113,6 +114,7 @@ const RUN_AT_ONCE = [
   'timezone',
   'date',
   'amount',
+  'remove',
   'bill',
   'cards',
   'bills',
@@ -127,21 +129,23 @@ const RUN_AT_ONCE = [
 /**
  * Those of them that change the user's cards, or the user. They are asked about first, as the commands below are,
  * when the model had read with a tool before it asked for them: see Asking. And after one of them is run, the user
- * and their cards are read again for what the model asks for next: see actInRounds. /date and /amount are not among
- * them: the id that they take is mostly found with a tool, and their reply shows what was changed.
+ * and their cards are read again for what the model asks for next: see actInRounds. /date, /amount and /remove are
+ * not among them: the id that they take is mostly found with a tool, and their reply shows what was changed.
  */
 const CHANGING = ['addcard', 'renamecard', 'cycle', 'timezone'] as const
 
 /**
- * The commands that are asked about first, whatever the model had read: those that remove or revoke. They are the
- * taking out of a purchase or of a card, the giving up of the access to a Gmail, the removing of an assistant's
- * token, the making of a new one, which ends the one that there is, the starting of a sign-in, which cancels one
- * that is waiting for its code, the removing of a pattern or of a reminder, or the saving of one, which takes the
- * place of the one that there is, and the linking of a card to a product, which forgets what was marked by hand
- * under another. The assistant runs none of them: each waits for its user to press a button. So they are what a
- * press may run, but for the commands above: see CONFIRMABLE in ../log.
+ * The commands that are asked about first, whatever the model had read: those that remove or revoke, but /remove,
+ * which is run at once. They are the taking out of a card, the giving up of the access to a Gmail, the removing of
+ * an assistant's token, the making of a new one, which ends the one that there is, the starting of a sign-in, which
+ * cancels one that is waiting for its code, the removing of a pattern or of a reminder, or the saving of one, which
+ * takes the place of the one that there is, and the linking of a card to a product, which forgets what was marked by
+ * hand under another. The assistant runs none of them: each waits for its user to press a button. So they are what
+ * a press may run, but for the commands above: see CONFIRMABLE in ../log.
  */
-const ASKED_FIRST = CONFIRMABLE.filter((name) => !CHANGING.some((changing) => changing === name))
+const ASKED_FIRST = CONFIRMABLE.filter((name) => name !== 'remove').filter(
+  (name) => !CHANGING.some((changing) => changing === name),
+)
 
 /**
  * The most queries that the things which are done for one message may run between them, each counted at the most
@@ -340,14 +344,15 @@ function toldOf(outcome: Carried['outcome']): string {
  * own, which is the bot's and not the model's. Returns the replies with what came of each action, or nothing when
  * the time of whoever waits was up: nothing is begun from then on.
  *
- * What removes or revokes is not done here at all: it is asked about, and done when its user presses a button. And
- * the deleting of everything is done for nobody but a user who sends the command themselves. See runAsked.
+ * What removes or revokes is not done here at all, but the taking out of a purchase: it is asked about, and done
+ * when its user presses a button. And the deleting of everything is done for nobody but a user who sends the command
+ * themselves. See runAsked.
  *
  * What the model asks for after a tool has read for it is trusted less than what it makes of its user's words
  * alone: what a tool returns holds text that somebody else wrote. So whatever of it would change something is asked
  * about first too. Purchases are held whole, for their user to add with a button, and the commands that change
  * something wait for a press as those that remove do. Purchases are sorted as before, a purchase's date or amount is
- * changed as before, and whatever only shows things still shows them. See Asking.
+ * changed and a purchase is taken out as before, and whatever only shows things still shows them. See Asking.
  *
  * An action that fails ends the carrying out. Those before it stay done, each with its reply, and the user is told
  * that it is those that are answered: see wentWrong. So does an action that there is no room left for, of the
@@ -574,10 +579,10 @@ async function sortAsked(deps: Deps, { user, room }: Asking, ids: number[], key:
  * own list of its commands.
  *
  * What is run is what is listed to be run, and nothing else: see RUN_AT_ONCE. A line of one of those commands is
- * run as if its user had sent it: see ran. A line of a command that removes or revokes is not run. Its user is
- * asked first, with buttons, and so they are about a command that changes something when the model had read before
- * it gave the line: see confirmFor. Only /timezone and /addcard with nothing after them are not asked about then, as
- * they show the time zone, or the cards that can be added, and change nothing.
+ * run as if its user had sent it: see ran. A line of any other command that removes or revokes is not run. Its user
+ * is asked first, with buttons, and so they are about a command that changes something when the model had read
+ * before it gave the line: see confirmFor. Only /timezone and /addcard with nothing after them are not asked about
+ * then, as they show the time zone, or the cards that can be added, and change nothing.
  *
  * A line of /delete is not run either, whatever follows the command. It is answered with what /delete answers when
  * it is sent with nothing after it, which says what to send to go ahead: the deleting of everything is done for a

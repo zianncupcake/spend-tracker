@@ -28,7 +28,7 @@ import { storeFor, type Card, type Transaction } from './store'
 import { mailStoreFor, removeExpiredAttempts, removeExpiredBatches, takeNextMailbox, type Mailbox } from './store-mail'
 import { ChatBlockedError, type MessageEntity } from './telegram/api'
 import { carriedNotes, describeTotals, formatMoney, formatShortDate, maskLast4 } from './telegram/format'
-import { addCardEnd, sortEnd } from './telegram/purchases'
+import { addCardEnd, removeRow, sortEnd } from './telegram/purchases'
 import { label } from './telegram/replies'
 import { alertNotRead, paymentMade, paymentScheduled, scheduledCleared } from './telegram/texts'
 
@@ -382,7 +382,8 @@ async function tellOfPurchase(
   const running = `Running total: ${describeTotals(totals, mailbox.timezone)}`
   const text = [spent, running, ...notes, ...clearedLines].join('\n')
   const product = productOf(card.product)
-  if (!product) return deps.messenger.send(mailbox.chatId, text, marked)
+  // On a card with no product, nothing moves the purchase: only the button that takes it out is under it.
+  if (!product) return deps.messenger.send(mailbox.chatId, text, marked, [removeRow(purchase.id)])
   // On a card with a product, the message ends with where the purchase is sorted, and has the buttons that move it.
   const { line, buttons } = sortEnd(product, { ...purchase, remembered })
   return deps.messenger.send(mailbox.chatId, `${text}\n${line}`, marked, buttons)

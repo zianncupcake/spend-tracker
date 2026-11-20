@@ -63,8 +63,8 @@ const HELD_PRESS = /^held:(\d{1,15}):(add|skip|\d{4})$/
 
 /**
  * What a button under a message that asks before a command is run sends back: whether to run it, and the line of
- * the command, as its user would send it. No other button of the bot's holds the like: none sends back what begins
- * so.
+ * the command, as its user would send it. The button that takes a purchase out sends back the same: see removeRow.
+ * No other button of the bot's holds the like: none sends back what begins so.
  */
 const CONFIRM_PRESS = /^(do|no):(.+)$/s
 
@@ -240,9 +240,9 @@ export function whereSorted(product: Product, category: string | null): string {
 
 /**
  * The end of a message about one purchase on a card with a product: the line that says where the purchase is, such
- * as "ID 57: Other Spend", and the buttons that move it. There is a button for each category that a purchase can be
- * put in by hand, but for the one that this purchase is in. `remembered` is for a purchase that has just been added
- * where its user's mark of the merchant put it: see `startOf` in ../domain/sorting.
+ * as "ID 57: Other Spend", the buttons that move it, and last the one that takes it out. There is a button for each
+ * category that a purchase can be put in by hand, but for the one that this purchase is in. `remembered` is for a
+ * purchase that has just been added where its user's mark of the merchant put it: see `startOf` in ../domain/sorting.
  */
 export function sortEnd(
   product: Product,
@@ -250,9 +250,10 @@ export function sortEnd(
 ): { line: string; buttons: Button[][] } {
   const current = categoryOf(product, purchase.category)
   // A row to each button, so that no label is cut short on a phone.
-  const buttons = categoriesOf(product)
+  const marks = categoriesOf(product)
     .filter((choice) => choice.key !== current)
     .map(({ key, label }) => [{ text: `Mark as ${label}`, data: `${purchase.id}:${key}` }])
+  const buttons = [...marks, removeRow(purchase.id)]
   const where = whereSorted(product, purchase.category)
   return { line: `ID ${purchase.id}: ${where}${purchase.remembered ? `, ${MARKED_BEFORE}` : ''}`, buttons }
 }
@@ -265,7 +266,19 @@ export function sortPrompt(product: Product, purchase: Transaction, timeZone: st
   return { ...message, buttons }
 }
 
-/** What a button of `sortEnd` sent back, read again. Null for anything else: a client can send what no button holds. */
+/**
+ * The row of the button that takes a purchase out. It sends back what "Do it" would for /remove, so a press runs
+ * /remove at once, as pressConfirm in ./confirming runs any "Do it": nothing is asked first, and the reply says what
+ * was taken out.
+ */
+export function removeRow(purchaseId: number): Button[] {
+  return [{ text: 'Remove', data: `do:/remove ${purchaseId}` }]
+}
+
+/**
+ * What a button of `sortEnd` that moves a purchase sent back, read again. Null for anything else: a client can send
+ * what no button holds.
+ */
 export function readPress(data: string): { purchaseId: number; category: string } | null {
   const [, purchaseId, category] = PRESS.exec(data) ?? []
   return purchaseId === undefined ? null : { purchaseId: Number(purchaseId), category }

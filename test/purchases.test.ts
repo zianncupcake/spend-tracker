@@ -15,6 +15,7 @@ import {
   readHeldPress,
   readPress,
   sectionsOf,
+  removeRow,
   sortEnd,
   type Dated,
   type Line,
@@ -717,21 +718,25 @@ describe('where a purchase is sorted', () => {
     other: [{ text: 'Mark as Other Spend', data: '57:other' }],
     fx: [{ text: 'Mark as Overseas Foreign Currency Spend', data: '57:fx' }],
   }
+  const REMOVE = removeRow(57)
 
-  it('ends a message with a button for each category but the one that the purchase is in, a row to each', () => {
-    const online = { line: 'ID 57: Online / Mobile Contactless Spend', buttons: [MARK.selected, MARK.other, MARK.fx] }
+  it('ends a message with a button for each category but the one that the purchase is in, a row to each, and then the one that takes it out', () => {
+    const online = {
+      line: 'ID 57: Online / Mobile Contactless Spend',
+      buttons: [MARK.selected, MARK.other, MARK.fx, REMOVE],
+    }
 
     expect(sortEnd(uobEvol, { id: 57, category: null })).toEqual(online)
     expect(sortEnd(uobEvol, { id: 57, category: 'online' })).toEqual(online)
     expect(sortEnd(uobEvol, { id: 57, category: 'dining' })).toEqual(online)
     expect(sortEnd(uobEvol, { id: 57, category: 'fx' })).toEqual({
       line: 'ID 57: Overseas Foreign Currency Spend',
-      buttons: [MARK.online, MARK.selected, MARK.other],
+      buttons: [MARK.online, MARK.selected, MARK.other, REMOVE],
     })
     // And for one that nothing has placed, on a product with no default: a button for every category.
     expect(sortEnd(NO_DEFAULT, { id: 57, category: null })).toEqual({
       line: 'ID 57: not sorted',
-      buttons: [MARK.online, MARK.selected, MARK.other, MARK.fx],
+      buttons: [MARK.online, MARK.selected, MARK.other, MARK.fx, REMOVE],
     })
   })
 })

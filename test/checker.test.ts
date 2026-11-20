@@ -7,6 +7,7 @@ import worker from '../src/index'
 import { storeFor } from '../src/store'
 import { heldStoreFor } from '../src/store-held'
 import { mailStoreFor } from '../src/store-mail'
+import { removeRow } from '../src/telegram/purchases'
 import {
   addCardOtherwise,
   alertNotRead,
@@ -277,8 +278,8 @@ describe('a new alert', () => {
         // In UTF-16 code units, as the indices of a string are: the 𝒳 is two of the 38.
         entities: [{ type: 'code', offset, length: 38 }],
         link_preview_options: { is_disabled: true },
-        // The buttons that add a card that is not added.
-        ...(nickname ? {} : { reply_markup: expect.anything() }),
+        // The buttons that add a card that is not added, or the one that takes the purchase out.
+        reply_markup: expect.anything(),
       },
     ])
     // The name is marked, and no more or less of the message than the name.
@@ -572,14 +573,18 @@ describe('a new alert for a card that is linked to a product', () => {
     await runCheck(deps)
     await runCheck(deps)
 
-    expect((await sortedOf(await jane.userId()))['msg-1'].category).toBe('fx')
-    expect((await sortedOf(await sam.userId()))['msg-1'].category).toBeNull()
-    // Only the message about the card with a product says where the purchase is, and has buttons.
+    const janes = (await sortedOf(await jane.userId()))['msg-1']
+    const sams = (await sortedOf(await sam.userId()))['msg-1']
+    expect(janes.category).toBe('fx')
+    expect(sams.category).toBeNull()
+    // Only the message about the card with a product says where the purchase is, and has buttons that move it.
+    // Each ends with the button that takes its purchase out.
     const told = posted.map(({ chatId, text, buttons }) => [chatId, text.split('\n').length, buttons?.length])
     expect(told).toEqual([
-      [jane.telegramId, 3, 3],
-      [sam.telegramId, 2, undefined],
+      [jane.telegramId, 3, 4],
+      [sam.telegramId, 2, 1],
     ])
+    expect(posted.map(({ buttons }) => buttons?.at(-1))).toEqual([removeRow(janes.id), removeRow(sams.id)])
   })
 })
 

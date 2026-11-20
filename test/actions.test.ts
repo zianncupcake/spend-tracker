@@ -6,6 +6,7 @@ import { userOfToken } from '../src/mcp/tokens'
 import { TelegramError, type RichMessage } from '../src/telegram/api'
 import { noSuchProduct } from '../src/telegram/arguments'
 import { handleUpdate } from '../src/telegram/handler'
+import { removeRow } from '../src/telegram/purchases'
 import {
   billsFor,
   CANCELLED,
@@ -39,7 +40,6 @@ import {
   BY_HAND,
   chatWithCard,
   chatWithCards,
-  labels,
   markedIn,
   MESSAGE,
   read,
@@ -408,6 +408,19 @@ describe('a command that the assistant gives to be run', () => {
     expect(texts[0].text).toContain('SGD 15.60')
   })
 
+  it('is run at once when it is /remove, whose reply shows what was taken out, though a tool read for the model first', async () => {
+    const chat = await chatWithCard()
+    const userId = await chat.userId()
+    const purchase = await buy(userId, { cardLast4: '5678' })
+    actingWith({ afterReading: true }, command(`/remove ${purchase}`))
+
+    const { texts } = await told(chat)
+
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toMatchObject({ text: expect.stringContaining(`ID ${purchase}`), buttons: undefined })
+    expect(await rowsOf(userId)).toMatchObject([{ id: purchase, removed_at: expect.any(Number) }])
+  })
+
   it('is answered with the table that the command replies with, when it is one that shows things in a table', async () => {
     const chat = await chatWithCards()
     const userId = await chat.userId()
@@ -441,11 +454,10 @@ describe('a command that the assistant gives to be run', () => {
     expect(rich).toEqual(sentDirectly)
   })
 
-  it('is not run when it removes or revokes: each of the five is asked about, with what it concerns, and changes nothing', async () => {
+  it('is not run when it removes or revokes: each of the four is asked about, with what it concerns, and changes nothing', async () => {
     const chat = await connectedChat('jane@example.test')
     await chat.say('/addcard evol 5678 calendar uob-evol')
     const userId = await chat.userId()
-    const purchase = await buy(userId, { cardLast4: '5678' })
     await chat.say('/mcp')
     const tokenOf = () =>
       env.DB.prepare('SELECT token_hash FROM mcp_tokens WHERE owner_id = ?').bind(userId).first('token_hash')
@@ -453,12 +465,7 @@ describe('a command that the assistant gives to be run', () => {
     const logged = catchConsole()
 
     // The line as the model gave it, the line that rides under the buttons, and what the message says.
-    const five: [given: string, line: string, text: string][] = [
-      [
-        `/REMOVE  #${purchase}`,
-        `/remove ${purchase}`,
-        `Take this purchase out of ••••5678?\nID ${purchase} · 5 Oct · SGD 12.40 · COFFEE PLACE`,
-      ],
+    const four: [given: string, line: string, text: string][] = [
       ['/removecard evol', '/removecard evol', 'Stop tracking evol ••••5678?'],
       [
         '/disconnect',
@@ -476,7 +483,7 @@ describe('a command that the assistant gives to be run', () => {
         'Remove your assistant access token? An assistant that uses it will no longer read your data.',
       ],
     ]
-    for (const [given, line, text] of five) {
+    for (const [given, line, text] of four) {
       acting(command(given))
       const { rich, texts } = await told(chat)
       expect(rich).toEqual([])
@@ -484,14 +491,12 @@ describe('a command that the assistant gives to be run', () => {
     }
 
     expect(logged.events('action').map(({ command: name, outcome }) => [name, outcome])).toEqual([
-      ['remove', 'asked'],
       ['removecard', 'asked'],
       ['disconnect', 'asked'],
       ['mcp', 'asked'],
       ['mcp', 'asked'],
     ])
-    // Nothing was removed and nothing was revoked: the purchase, the card, the Gmail and the token are as they were.
-    expect(await rowsOf(userId)).toMatchObject([{ id: purchase, removed_at: null }])
+    // Nothing was removed and nothing was revoked: the card, the Gmail and the token are as they were.
     expect(await chat.lines('/cards')).toContain(
       `evol | ••••5678 | calendar month | UOB EVOL Card | - | ${CHECK_UOB_APP}`,
     )
@@ -597,23 +602,21 @@ describe('a command that the assistant gives to be run', () => {
   })
 })
 
-describe('a press of a button under a message that asks before a command is run', () => {
-  /** A user with a card and a purchase on it, and the message that asks whether to take the purchase out. */
+describe('a press of a button that runs a command: "Do it" or "Cancel" under a question, or "Remove" under a purchase', () => {
+  /** A user with a card and a purchase on it, and the message that shows it, with the button that takes it out. */
   async function asked() {
     const chat = await chatWithCard()
     const userId = await chat.userId()
     const purchase = await buy(userId, { cardLast4: '5678' })
-    const asking = await askedAbout(chat, `/remove ${purchase}`)
-    const shown = `Take this purchase out of ••••5678?\nID ${purchase} · 5 Oct · SGD 12.40 · COFFEE PLACE`
-    expect(asking.text).toBe(shown)
-    return { chat, userId, purchase, asking, shown }
+    const [asking] = await chat.ask(`/sort ${purchase}`)
+    return { chat, userId, purchase, asking, shown: asking.text }
   }
 
-  it('runs the command once when it is "Do it": the command’s reply is sent, and the message points to it and has no buttons', async () => {
+  it('runs /remove at once when it is "Remove": the command’s reply is sent, and the message points to it and has no buttons', async () => {
     const { chat, userId, purchase, asking, shown } = await asked()
     const logged = catchConsole()
 
-    const pressed = await chat.press(asking, 'Do it')
+    const pressed = await chat.press(asking, 'Remove')
 
     expect(pressed.answer).toBe(SEE_REPLY)
     expect(pressed.sent.map((message) => message.text)).toEqual([
@@ -627,11 +630,9 @@ describe('a press of a button under a message that asks before a command is run'
       { event: 'confirm_press', user: userId, command: 'remove', outcome: 'done' },
       { event: 'update', kind: 'press', outcome: 'replied', ms: 0 },
     ])
-    expect(answering).toHaveBeenCalledTimes(1)
-
     // A press that Telegram delivers again takes nothing out twice: the command says that there is nothing to take.
     // The press is answered as the first was: it is the reply that says what came of the command.
-    const again = await chat.pressWith(asking, `do:/remove ${purchase}`)
+    const again = await chat.pressWith(asking, removeRow(purchase)[0].data)
     expect(again.sent.map((message) => message.text)).toEqual([`You have no purchase with ID ${purchase}.`])
     expect(again.answer).toBe(SEE_REPLY)
     expect(await rowsOf(userId)).toHaveLength(1)
@@ -674,7 +675,10 @@ describe('a press of a button under a message that asks before a command is run'
   })
 
   it('runs nothing when it is "Cancel", and the message says so', async () => {
-    const { chat, userId, purchase, asking, shown } = await asked()
+    const chat = await chatWithCard()
+    const userId = await chat.userId()
+    const asking = await askedAbout(chat, '/removecard evol')
+    const shown = asking.text
     const logged = catchConsole()
 
     const pressed = await chat.press(asking, 'Cancel')
@@ -682,19 +686,19 @@ describe('a press of a button under a message that asks before a command is run'
     expect(pressed).toEqual({ answer: CANCELLED, sent: [] })
     expect(asking.text).toBe(`${shown}\n${CANCELLED}`)
     expect(asking.buttons).toBeUndefined()
-    expect(await rowsOf(userId)).toMatchObject([{ id: purchase, removed_at: null }])
+    expect(await rowsOwnedBy(userId)).toEqual({ users: 1, cards: 1, transactions: 0 })
     expect(logged.events('confirm_press')).toEqual([
-      { event: 'confirm_press', user: userId, command: 'remove', outcome: 'cancelled' },
+      { event: 'confirm_press', user: userId, command: 'removecard', outcome: 'cancelled' },
     ])
   })
 
   it('by somebody else takes nothing of the user’s out: it is run for whoever pressed, in their own chat, or not at all', async () => {
     const { chat, userId, purchase, asking } = await asked()
     const before = { ...asking }
-    const data = `do:/remove ${purchase}`
-    // Somebody with a card and a message of their own that asks, who presses what the user's button holds.
+    const data = removeRow(purchase)[0].data
+    // Somebody with a card and a purchase of their own, who presses what the user's button holds under its message.
     const other = await chatWithCard()
-    const theirs = await askedAbout(other, `/remove ${await buy(await other.userId(), { cardLast4: '5678' })}`)
+    const [theirs] = await other.ask(`/sort ${await buy(await other.userId(), { cardLast4: '5678' })}`)
     const stranger = openChat()
 
     const pressed = await other.pressWith(theirs, data)
@@ -711,7 +715,6 @@ describe('a press of a button under a message that asks before a command is run'
     expect(await rowsOf(userId)).toMatchObject([{ id: purchase, removed_at: null }])
     expect(await rowsOf(await other.userId())).toMatchObject([{ removed_at: null }])
     expect(asking).toEqual(before)
-    expect(labels(asking)).toEqual(['Do it', 'Cancel'])
   })
 
   it.each(['do:/delete confirm', 'do:/spend evol'])(
@@ -972,12 +975,13 @@ describe('what the log has of the things that the assistant was asked to do', ()
       { kind: 'category', ids: [PURCHASE], category: 'other' },
       command('/timezone Asia/Tokyo'),
       command(`/remove ${PURCHASE}`),
+      command('/removecard privatecard'),
       command('/nosuchcommand PRIVATE'),
     )
 
     const { texts } = await told(chat, 424242)
-    await chat.press(texts[3], 'Cancel')
-    await chat.press(await askedAbout(chat, `/remove ${PURCHASE}`), 'Do it')
+    await chat.press(texts[4], 'Cancel')
+    await chat.press(await askedAbout(chat, '/removecard privatecard'), 'Do it')
 
     const action = { event: 'action', user: userId }
     expect(logged.events().slice(1)).toEqual([
@@ -985,13 +989,14 @@ describe('what the log has of the things that the assistant was asked to do', ()
       { ...action, kind: 'add', outcome: 'asked', stored: 0, held: 1 },
       { ...action, kind: 'category', outcome: 'done' },
       { ...action, kind: 'command', command: 'timezone', outcome: 'done' },
-      { ...action, kind: 'command', command: 'remove', outcome: 'asked' },
+      { ...action, kind: 'command', command: 'remove', outcome: 'done' },
+      { ...action, kind: 'command', command: 'removecard', outcome: 'asked' },
       { ...action, kind: 'command', command: 'unknown', outcome: 'refused' },
-      { ...loggedFor(userId, [])[1], tool_calls: 5, actions: 5 },
-      { event: 'confirm_press', user: userId, command: 'remove', outcome: 'cancelled' },
+      { ...loggedFor(userId, [])[1], tool_calls: 6, actions: 6 },
+      { event: 'confirm_press', user: userId, command: 'removecard', outcome: 'cancelled' },
       { event: 'update', kind: 'press', outcome: 'replied', ms: 0 },
-      ...loggedFor(userId, [{ kind: 'command', command: 'remove', outcome: 'asked' }]),
-      { event: 'confirm_press', user: userId, command: 'remove', outcome: 'done' },
+      ...loggedFor(userId, [{ kind: 'command', command: 'removecard', outcome: 'asked' }]),
+      { event: 'confirm_press', user: userId, command: 'removecard', outcome: 'done' },
       { event: 'update', kind: 'press', outcome: 'replied', ms: 0 },
     ])
     // As it is written, the line of an action is this.
