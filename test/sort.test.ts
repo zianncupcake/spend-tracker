@@ -4,6 +4,7 @@ import { uobEvol } from '../src/catalogue/uob-evol'
 import { storeFor } from '../src/store'
 import { ChatBlockedError, TelegramError } from '../src/telegram/api'
 import { handleUpdate } from '../src/telegram/handler'
+import { removeRow } from '../src/telegram/purchases'
 import { PRESS_FAILED, SORT_USAGE } from '../src/telegram/texts'
 import { answered, deps, openChat, sent, type Posted } from './connect-helpers'
 import { buy, linesOf, marksOf, userCount } from './helpers'
@@ -91,7 +92,12 @@ describe('/sort with the id of a purchase', () => {
 
     expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE · by hand\nID ${id}: ${ONLINE}`)
     expect(markedIn(message)).toEqual(['COFFEE PLACE'])
-    expect(message.buttons?.flat().map((button) => button.data)).toEqual([`${id}:selected`, `${id}:other`, `${id}:fx`])
+    expect(message.buttons?.flat().map((button) => button.data)).toEqual([
+      `${id}:selected`,
+      `${id}:other`,
+      `${id}:fx`,
+      removeRow(id)[0].data,
+    ])
   })
 
   it('flags the purchase when the button is pressed, says so in the message, and changes the buttons', async () => {

@@ -20,7 +20,7 @@ import { ocbcRewards } from '../src/catalogue/ocbc-rewards'
 import type { Product } from '../src/catalogue/types'
 import { uobEvol } from '../src/catalogue/uob-evol'
 import { TRANSIT_MERCHANT } from '../src/parsers/uob'
-import { sortEnd } from '../src/telegram/purchases'
+import { removeRow, sortEnd } from '../src/telegram/purchases'
 
 /** The category that the product's rules give a purchase in the product's own currency. */
 function at(merchant: string | null, product: Product = uobEvol): string | null {
@@ -48,8 +48,9 @@ describe('the catalogue', () => {
     // The category that a purchase is in by default, when the product has one, is one of its own.
     expect([undefined, ...keys]).toContain(product.defaultCategory)
     // A button sends back the id of a purchase and the key of a category, in 64 bytes at most. Each category has
-    // one under a purchase that is in another category.
-    const buttons = keys.flatMap((category) => sortEnd(product, { id: 999_999_999_999_999, category }).buttons.flat())
+    // one under a purchase that is in another category. The last row is the one that takes the purchase out.
+    const rows = (category: string) => sortEnd(product, { id: 999_999_999_999_999, category }).buttons.slice(0, -1)
+    const buttons = keys.flatMap((category) => rows(category).flat())
     expect(new Set(buttons.map((button) => button.data)).size).toBe(keys.length)
     for (const button of buttons) {
       expect(new TextEncoder().encode(button.data).length).toBeLessThanOrEqual(64)
@@ -404,6 +405,7 @@ describe('a product with other rules', () => {
       buttons: [
         [{ text: 'Mark as dining', data: '57:dining' }],
         [{ text: 'Mark as everything else', data: '57:rest' }],
+        removeRow(57),
       ],
     })
   })

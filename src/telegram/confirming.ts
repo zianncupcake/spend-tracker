@@ -13,13 +13,12 @@ import {
   parsePattern,
   parseReminder,
   PRODUCT_KEY,
-  PURCHASE_ID,
   timeZoneNamed,
   windowWords,
 } from './arguments'
 import { commandIn, ran } from './commands'
-import { describeWindow, formatAmount, formatShortDate, maskLast4 } from './format'
-import { confirmButtons, inMessages, purchaseLine, type Line } from './purchases'
+import { describeWindow, formatAmount } from './format'
+import { confirmButtons, inMessages, type Line } from './purchases'
 import { describeCard, label, patternLine } from './replies'
 import { sendReply } from './sending'
 import { codeWithin, declined, type Carried, type Handling, type Press } from './shared'
@@ -43,29 +42,19 @@ import {
  * read to mean, and is none of the model's text.
  *
  * Where there is nothing that the command could do, it is answered with what the command itself would say of that,
- * and with no buttons: a purchase or a card that the user has not got, a product that there is not, a nickname that
- * a card of theirs has already, a Gmail that is not connected, and one that is connected already. A line that the
+ * and with no buttons: a card that the user has not got, a product that there is not, a nickname that a card of
+ * theirs has already, a Gmail that is not connected, and one that is connected already. A line that the
  * command would not take is answered with that it could not be done.
  */
 export async function confirmFor(
   deps: Deps,
   user: User,
-  name: (typeof CONFIRMABLE)[number],
+  // A press may run /remove, but nothing asks about it first: see RUN_AT_ONCE in ./actions.
+  name: Exclude<(typeof CONFIRMABLE)[number], 'remove'>,
   args: string[],
 ): Promise<Carried> {
   const { db } = deps
   switch (name) {
-    case 'remove': {
-      const [, id] = PURCHASE_ID.exec(args[0] ?? '') ?? []
-      if (args.length !== 1 || id === undefined) return declined(NOT_DONE)
-      const purchase = await storeFor(db, user.id).findTransaction(Number(id))
-      if (!purchase) return declined(`You have no purchase with ID ${Number(id)}.`)
-      const date = formatShortDate(new Date(purchase.occurredAt * 1000), user.timezone)
-      return confirmation(`/remove ${purchase.id}`, [
-        { text: `Take this purchase out of ${maskLast4(purchase.cardLast4)}?` },
-        purchaseLine(purchase, date),
-      ])
-    }
     case 'removecard': {
       const [nickname = ''] = args
       if (args.length !== 1 || !NICKNAME.test(nickname)) return declined(NOT_DONE)

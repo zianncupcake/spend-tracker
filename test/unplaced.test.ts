@@ -32,9 +32,9 @@ describe('purchases that are added at once', () => {
     const [eatery, grab] = await rowsOf(await chat.userId())
     expect([eatery.category, grab.category]).toEqual([null, 'eligible'])
     expect(sendRich.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0])
-    // Under the line that says why, the purchase is as /sort shows it, with its button.
+    // Under the line that says why, the purchase is as /sort shows it, with its button and the one that takes it out.
     const shown = await sortShows(chat, eatery.id)
-    expect(shown.buttons).toHaveLength(1)
+    expect(shown.buttons).toHaveLength(2)
     expect(texts).toMatchObject([{ text: NOT_PLACED }, shown])
   })
 

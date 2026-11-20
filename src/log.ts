@@ -59,8 +59,9 @@ export const COMMAND_NAMES = [
 ] as const
 
 /**
- * The commands that a press of "Do it" may run: those that a message can have asked about, and no others. See
- * pressConfirm in ./telegram/confirming.
+ * The commands that a press of "Do it" may run: those that a message can have asked about, and /remove, which the
+ * button under a purchase runs: see removeRow in ./telegram/purchases. No others. See pressConfirm in
+ * ./telegram/confirming.
  */
 export const CONFIRMABLE = [
   'remove',

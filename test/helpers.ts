@@ -123,8 +123,9 @@ export async function buy(userId: number, given: Partial<NewTransaction> & { at?
 }
 
 /** The categories that the buttons under a message move its purchase to, in their order. */
-export function marksOf(message: { buttons?: { data: string }[][] }): string[] | undefined {
-  return message.buttons?.flat().map((button) => button.data.split(':')[1])
+export function marksOf(message: { buttons?: { text: string; data: string }[][] }): string[] | undefined {
+  const marks = message.buttons?.flat().filter((button) => button.text.startsWith('Mark as'))
+  return marks?.map((button) => button.data.split(':')[1])
 }
 
 // The blocks of a rich message as the bot is to send them, for a test to say what it expects in fewer lines. Each

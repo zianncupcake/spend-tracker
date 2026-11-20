@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { spendingSummary } from '../src/mcp/tools'
 import { storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
-import { BY_HAND_NOTE } from '../src/telegram/purchases'
+import { BY_HAND_NOTE, removeRow } from '../src/telegram/purchases'
 import { CHECK_UOB_APP, NO_CARDS, PRODUCT_USAGE, SORTED_AGAIN } from '../src/telegram/texts'
 import { clock, deps, NOW, openChat } from './connect-helpers'
 import {
@@ -288,14 +288,14 @@ describe('a card that is linked to the HSBC Revolution Credit Card', () => {
     )
     const [message] = await chat.ask(`/sort ${id}`)
     expect(message.text).toBe(`ID ${id} · 5 Oct · SGD 12.40 · COFFEE PLACE\nID ${id}: ${ELIGIBLE}`)
-    expect(message.buttons).toEqual([[{ text: `Mark as ${OTHER}`, data: `${id}:other` }]])
+    expect(message.buttons).toEqual([[{ text: `Mark as ${OTHER}`, data: `${id}:other` }], removeRow(id)])
     // Nothing is stored for it: it is where the product takes a purchase to be.
     expect(await categoriesOf(userId)).toEqual({ 'COFFEE PLACE': null })
 
     expect((await chat.press(message, `Mark as ${OTHER}`)).answer).toBe(`ID ${id}: ${OTHER}`)
 
     expect(await categoriesOf(userId)).toEqual({ 'COFFEE PLACE': 'other' })
-    expect(message.buttons).toEqual([[{ text: `Mark as ${ELIGIBLE}`, data: `${id}:eligible` }]])
+    expect(message.buttons).toEqual([[{ text: `Mark as ${ELIGIBLE}`, data: `${id}:eligible` }], removeRow(id)])
     // It is in the table of the others now, and nothing is held against the limit.
     expect(linesOf(await chat.rich('/spend hsbc')).slice(1, 9)).toEqual([
       ELIGIBLE,
@@ -383,12 +383,12 @@ describe('a card that is linked to the OCBC Rewards Card', () => {
       const [reply] = await chat.ask(`/add ocbc 10 ${merchant}`)
       // The terms name that description as earning nothing. Its user can say that the purchase earned all the same.
       expect(reply.text).toMatch(/\nID \d+: Other Spend$/)
-      expect(labels(reply)).toEqual([`Mark as ${SHOPPING}`])
+      expect(labels(reply)).toEqual([`Mark as ${SHOPPING}`, 'Remove'])
       wallet.push(reply)
     }
     const [marketplace] = await chat.ask('/add ocbc 10 SHOPEE SINGAPORE MP')
     expect(marketplace.text).toMatch(/\nID \d+: Shopping Spend$/)
-    expect(labels(marketplace)).toEqual([`Mark as ${OTHER}`])
+    expect(labels(marketplace)).toEqual([`Mark as ${OTHER}`, 'Remove'])
 
     // A rule stores where each of them is: the last is at a merchant that the terms name for Shopping Spend.
     expect(await categoriesOf(userId)).toEqual({

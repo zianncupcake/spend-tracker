@@ -169,8 +169,9 @@ async function tellOfFailure(tell: Handling['tell'], error: unknown): Promise<bo
 
 /**
  * Answers the press of a button. Most of the bot's buttons move a purchase to a category. Others answer for
- * purchases that are held, and others say whether a command that removes or revokes is to be run. A press does the
- * one that its button is for, for the user who made it, and in their own private chat with the bot.
+ * purchases that are held, others say whether a command that removes or revokes is to be run, and one under a
+ * purchase takes it out, as "Do it" under /remove would. A press does the one that its button is for, for the user
+ * who made it, and in their own private chat with the bot.
  */
 async function press(deps: Deps, { id, from, data, message }: Press, handling: Handling): Promise<void> {
   const { db, messenger } = deps
@@ -196,8 +197,8 @@ async function press(deps: Deps, { id, from, data, message }: Press, handling: H
   // changed, and the purchase through the store of the user who pressed, which finds no purchase of anyone else's.
   const refuse = () => answer('That button no longer works.')
   const brought = typeof data === 'string' ? data : ''
-  // A button under a message that asks before a command is run holds what no other button does, and so does one
-  // under purchases that are held: see readConfirmPress and readHeldPress.
+  // A button under a message that asks before a command is run holds what no other button does but the one that
+  // takes a purchase out, and so does one under purchases that are held: see readConfirmPress and readHeldPress.
   const confirmed = readConfirmPress(brought)
   if (confirmed) return pressConfirm(deps, chatId, confirmed, message, handling, answer, refuse)
   const held = readHeldPress(brought)
