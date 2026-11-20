@@ -12,6 +12,7 @@ const MERCHANTS: [name: string, mcc: number][] = [
   ['yole', 5814],
   ['ppp coffee', 5814],
   ['saladstop', 5814],
+  ['ah chew', 5814],
   ['a.c.a.i bowl', 5812],
   ['bakery cuisine', 5462],
   ['lavender', 5462],
