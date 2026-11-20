@@ -42,6 +42,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 | `/add <nickname> <amount> <merchant>` | Adds a purchase by hand. Its date can go before the merchant, and a `YYYY-MM-DD` still to come schedules it. |
 | `/remove <purchase id>` | Takes a purchase out. |
 | `/date <purchase id> <YYYY-MM-DD>` | Changes the date of a purchase, to any day, past or still to come. It is then counted by that day. |
+| `/amount <purchase id> <amount>` | Changes the amount of a purchase. It stays in the purchase's own currency. |
 | `/products` | Lists the card products whose reward rules are known. |
 | `/product <nickname> <product key>` | Links a card to a product. With `none` for the key, it links the card to none. |
 | `/sort <nickname>` | Says how a card's purchases are sorted into the reward categories of its product. |
@@ -64,7 +65,7 @@ say otherwise, as the DBS Woman's World Card does: its terms count a purchase by
 nickname is 1 to 20 letters, digits, `_` or `-`. `/addcard` takes a product key as a last word, which links the
 card as `/product` does. The amount of `/add` can have a currency before it, as in `USD 12.50`, and its date is
 written `YYYY-MM-DD`. A scheduled payment counts at once, and is taken out by a charge on its card on the same day, in
-the same currency, within 10% of its amount. `/remove`, `/date` and `/sort` take the id of a purchase, which
+the same currency, within 10% of its amount. `/remove`, `/date`, `/amount` and `/sort` take the id of a purchase, which
 `/spend <nickname>` shows. The
 merchant of `/pattern` is 40 plain characters at most, 3 of them letters or digits at the least, and 12 days can
 follow `except`. The bot answers only in a user's own private chat with it.
@@ -92,7 +93,7 @@ card, disconnecting the Gmail, making or removing the token of `/mcp`, starting 
 a pattern or a reminder, as one that is saved takes the place of the one that there is, and linking a card to a
 product, as that forgets what was marked by hand under another. So does a change that the model asks for after it
 has looked purchases up, or after an earlier reply that it was sent showed purchases or anything else stored, as a
-merchant's name is text that somebody else wrote, though not `/date`, which is done at once and shows what it moved. `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
+merchant's name is text that somebody else wrote, though not `/date` or `/amount`, which are done at once and show what they changed. `/delete` is never done for the assistant: its user sends `/delete confirm` themselves.
 
 ### Photos
 

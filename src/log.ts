@@ -43,6 +43,7 @@ export const COMMAND_NAMES = [
   'add',
   'remove',
   'date',
+  'amount',
   'sort',
   'patterns',
   'pattern',

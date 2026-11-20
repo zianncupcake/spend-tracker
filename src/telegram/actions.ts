@@ -101,10 +101,10 @@ const MAX_PARAGRAPHS = 500
 
 /**
  * The commands that the assistant has run at once, as if their user had sent them: the adding of a card, the
- * renaming of one, the changing of its window, of the time zone and of a purchase's date, each of which is undone in
- * one step, the saying that a card's bill is scheduled or paid, which only /bills shows, and those that only show things. It
- * is a list of what is run, and not of what is not: a command that the bot is given later is run for no model until
- * somebody puts it here. See runAsked for what becomes of every other line.
+ * renaming of one, the changing of its window, of the time zone and of a purchase's date or amount, each of which is
+ * undone in one step, the saying that a card's bill is scheduled or paid, which only /bills shows, and those that only
+ * show things. It is a list of what is run, and not of what is not: a command that the bot is given later is run for
+ * no model until somebody puts it here. See runAsked for what becomes of every other line.
  */
 const RUN_AT_ONCE = [
   'addcard',
@@ -112,6 +112,7 @@ const RUN_AT_ONCE = [
   'cycle',
   'timezone',
   'date',
+  'amount',
   'bill',
   'cards',
   'bills',
@@ -126,8 +127,8 @@ const RUN_AT_ONCE = [
 /**
  * Those of them that change the user's cards, or the user. They are asked about first, as the commands below are,
  * when the model had read with a tool before it asked for them: see Asking. And after one of them is run, the user
- * and their cards are read again for what the model asks for next: see actInRounds. /date is not among them: the id
- * that it takes is mostly found with a tool, and its reply shows what was moved.
+ * and their cards are read again for what the model asks for next: see actInRounds. /date and /amount are not among
+ * them: the id that they take is mostly found with a tool, and their reply shows what was changed.
  */
 const CHANGING = ['addcard', 'renamecard', 'cycle', 'timezone'] as const
 
@@ -345,8 +346,8 @@ function toldOf(outcome: Carried['outcome']): string {
  * What the model asks for after a tool has read for it is trusted less than what it makes of its user's words
  * alone: what a tool returns holds text that somebody else wrote. So whatever of it would change something is asked
  * about first too. Purchases are held whole, for their user to add with a button, and the commands that change
- * something wait for a press as those that remove do. Purchases are sorted as before, a purchase's date is changed
- * as before, and whatever only shows things still shows them. See Asking.
+ * something wait for a press as those that remove do. Purchases are sorted as before, a purchase's date or amount is
+ * changed as before, and whatever only shows things still shows them. See Asking.
  *
  * An action that fails ends the carrying out. Those before it stay done, each with its reply, and the user is told
  * that it is those that are answered: see wentWrong. So does an action that there is no room left for, of the

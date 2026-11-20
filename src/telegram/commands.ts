@@ -12,7 +12,17 @@ import { cardTotals } from '../domain/totals'
 import { currentWindow, dayOf, startOfDay } from '../domain/window'
 import { COMMAND_NAMES } from '../log'
 import { issueToken } from '../mcp/tokens'
-import { deleteUser, findOrCreateUser, findUser, MAX_CARDS, setTimezone, storeFor } from '../store'
+import { hundredths } from '../parsers/shared'
+import {
+  deleteUser,
+  findOrCreateUser,
+  findUser,
+  MAX_CARDS,
+  setTimezone,
+  storeFor,
+  type Store,
+  type Transaction,
+} from '../store'
 import { connectStoreFor } from '../store-connect'
 import { mailStoreFor } from '../store-mail'
 import { mcpStoreFor } from '../store-mcp'
@@ -20,6 +30,7 @@ import { reminderStoreFor } from '../store-reminders'
 import { addPurchase } from './adding'
 import type { Outgoing } from './api'
 import {
+  AMOUNT,
   CODE,
   NICKNAME,
   noSuchProduct,
@@ -53,6 +64,7 @@ import type { Reply, Sent } from './sending'
 import { DEFAULT_CURRENCY, type Seen } from './shared'
 import {
   ADD_USAGE,
+  AMOUNT_USAGE,
   ASK,
   ASK_TOO,
   BEST_USAGE,
@@ -85,6 +97,7 @@ import {
   TOO_MANY_PATTERNS,
   UNREAD_ALERT,
   WELCOME,
+  ZERO_AMOUNT,
 } from './texts'
 
 /**
@@ -276,11 +289,22 @@ export async function reply(
       // Not noonOf, which would pull a day still to come back to now.
       const moved = await store.setOccurredAt(Number(purchaseId), start + 12 * 3600)
       if (!moved) return `You have no purchase with ID ${Number(purchaseId)}.`
-      const date = formatShortDate(new Date(moved.occurredAt * 1000), timezone)
-      // None when its card is no longer tracked.
-      const onCard = (await store.listCards()).filter((each) => each.last4 === moved.cardLast4)
-      const totals = await cardTotals(store, onCard, now(), timezone)
-      return inMessages([purchaseLine(moved, date), ...totals.map((each) => ({ text: spendLine(each, timezone) }))])
+      return changedReply(store, moved, now(), timezone)
+    }
+
+    case '/amount': {
+      const [, purchaseId] = PURCHASE_ID.exec(args[0] ?? '') ?? []
+      const [, currency, whole, decimals] = AMOUNT.exec(args[1] ?? '') ?? []
+      // The purchase keeps its own currency, so none is taken.
+      const plain = whole !== undefined && currency === undefined
+      if (args.length !== 2 || purchaseId === undefined || !plain) return AMOUNT_USAGE
+      const amountMinor = hundredths(whole, decimals)
+      if (amountMinor === 0) return ZERO_AMOUNT
+      const { id, timezone } = await user()
+      const store = storeFor(db, id)
+      const changed = await store.setAmount(Number(purchaseId), amountMinor)
+      if (!changed) return `You have no purchase with ID ${Number(purchaseId)}.`
+      return changedReply(store, changed, now(), timezone)
     }
 
     case '/sort': {
@@ -515,6 +539,15 @@ async function unaddedOffers(db: D1Database, telegramId: number): Promise<Outgoi
     const { text, buttons } = addCardEnd(taken, parser, last4)
     return { text: `Card ${maskLast4(last4)}\n${text}`, buttons }
   })
+}
+
+/** What /date and /amount reply with: the purchase as it now is, and the totals of its card. */
+async function changedReply(store: Store, purchase: Transaction, now: Date, timeZone: string): Promise<Outgoing[]> {
+  const date = formatShortDate(new Date(purchase.occurredAt * 1000), timeZone)
+  // None when its card is no longer tracked.
+  const onCard = (await store.listCards()).filter((each) => each.last4 === purchase.cardLast4)
+  const totals = await cardTotals(store, onCard, now, timeZone)
+  return inMessages([purchaseLine(purchase, date), ...totals.map((each) => ({ text: spendLine(each, timeZone) }))])
 }
 
 async function confirmReply(deps: Deps, userId: number, code: string): Promise<string> {
