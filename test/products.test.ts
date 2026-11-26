@@ -4,7 +4,7 @@ import { spendingSummary } from '../src/mcp/tools'
 import { storeFor } from '../src/store'
 import { TelegramError } from '../src/telegram/api'
 import { BY_HAND_NOTE, removeRow } from '../src/telegram/purchases'
-import { CHECK_UOB_APP, NO_CARDS, PRODUCT_USAGE, SORTED_AGAIN } from '../src/telegram/texts'
+import { CHECK_UOB_APP, NO_CARDS, PRODUCT_USAGE, ratesNotFetched, SORTED_AGAIN } from '../src/telegram/texts'
 import { clock, deps, NOW, openChat } from './connect-helpers'
 import {
   BY_PURCHASE_DAY,
@@ -333,6 +333,7 @@ describe('a card that is linked to the HSBC Revolution Credit Card', () => {
       'Total | 0.00',
       BY_HAND_NOTE,
       'Total: SGD 1.00 + USD 1.00 in 2 purchases, resets 1 Nov',
+      ratesNotFetched('SGD'),
       expect.stringMatching(/^The total counts purchases made from 29 Sep to 29 Oct\./),
       'A table has a Total for each currency. A Cap counts SGD only, so USD 1.00 is not taken off what is Left: ' +
         'an alert does not say what a purchase in another currency comes to in SGD.',
