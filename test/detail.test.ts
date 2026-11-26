@@ -3,7 +3,7 @@ import { uobEvol } from '../src/catalogue/uob-evol'
 import { TelegramError } from '../src/telegram/api'
 import { COUNTED_BY_POSTING } from '../src/telegram/format'
 import { BY_HAND_NOTE } from '../src/telegram/purchases'
-import { AT_REFERENCE_RATES, FAILED } from '../src/telegram/texts'
+import { AT_REFERENCE_RATES, FAILED, ratesNotFetched } from '../src/telegram/texts'
 import { clock, deps, openChat, outside as services, sent, sentRich, type Posted } from './connect-helpers'
 import { buy } from './helpers'
 import { catchConsole } from './log-helpers'
@@ -163,15 +163,15 @@ describe('/spend with a card that has purchases in another currency', () => {
   it.each<[string, typeof services.rates]>([
     ['answers 500', () => new Response(null, { status: 500 })],
     ['has no rate of MYR', { USD: 0.8 }],
-  ])('has the total as it is without rates, when frankfurter.dev %s', async (_, rates) => {
+  ])('has the total as it is and says that it is not converted, when frankfurter.dev %s', async (_, rates) => {
     const chat = await spentInMyr()
     services.rates = rates
 
     const [message] = await chat.ask('/spend amex')
 
-    const [total, next] = fromTotal(message)
+    const [total, note] = fromTotal(message)
     expect(total).toBe('Total: MYR 40.00 + SGD 12.40 in 2 purchases, resets 1 Nov')
-    expect(next).toBe(OCTOBER_COUNTS)
+    expect(note).toBe(ratesNotFetched('SGD'))
   })
 
   /** The line of a reply that says how far the spend is towards the minimum. */
@@ -249,6 +249,7 @@ describe('/spend with a card that is linked to a product', () => {
         BY_HAND_NOTE,
         '',
         'Total: SGD 254.88 + USD 5.00 in 8 purchases, resets 16 Oct',
+        ratesNotFetched('SGD'),
         counting('14 Sep', '13 Oct'),
         '',
         'Minimum spend: SGD 254.88 of SGD 800.00, not counting purchases in other currencies',

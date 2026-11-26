@@ -47,6 +47,7 @@ import {
   CHECK_UOB_APP,
   HOLDS_NOTHING,
   PAID,
+  ratesNotFetched,
   scheduledNotSeen,
   STATUS_DAYS,
   useCard,
@@ -385,7 +386,7 @@ function spendDetail(
     ],
     [
       `Total: ${describeTotals({ card, window, totals, count }, timeZone, converted)}`,
-      ...(converted ? [AT_REFERENCE_RATES] : []),
+      ...(converted ? [AT_REFERENCE_RATES] : foreign ? [ratesNotFetched(homeCurrency)] : []),
       ...describeCounted(card, window, shortDate),
     ],
     product && breakdown ? breakdownLines(product, breakdown) : [],

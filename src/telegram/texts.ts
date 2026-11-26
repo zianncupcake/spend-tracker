@@ -440,6 +440,11 @@ export function alertNotRead(bank: string): string {
 /** What follows a card's total whose amounts in other currencies have what they come to in its own beside them. */
 export const AT_REFERENCE_RATES = "≈ at today's reference rates; the bank's rate and fees differ."
 
+/** What follows a card's total in its place when today's rates could not be had: see ratesFor. */
+export function ratesNotFetched(homeCurrency: string): string {
+  return `Not converted to ${homeCurrency}: today's exchange rates could not be fetched. Ask again to try once more.`
+}
+
 export const NONE_LINKED =
   'None of your cards is linked to a product, so the bot does not know where a purchase would earn a bonus. To ' +
   'link one, send /product <nickname> <product key>.'
